@@ -1,0 +1,28 @@
+{
+  "color": [
+    {
+      "name": "start_window_background",
+      "value": "#FFF4E6"
+    },
+    {
+      "name": "sky_top",
+      "value": "#FFE8C8"
+    },
+    {
+      "name": "sky_bottom",
+      "value": "#FFC98A"
+    },
+    {
+      "name": "panel_bg",
+      "value": "#FFFFFF"
+    },
+    {
+      "name": "text_primary",
+      "value": "#1A1A1A"
+    },
+    {
+      "name": "accent",
+      "value": "#E85D04"
+    }
+  ]
+}

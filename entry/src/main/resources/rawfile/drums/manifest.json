@@ -1,0 +1,126 @@
+{
+  "generator": "OneBeat deterministic DSP v1",
+  "license": "Original project asset",
+  "styles": {
+    "rock": [
+      "rock/kick.wav",
+      "rock/snare.wav",
+      "rock/hat_closed.wav",
+      "rock/hat_open.wav",
+      "rock/clap.wav",
+      "rock/tom_low.wav",
+      "rock/tom_high.wav",
+      "rock/perc.wav"
+    ],
+    "psychedelic": [
+      "psychedelic/kick.wav",
+      "psychedelic/snare.wav",
+      "psychedelic/hat_closed.wav",
+      "psychedelic/hat_open.wav",
+      "psychedelic/clap.wav",
+      "psychedelic/tom_low.wav",
+      "psychedelic/tom_high.wav",
+      "psychedelic/perc.wav"
+    ],
+    "jazz": [
+      "jazz/kick.wav",
+      "jazz/snare.wav",
+      "jazz/hat_closed.wav",
+      "jazz/hat_open.wav",
+      "jazz/clap.wav",
+      "jazz/tom_low.wav",
+      "jazz/tom_high.wav",
+      "jazz/perc.wav"
+    ],
+    "funk": [
+      "funk/kick.wav",
+      "funk/snare.wav",
+      "funk/hat_closed.wav",
+      "funk/hat_open.wav",
+      "funk/clap.wav",
+      "funk/tom_low.wav",
+      "funk/tom_high.wav",
+      "funk/perc.wav"
+    ],
+    "disco": [
+      "disco/kick.wav",
+      "disco/snare.wav",
+      "disco/hat_closed.wav",
+      "disco/hat_open.wav",
+      "disco/clap.wav",
+      "disco/tom_low.wav",
+      "disco/tom_high.wav",
+      "disco/perc.wav"
+    ],
+    "hiphop": [
+      "hiphop/kick.wav",
+      "hiphop/snare.wav",
+      "hiphop/hat_closed.wav",
+      "hiphop/hat_open.wav",
+      "hiphop/clap.wav",
+      "hiphop/tom_low.wav",
+      "hiphop/tom_high.wav",
+      "hiphop/perc.wav"
+    ],
+    "trap": [
+      "trap/kick.wav",
+      "trap/snare.wav",
+      "trap/hat_closed.wav",
+      "trap/hat_open.wav",
+      "trap/clap.wav",
+      "trap/tom_low.wav",
+      "trap/tom_high.wav",
+      "trap/perc.wav"
+    ],
+    "house": [
+      "house/kick.wav",
+      "house/snare.wav",
+      "house/hat_closed.wav",
+      "house/hat_open.wav",
+      "house/clap.wav",
+      "house/tom_low.wav",
+      "house/tom_high.wav",
+      "house/perc.wav"
+    ],
+    "techno": [
+      "techno/kick.wav",
+      "techno/snare.wav",
+      "techno/hat_closed.wav",
+      "techno/hat_open.wav",
+      "techno/clap.wav",
+      "techno/tom_low.wav",
+      "techno/tom_high.wav",
+      "techno/perc.wav"
+    ],
+    "dnb": [
+      "dnb/kick.wav",
+      "dnb/snare.wav",
+      "dnb/hat_closed.wav",
+      "dnb/hat_open.wav",
+      "dnb/clap.wav",
+      "dnb/tom_low.wav",
+      "dnb/tom_high.wav",
+      "dnb/perc.wav"
+    ],
+    "latin": [
+      "latin/kick.wav",
+      "latin/snare.wav",
+      "latin/hat_closed.wav",
+      "latin/hat_open.wav",
+      "latin/clap.wav",
+      "latin/tom_low.wav",
+      "latin/tom_high.wav",
+      "latin/perc.wav"
+    ],
+    "reggae": [
+      "reggae/kick.wav",
+      "reggae/snare.wav",
+      "reggae/hat_closed.wav",
+      "reggae/hat_open.wav",
+      "reggae/clap.wav",
+      "reggae/tom_low.wav",
+      "reggae/tom_high.wav",
+      "reggae/perc.wav"
+    ]
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "src": [
+    "pages/Index",
+    "pages/TeamPage",
+    "pages/LeaderLobbyPage",
+    "pages/MemberJoinPage",
+    "pages/MainPage",
+    "pages/DrumMachinePage",
+    "pages/StorePage",
+    "pages/PrivacyPage"
+  ]
+}

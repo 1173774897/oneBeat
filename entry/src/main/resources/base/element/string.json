@@ -1,0 +1,32 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "OneBeat entry module"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "OneBeat synchronized metronome"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "OneBeat"
+    },
+    {
+      "name": "perm_internet_reason",
+      "value": "Wi-Fi P2P 组队与节拍同步需要网络通信"
+    },
+    {
+      "name": "perm_wifi_reason",
+      "value": "发现附近设备并建立临时 Wi-Fi P2P 队伍"
+    },
+    {
+      "name": "perm_bluetooth_reason",
+      "value": "通过加入码发现附近的 OneBeat 房间"
+    },
+    {
+      "name": "perm_camera_reason",
+      "value": "扫码加入队伍需要使用相机"
+    }
+  ]
+}
