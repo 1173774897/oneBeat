@@ -1,0 +1,280 @@
+{
+  "request": "用已选定的第一帧新配色制作其余七帧，连同第一帧保存为完整八帧。",
+  "created_date": "2026-10-03",
+  "mode": "built-in image_gen",
+  "use_case": "precise-object-edit",
+  "palette": {
+    "hat": "#8450CE violet",
+    "windbreaker": "#F16643 coral-orange",
+    "shorts": "#179CAD cyan-teal blue",
+    "skin": "#F2CDAC warm beige-peach",
+    "sneakers": "violet and ivory, cyan accent replacing orange",
+    "unchanged": "black hair, black socks, black linework, ivory shirt and panels"
+  },
+  "palette_authority": "/Users/lizhe/work/oneBeat/designs/boonie-linework/2026-10-03/frame_01-palette-v2.png",
+  "transparent_background": true,
+  "frames": [
+    {
+      "frame": "01",
+      "inputs": [
+        {
+          "path": "/Users/lizhe/work/oneBeat/designs/boonie-linework/2026-10-03/frame_01.png",
+          "role": "sole edit target; pose and linework authority"
+        }
+      ],
+      "prompt": "Use case: precise-object-edit.\nAsset type: alternate palette for frame 01 of the oneBeat comic walking character.\nInput Image 1: sole edit target and strict authority for all geometry, linework and composition.\nPrimary request: PALETTE-ONLY RECOLOR of this existing transparent character image. Produce one fresh colorway in the same saturated 2D comic streetwear style, changing colors only, not designing a new character or pose.\nNew palette mapping:\n- Orange bucket/boonie hat becomes rich saturated violet, approximately #8450CE, with darker purple shadow planes. Keep its black ink lines and underside hatching unchanged.\n- Blue windbreaker body, blue sleeve areas, collar and ribbed cuffs become warm vivid coral-orange, approximately #F16643. Keep the existing ivory sleeve panels and black bands, zip, pocket details exactly as they are.\n- Yellow cargo shorts become saturated cyan/teal blue, approximately #179CAD, with matching darker blue shadow planes. Preserve every pocket, seam, fold and hatch.\n- Lavender skin on face, ear, hands and shins becomes warm pale beige/peach, approximately #F2CDAC, with restrained warm tan shadows, not pink, purple or green skin.\n- Sneakers keep violet and ivory main panels, charcoal soles and black laces; change their small orange heel/tongue accents to cyan-blue to echo the shorts. Preserve the exact existing panel boundaries, construction and orientation.\n- Hair stays ink-black, socks stay black, shirt and ivory fabric/shoe areas stay creamy ivory; eye black/ivory unchanged.\nPreserve aggressively: SAME confident hand-inked outer contours, every existing fine hatch and crease line, flat cel-shading finish and shadow boundaries. No re-inking or added texture. SAME silhouette, anatomy, head/hat/limb/hand/shoe positions, scale, crop and margins. The same exaggerated walking pose: near forearm stretched forward, rightward raised shoe toe-up, screen-left planted sneaker, cool half-lidded mouthless profile looking straight forward toward screen-right, never at camera.\nKeep the existing low line-drawn ground contact shadow exactly in place, and retain true RGBA transparency everywhere else, including gaps between limbs and fingers. Retain the 1254×1254 square framing, whole character visible.\nAvoid: new clothing, accessories, patterns, logos, lettering, border, watermark, mouth, smile, eye direction changes, different gesture, extra shadows, scenery, white/black/gray background or checkerboard pixels, 3D or gradients. Change only the color palette. Output one recolored frame only.",
+      "generated_source": "/Users/lizhe/.codex/generated_images/01a0f634-5a2d-7ce1-9fb7-7ca18dcc1ab3/exec-c9d70b79-a161-470d-98b1-30889f3eedd4.png",
+      "saved_output": "/Users/lizhe/work/oneBeat/designs/boonie-linework/2026-10-03/frame_01-palette-v2.png",
+      "verified": {
+        "width": 1254,
+        "height": 1254,
+        "mode": "RGBA",
+        "alpha_extrema": [
+          0,
+          255
+        ],
+        "corner_alpha": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "sha256": "24a7f63ab0532a1acd82c7e14de9440b3936b40fea204eac3ac03a9d882369a4"
+      },
+      "visual_review": "已检查颜色分区、人物朝向、各帧动作、墨线和地面线条阴影；未见文字框或新增背景。"
+    },
+    {
+      "frame": "02",
+      "inputs": [
+        {
+          "path": "/Users/lizhe/work/oneBeat/designs/boonie-linework/2026-10-03/frame_02.png",
+          "role": "sole edit target; pose and linework authority"
+        },
+        {
+          "path": "/Users/lizhe/work/oneBeat/designs/boonie-linework/2026-10-03/frame_01-palette-v2.png",
+          "role": "approved palette reference only"
+        }
+      ],
+      "prompt": "Use case: precise-object-edit.\nAsset type: palette-v2 walking animation frame for the oneBeat comic character.\nInput Image 1: THE SOLE EDIT TARGET, authoritative for this frame's exact pose, silhouette, head/hat angle, garment folds, geometry, ink lines, hatching, shadow, scale, margins and framing.\nInput Image 2: USER-SELECTED NEW PALETTE REFERENCE ONLY, showing the same character in a DIFFERENT walking phase. Transfer its COLORS to Image 1, never its pose, limb positions, facial geometry or framing.\nPrimary request: PALETTE-ONLY RECOLOR Image 1 to match the ACTUAL hues and color-block mapping of Image 2. This is not a redraw or a new animation pose.\nColor mapping, faithfully matching Image 2:\n- Orange bucket/boonie hat becomes rich saturated violet, including darker purple cel-shadow planes.\n- Bright blue windbreaker body, blue sleeve areas, collar, cuffs and waistband become vivid warm coral-orange. Its ivory sleeve panels, black bands, black zip and black pocket details stay unchanged.\n- Yellow cargo shorts become saturated cyan/teal blue, with corresponding darker blue shadow planes.\n- Lavender skin on all visible face, ear, hands and shins becomes warm pale beige/peach like Image 2, including subtle warm tan shadow areas.\n- Violet and ivory sneaker panels remain violet and creamy ivory, and every former orange heel or tongue accent becomes cyan-blue, exactly following Image 2. Laces and charcoal soles remain black.\n- Shaggy hair, black socks, black contours and eye stay unchanged; undershirt, ivory sleeve panels, ivory shoe panels and ivory soles remain creamy ivory.\nPreserve aggressively: EVERY existing black contour, fine directional hatch and interior crease from Image 1. Preserve its flat hand-inked 2D comic rendering and existing cel-shadow boundaries. Same anatomy, exact hands, expression, garment shapes, seams and pockets. Cool half-lidded mouthless profile, looking forward toward screen-right, never at viewer.\nNo pose, joint-angle, limb-overlap, shoe orientation or raised-foot-height change. Keep Image 1's normalized pixel layout and 1254×1254 square framing; do not zoom or re-center. Keep its original low ink contact-shadow strokes in the same ground position. Only Image 1 is the geometry authority.\nBackground remains genuinely RGBA transparent, including all limb and finger gaps. Whole character remains visible.\nAvoid: reference-pose copying, new clothing/patterns, added accessories or objects, smile or mouth, camera-gaze, changed line weights, extra texture, different shadow rendering, glow/blur, scenery, white/gray/black background, checkerboard pixels, logos, words, labels or watermark. Output exactly one recolored frame, not two images or a montage.\nFrame-specific geometry lock: Keep the narrower push-off phase: screen-right front shoe is flat/planted, screen-left trailing shoe almost vertical toe-down with rear shin bent backward. Near forward fist remains lowered around waist level, rear fist low. Do NOT copy Image 2's straight-leg raised kick.",
+      "generated_source": "/Users/lizhe/.codex/generated_images/01a0f634-5a2d-7ce1-9fb7-7ca18dcc1ab3/exec-4dd3e800-9099-4918-9966-447fdbbfa160.png",
+      "saved_output": "/Users/lizhe/work/oneBeat/designs/boonie-linework/2026-10-03/frame_02-palette-v2.png",
+      "verified": {
+        "width": 1254,
+        "height": 1254,
+        "mode": "RGBA",
+        "alpha_extrema": [
+          0,
+          255
+        ],
+        "corner_alpha": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "sha256": "1c69ad0271bba19d7d1920f675c167b7bb1429c54e385ef604ace41f1d6e380a"
+      },
+      "visual_review": "已检查颜色分区、人物朝向、各帧动作、墨线和地面线条阴影；未见文字框或新增背景。"
+    },
+    {
+      "frame": "03",
+      "inputs": [
+        {
+          "path": "/Users/lizhe/work/oneBeat/designs/boonie-linework/2026-10-03/frame_03.png",
+          "role": "sole edit target; pose and linework authority"
+        },
+        {
+          "path": "/Users/lizhe/work/oneBeat/designs/boonie-linework/2026-10-03/frame_01-palette-v2.png",
+          "role": "approved palette reference only"
+        }
+      ],
+      "prompt": "Use case: precise-object-edit.\nAsset type: palette-v2 walking animation frame for the oneBeat comic character.\nInput Image 1: THE SOLE EDIT TARGET, authoritative for this frame's exact pose, silhouette, head/hat angle, garment folds, geometry, ink lines, hatching, shadow, scale, margins and framing.\nInput Image 2: USER-SELECTED NEW PALETTE REFERENCE ONLY, showing the same character in a DIFFERENT walking phase. Transfer its COLORS to Image 1, never its pose, limb positions, facial geometry or framing.\nPrimary request: PALETTE-ONLY RECOLOR Image 1 to match the ACTUAL hues and color-block mapping of Image 2. This is not a redraw or a new animation pose.\nColor mapping, faithfully matching Image 2:\n- Orange bucket/boonie hat becomes rich saturated violet, including darker purple cel-shadow planes.\n- Bright blue windbreaker body, blue sleeve areas, collar, cuffs and waistband become vivid warm coral-orange. Its ivory sleeve panels, black bands, black zip and black pocket details stay unchanged.\n- Yellow cargo shorts become saturated cyan/teal blue, with corresponding darker blue shadow planes.\n- Lavender skin on all visible face, ear, hands and shins becomes warm pale beige/peach like Image 2, including subtle warm tan shadow areas.\n- Violet and ivory sneaker panels remain violet and creamy ivory, and every former orange heel or tongue accent becomes cyan-blue, exactly following Image 2. Laces and charcoal soles remain black.\n- Shaggy hair, black socks, black contours and eye stay unchanged; undershirt, ivory sleeve panels, ivory shoe panels and ivory soles remain creamy ivory.\nPreserve aggressively: EVERY existing black contour, fine directional hatch and interior crease from Image 1. Preserve its flat hand-inked 2D comic rendering and existing cel-shadow boundaries. Same anatomy, exact hands, expression, garment shapes, seams and pockets. Cool half-lidded mouthless profile, looking forward toward screen-right, never at viewer.\nNo pose, joint-angle, limb-overlap, shoe orientation or raised-foot-height change. Keep Image 1's normalized pixel layout and 1254×1254 square framing; do not zoom or re-center. Keep its original low ink contact-shadow strokes in the same ground position. Only Image 1 is the geometry authority.\nBackground remains genuinely RGBA transparent, including all limb and finger gaps. Whole character remains visible.\nAvoid: reference-pose copying, new clothing/patterns, added accessories or objects, smile or mouth, camera-gaze, changed line weights, extra texture, different shadow rendering, glow/blur, scenery, white/gray/black background, checkerboard pixels, logos, words, labels or watermark. Output exactly one recolored frame, not two images or a montage.\nFrame-specific geometry lock: Keep the raised BENT front knee and right shoe gently toe-down above ground, back left shoe planted, near arm hanging down-left and far fist bent near lower chest. Keep this exact bent-knee geometry, never straighten it into the palette reference's kick.",
+      "generated_source": "/Users/lizhe/.codex/generated_images/01a0f634-5a2d-7ce1-9fb7-7ca18dcc1ab3/exec-ee8e09e5-bfe8-463e-bad9-dfce9beee2e4.png",
+      "saved_output": "/Users/lizhe/work/oneBeat/designs/boonie-linework/2026-10-03/frame_03-palette-v2.png",
+      "verified": {
+        "width": 1254,
+        "height": 1254,
+        "mode": "RGBA",
+        "alpha_extrema": [
+          0,
+          255
+        ],
+        "corner_alpha": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "sha256": "27a8e8eb707152dbfaa2ff435472c01c1cf5155bbe1eae5712b06d96203b51e0"
+      },
+      "visual_review": "已检查颜色分区、人物朝向、各帧动作、墨线和地面线条阴影；未见文字框或新增背景。"
+    },
+    {
+      "frame": "04",
+      "inputs": [
+        {
+          "path": "/Users/lizhe/work/oneBeat/designs/boonie-linework/2026-10-03/frame_04.png",
+          "role": "sole edit target; pose and linework authority"
+        },
+        {
+          "path": "/Users/lizhe/work/oneBeat/designs/boonie-linework/2026-10-03/frame_01-palette-v2.png",
+          "role": "approved palette reference only"
+        }
+      ],
+      "prompt": "Use case: precise-object-edit.\nAsset type: palette-v2 walking animation frame for the oneBeat comic character.\nInput Image 1: THE SOLE EDIT TARGET, authoritative for this frame's exact pose, silhouette, head/hat angle, garment folds, geometry, ink lines, hatching, shadow, scale, margins and framing.\nInput Image 2: USER-SELECTED NEW PALETTE REFERENCE ONLY, showing the same character in a DIFFERENT walking phase. Transfer its COLORS to Image 1, never its pose, limb positions, facial geometry or framing.\nPrimary request: PALETTE-ONLY RECOLOR Image 1 to match the ACTUAL hues and color-block mapping of Image 2. This is not a redraw or a new animation pose.\nColor mapping, faithfully matching Image 2:\n- Orange bucket/boonie hat becomes rich saturated violet, including darker purple cel-shadow planes.\n- Bright blue windbreaker body, blue sleeve areas, collar, cuffs and waistband become vivid warm coral-orange. Its ivory sleeve panels, black bands, black zip and black pocket details stay unchanged.\n- Yellow cargo shorts become saturated cyan/teal blue, with corresponding darker blue shadow planes.\n- Lavender skin on all visible face, ear, hands and shins becomes warm pale beige/peach like Image 2, including subtle warm tan shadow areas.\n- Violet and ivory sneaker panels remain violet and creamy ivory, and every former orange heel or tongue accent becomes cyan-blue, exactly following Image 2. Laces and charcoal soles remain black.\n- Shaggy hair, black socks, black contours and eye stay unchanged; undershirt, ivory sleeve panels, ivory shoe panels and ivory soles remain creamy ivory.\nPreserve aggressively: EVERY existing black contour, fine directional hatch and interior crease from Image 1. Preserve its flat hand-inked 2D comic rendering and existing cel-shadow boundaries. Same anatomy, exact hands, expression, garment shapes, seams and pockets. Cool half-lidded mouthless profile, looking forward toward screen-right, never at viewer.\nNo pose, joint-angle, limb-overlap, shoe orientation or raised-foot-height change. Keep Image 1's normalized pixel layout and 1254×1254 square framing; do not zoom or re-center. Keep its original low ink contact-shadow strokes in the same ground position. Only Image 1 is the geometry authority.\nBackground remains genuinely RGBA transparent, including all limb and finger gaps. Whole character remains visible.\nAvoid: reference-pose copying, new clothing/patterns, added accessories or objects, smile or mouth, camera-gaze, changed line weights, extra texture, different shadow rendering, glow/blur, scenery, white/gray/black background, checkerboard pixels, logos, words, labels or watermark. Output exactly one recolored frame, not two images or a montage.\nFrame-specific geometry lock: Keep this target's straight front leg raised rightward and back left shoe planted, near arm swung backward down-left and far fist bent forward near chest. Do not copy the palette reference's extended near forward arm.",
+      "generated_source": "/Users/lizhe/.codex/generated_images/01a0f634-5a2d-7ce1-9fb7-7ca18dcc1ab3/exec-92dd542c-9f8a-4007-a1c3-0fe8b3cbfe2f.png",
+      "saved_output": "/Users/lizhe/work/oneBeat/designs/boonie-linework/2026-10-03/frame_04-palette-v2.png",
+      "verified": {
+        "width": 1254,
+        "height": 1254,
+        "mode": "RGBA",
+        "alpha_extrema": [
+          0,
+          255
+        ],
+        "corner_alpha": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "sha256": "262b20501607808a06e5e667d264d82dc0dcd15747a170646c564699b053d352"
+      },
+      "visual_review": "已检查颜色分区、人物朝向、各帧动作、墨线和地面线条阴影；未见文字框或新增背景。"
+    },
+    {
+      "frame": "05",
+      "inputs": [
+        {
+          "path": "/Users/lizhe/work/oneBeat/designs/boonie-linework/2026-10-03/frame_05.png",
+          "role": "sole edit target; pose and linework authority"
+        },
+        {
+          "path": "/Users/lizhe/work/oneBeat/designs/boonie-linework/2026-10-03/frame_01-palette-v2.png",
+          "role": "approved palette reference only"
+        }
+      ],
+      "prompt": "Use case: precise-object-edit.\nAsset type: palette-v2 walking animation frame for the oneBeat comic character.\nInput Image 1: THE SOLE EDIT TARGET, authoritative for this frame's exact pose, silhouette, head/hat angle, garment folds, geometry, ink lines, hatching, shadow, scale, margins and framing.\nInput Image 2: USER-SELECTED NEW PALETTE REFERENCE ONLY, showing the same character in a DIFFERENT walking phase. Transfer its COLORS to Image 1, never its pose, limb positions, facial geometry or framing.\nPrimary request: PALETTE-ONLY RECOLOR Image 1 to match the ACTUAL hues and color-block mapping of Image 2. This is not a redraw or a new animation pose.\nColor mapping, faithfully matching Image 2:\n- Orange bucket/boonie hat becomes rich saturated violet, including darker purple cel-shadow planes.\n- Bright blue windbreaker body, blue sleeve areas, collar, cuffs and waistband become vivid warm coral-orange. Its ivory sleeve panels, black bands, black zip and black pocket details stay unchanged.\n- Yellow cargo shorts become saturated cyan/teal blue, with corresponding darker blue shadow planes.\n- Lavender skin on all visible face, ear, hands and shins becomes warm pale beige/peach like Image 2, including subtle warm tan shadow areas.\n- Violet and ivory sneaker panels remain violet and creamy ivory, and every former orange heel or tongue accent becomes cyan-blue, exactly following Image 2. Laces and charcoal soles remain black.\n- Shaggy hair, black socks, black contours and eye stay unchanged; undershirt, ivory sleeve panels, ivory shoe panels and ivory soles remain creamy ivory.\nPreserve aggressively: EVERY existing black contour, fine directional hatch and interior crease from Image 1. Preserve its flat hand-inked 2D comic rendering and existing cel-shadow boundaries. Same anatomy, exact hands, expression, garment shapes, seams and pockets. Cool half-lidded mouthless profile, looking forward toward screen-right, never at viewer.\nNo pose, joint-angle, limb-overlap, shoe orientation or raised-foot-height change. Keep Image 1's normalized pixel layout and 1254×1254 square framing; do not zoom or re-center. Keep its original low ink contact-shadow strokes in the same ground position. Only Image 1 is the geometry authority.\nBackground remains genuinely RGBA transparent, including all limb and finger gaps. Whole character remains visible.\nAvoid: reference-pose copying, new clothing/patterns, added accessories or objects, smile or mouth, camera-gaze, changed line weights, extra texture, different shadow rendering, glow/blur, scenery, white/gray/black background, checkerboard pixels, logos, words, labels or watermark. Output exactly one recolored frame, not two images or a montage.\nFrame-specific geometry lock: Keep this target's very broad raised forward straight leg, own shin slope and shoe angle, rear planted left shoe, near arm swung backward and far fist bent at chest. Do not substitute the reference arm swing or different stride.",
+      "generated_source": "/Users/lizhe/.codex/generated_images/01a0f634-5a2d-7ce1-9fb7-7ca18dcc1ab3/exec-2460f88b-c9ea-43fb-b21e-0ac6d7e22743.png",
+      "saved_output": "/Users/lizhe/work/oneBeat/designs/boonie-linework/2026-10-03/frame_05-palette-v2.png",
+      "verified": {
+        "width": 1254,
+        "height": 1254,
+        "mode": "RGBA",
+        "alpha_extrema": [
+          0,
+          255
+        ],
+        "corner_alpha": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "sha256": "d71a64a817e563c5b325ebdbbef3c759009a83de00fdbd4e936211a3675d7584"
+      },
+      "visual_review": "已检查颜色分区、人物朝向、各帧动作、墨线和地面线条阴影；未见文字框或新增背景。"
+    },
+    {
+      "frame": "06",
+      "inputs": [
+        {
+          "path": "/Users/lizhe/work/oneBeat/designs/boonie-linework/2026-10-03/frame_06.png",
+          "role": "sole edit target; pose and linework authority"
+        },
+        {
+          "path": "/Users/lizhe/work/oneBeat/designs/boonie-linework/2026-10-03/frame_01-palette-v2.png",
+          "role": "approved palette reference only"
+        }
+      ],
+      "prompt": "Use case: precise-object-edit.\nAsset type: palette-v2 walking animation frame for the oneBeat comic character.\nInput Image 1: THE SOLE EDIT TARGET, authoritative for this frame's exact pose, silhouette, head/hat angle, garment folds, geometry, ink lines, hatching, shadow, scale, margins and framing.\nInput Image 2: USER-SELECTED NEW PALETTE REFERENCE ONLY, showing the same character in a DIFFERENT walking phase. Transfer its COLORS to Image 1, never its pose, limb positions, facial geometry or framing.\nPrimary request: PALETTE-ONLY RECOLOR Image 1 to match the ACTUAL hues and color-block mapping of Image 2. This is not a redraw or a new animation pose.\nColor mapping, faithfully matching Image 2:\n- Orange bucket/boonie hat becomes rich saturated violet, including darker purple cel-shadow planes.\n- Bright blue windbreaker body, blue sleeve areas, collar, cuffs and waistband become vivid warm coral-orange. Its ivory sleeve panels, black bands, black zip and black pocket details stay unchanged.\n- Yellow cargo shorts become saturated cyan/teal blue, with corresponding darker blue shadow planes.\n- Lavender skin on all visible face, ear, hands and shins becomes warm pale beige/peach like Image 2, including subtle warm tan shadow areas.\n- Violet and ivory sneaker panels remain violet and creamy ivory, and every former orange heel or tongue accent becomes cyan-blue, exactly following Image 2. Laces and charcoal soles remain black.\n- Shaggy hair, black socks, black contours and eye stay unchanged; undershirt, ivory sleeve panels, ivory shoe panels and ivory soles remain creamy ivory.\nPreserve aggressively: EVERY existing black contour, fine directional hatch and interior crease from Image 1. Preserve its flat hand-inked 2D comic rendering and existing cel-shadow boundaries. Same anatomy, exact hands, expression, garment shapes, seams and pockets. Cool half-lidded mouthless profile, looking forward toward screen-right, never at viewer.\nNo pose, joint-angle, limb-overlap, shoe orientation or raised-foot-height change. Keep Image 1's normalized pixel layout and 1254×1254 square framing; do not zoom or re-center. Keep its original low ink contact-shadow strokes in the same ground position. Only Image 1 is the geometry authority.\nBackground remains genuinely RGBA transparent, including all limb and finger gaps. Whole character remains visible.\nAvoid: reference-pose copying, new clothing/patterns, added accessories or objects, smile or mouth, camera-gaze, changed line weights, extra texture, different shadow rendering, glow/blur, scenery, white/gray/black background, checkerboard pixels, logos, words, labels or watermark. Output exactly one recolored frame, not two images or a montage.\nFrame-specific geometry lock: Keep the narrow push-off stance: front right sneaker flat/planted, back left sneaker almost vertical toe-down and rear knee bent back. Near arm hangs down-left, far fist bends in front near waist. No high forward-kick substitution.",
+      "generated_source": "/Users/lizhe/.codex/generated_images/01a0f634-5a2d-7ce1-9fb7-7ca18dcc1ab3/exec-4a9d34d4-8406-45ae-a8d9-2ca6ddbee52b.png",
+      "saved_output": "/Users/lizhe/work/oneBeat/designs/boonie-linework/2026-10-03/frame_06-palette-v2.png",
+      "verified": {
+        "width": 1254,
+        "height": 1254,
+        "mode": "RGBA",
+        "alpha_extrema": [
+          0,
+          255
+        ],
+        "corner_alpha": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "sha256": "38fe6c0348c38aa02ac9951570742ac89ce001db87b7dd85737991094402aeec"
+      },
+      "visual_review": "已检查颜色分区、人物朝向、各帧动作、墨线和地面线条阴影；未见文字框或新增背景。"
+    },
+    {
+      "frame": "07",
+      "inputs": [
+        {
+          "path": "/Users/lizhe/work/oneBeat/designs/boonie-linework/2026-10-03/frame_07.png",
+          "role": "sole edit target; pose and linework authority"
+        },
+        {
+          "path": "/Users/lizhe/work/oneBeat/designs/boonie-linework/2026-10-03/frame_01-palette-v2.png",
+          "role": "approved palette reference only"
+        }
+      ],
+      "prompt": "Use case: precise-object-edit.\nAsset type: palette-v2 walking animation frame for the oneBeat comic character.\nInput Image 1: THE SOLE EDIT TARGET, authoritative for this frame's exact pose, silhouette, head/hat angle, garment folds, geometry, ink lines, hatching, shadow, scale, margins and framing.\nInput Image 2: USER-SELECTED NEW PALETTE REFERENCE ONLY, showing the same character in a DIFFERENT walking phase. Transfer its COLORS to Image 1, never its pose, limb positions, facial geometry or framing.\nPrimary request: PALETTE-ONLY RECOLOR Image 1 to match the ACTUAL hues and color-block mapping of Image 2. This is not a redraw or a new animation pose.\nColor mapping, faithfully matching Image 2:\n- Orange bucket/boonie hat becomes rich saturated violet, including darker purple cel-shadow planes.\n- Bright blue windbreaker body, blue sleeve areas, collar, cuffs and waistband become vivid warm coral-orange. Its ivory sleeve panels, black bands, black zip and black pocket details stay unchanged.\n- Yellow cargo shorts become saturated cyan/teal blue, with corresponding darker blue shadow planes.\n- Lavender skin on all visible face, ear, hands and shins becomes warm pale beige/peach like Image 2, including subtle warm tan shadow areas.\n- Violet and ivory sneaker panels remain violet and creamy ivory, and every former orange heel or tongue accent becomes cyan-blue, exactly following Image 2. Laces and charcoal soles remain black.\n- Shaggy hair, black socks, black contours and eye stay unchanged; undershirt, ivory sleeve panels, ivory shoe panels and ivory soles remain creamy ivory.\nPreserve aggressively: EVERY existing black contour, fine directional hatch and interior crease from Image 1. Preserve its flat hand-inked 2D comic rendering and existing cel-shadow boundaries. Same anatomy, exact hands, expression, garment shapes, seams and pockets. Cool half-lidded mouthless profile, looking forward toward screen-right, never at viewer.\nNo pose, joint-angle, limb-overlap, shoe orientation or raised-foot-height change. Keep Image 1's normalized pixel layout and 1254×1254 square framing; do not zoom or re-center. Keep its original low ink contact-shadow strokes in the same ground position. Only Image 1 is the geometry authority.\nBackground remains genuinely RGBA transparent, including all limb and finger gaps. Whole character remains visible.\nAvoid: reference-pose copying, new clothing/patterns, added accessories or objects, smile or mouth, camera-gaze, changed line weights, extra texture, different shadow rendering, glow/blur, scenery, white/gray/black background, checkerboard pixels, logos, words, labels or watermark. Output exactly one recolored frame, not two images or a montage.\nFrame-specific geometry lock: Keep the bent raised right knee, right sneaker nearly horizontal well above ground, back left shoe planted, near fist beside raised thigh and rear fist hanging low behind. Preserve this target's jacket rear panels and arm swing.",
+      "generated_source": "/Users/lizhe/.codex/generated_images/01a0f634-5a2d-7ce1-9fb7-7ca18dcc1ab3/exec-db4613ee-5a3c-44ca-8b6a-d3e74d71886f.png",
+      "saved_output": "/Users/lizhe/work/oneBeat/designs/boonie-linework/2026-10-03/frame_07-palette-v2.png",
+      "verified": {
+        "width": 1254,
+        "height": 1254,
+        "mode": "RGBA",
+        "alpha_extrema": [
+          0,
+          255
+        ],
+        "corner_alpha": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "sha256": "79b7add3b62a15bc126071443268855f4cf2f59ad7f67beecc4531a3b3237faa"
+      },
+      "visual_review": "已检查颜色分区、人物朝向、各帧动作、墨线和地面线条阴影；未见文字框或新增背景。"
+    },
+    {
+      "frame": "08",
+      "inputs": [
+        {
+          "path": "/Users/lizhe/work/oneBeat/designs/boonie-linework/2026-10-03/frame_08.png",
+          "role": "sole edit target; pose and linework authority"
+        },
+        {
+          "path": "/Users/lizhe/work/oneBeat/designs/boonie-linework/2026-10-03/frame_01-palette-v2.png",
+          "role": "approved palette reference only"
+        }
+      ],
+      "prompt": "Use case: precise-object-edit.\nAsset type: palette-v2 walking animation frame for the oneBeat comic character.\nInput Image 1: THE SOLE EDIT TARGET, authoritative for this frame's exact pose, silhouette, head/hat angle, garment folds, geometry, ink lines, hatching, shadow, scale, margins and framing.\nInput Image 2: USER-SELECTED NEW PALETTE REFERENCE ONLY, showing the same character in a DIFFERENT walking phase. Transfer its COLORS to Image 1, never its pose, limb positions, facial geometry or framing.\nPrimary request: PALETTE-ONLY RECOLOR Image 1 to match the ACTUAL hues and color-block mapping of Image 2. This is not a redraw or a new animation pose.\nColor mapping, faithfully matching Image 2:\n- Orange bucket/boonie hat becomes rich saturated violet, including darker purple cel-shadow planes.\n- Bright blue windbreaker body, blue sleeve areas, collar, cuffs and waistband become vivid warm coral-orange. Its ivory sleeve panels, black bands, black zip and black pocket details stay unchanged.\n- Yellow cargo shorts become saturated cyan/teal blue, with corresponding darker blue shadow planes.\n- Lavender skin on all visible face, ear, hands and shins becomes warm pale beige/peach like Image 2, including subtle warm tan shadow areas.\n- Violet and ivory sneaker panels remain violet and creamy ivory, and every former orange heel or tongue accent becomes cyan-blue, exactly following Image 2. Laces and charcoal soles remain black.\n- Shaggy hair, black socks, black contours and eye stay unchanged; undershirt, ivory sleeve panels, ivory shoe panels and ivory soles remain creamy ivory.\nPreserve aggressively: EVERY existing black contour, fine directional hatch and interior crease from Image 1. Preserve its flat hand-inked 2D comic rendering and existing cel-shadow boundaries. Same anatomy, exact hands, expression, garment shapes, seams and pockets. Cool half-lidded mouthless profile, looking forward toward screen-right, never at viewer.\nNo pose, joint-angle, limb-overlap, shoe orientation or raised-foot-height change. Keep Image 1's normalized pixel layout and 1254×1254 square framing; do not zoom or re-center. Keep its original low ink contact-shadow strokes in the same ground position. Only Image 1 is the geometry authority.\nBackground remains genuinely RGBA transparent, including all limb and finger gaps. Whole character remains visible.\nAvoid: reference-pose copying, new clothing/patterns, added accessories or objects, smile or mouth, camera-gaze, changed line weights, extra texture, different shadow rendering, glow/blur, scenery, white/gray/black background, checkerboard pixels, logos, words, labels or watermark. Output exactly one recolored frame, not two images or a montage.\nFrame-specific geometry lock: Keep this target's raised rightward straight leg with toe-up shoe, planted left sneaker, near forearm reaching ahead at upper-waist/chest level and rear hand hanging back. Preserve the actual jacket rear folds and precise arm extension of Image 1.",
+      "generated_source": "/Users/lizhe/.codex/generated_images/01a0f634-5a2d-7ce1-9fb7-7ca18dcc1ab3/exec-c9203e97-b3f9-4e95-9deb-32fa53f2874d.png",
+      "saved_output": "/Users/lizhe/work/oneBeat/designs/boonie-linework/2026-10-03/frame_08-palette-v2.png",
+      "verified": {
+        "width": 1254,
+        "height": 1254,
+        "mode": "RGBA",
+        "alpha_extrema": [
+          0,
+          255
+        ],
+        "corner_alpha": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "sha256": "dcbd57905dede65fa1cc1671d2e4d6833a0c3a6b578576d9103751fe923ffb99"
+      },
+      "visual_review": "已检查颜色分区、人物朝向、各帧动作、墨线和地面线条阴影；未见文字框或新增背景。"
+    }
+  ],
+  "preservation": "新配色另存，未覆盖原版 frame_01–08.png 或原版 ZIP；未替换客户端运行资源，未修改代码。",
+  "limitations": "AI 图像编辑以姿势和墨线保留为约束，但不保证逐像素一致；未验证应用内动画循环。参考色号是提示词目标，最终颜色以获选第一帧图像为准。"
+}

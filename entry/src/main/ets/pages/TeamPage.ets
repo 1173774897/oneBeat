@@ -1,5 +1,5 @@
 import { router } from '@kit.ArkUI';
-import { ComicCharacter, PAPER, INK, CORAL, LILAC, TEAL } from '../components/ComicKit';
+import { ComicCharacter, PAPER, INK, CORAL, LILAC, WHITE, BLUE, CARD_SHADOW, CONTROL_SHADOW } from '../components/ComicKit';
 
 const PLAYER_DISPLAY_NAME_KEY: string = 'playerDisplayName';
 
@@ -92,7 +92,7 @@ struct TeamPage {
             .backgroundColor(LILAC)
             .padding({ left: 9, right: 9, top: 6, bottom: 6 })
             .border({ width: 1, color: INK })
-            .borderRadius(4)
+            .borderRadius(4).shadow(CONTROL_SHADOW)
             .rotate({ angle: 3 })
         }.width('100%')
 
@@ -101,14 +101,17 @@ struct TeamPage {
             .width('100%')
             .height('100%')
             .objectFit(ImageFit.Fill)
-          Row({ space: -28 }) {
-            ComicCharacter({ avatar: 'mismatch' })
+          Row({ space: -44 }) {
+            ComicCharacter({ avatar: 'mismatch', pose: 'mismatch' })
               .width('52%')
               .height(190)
+              .translate({ x: 22 })
               .rotate({ angle: -7 })
-            ComicCharacter({ avatar: 'wave' })
+            ComicCharacter({ avatar: 'wave', pose: 'wave' })
               .width('52%')
               .height(190)
+              .scale({ x: 0.85, y: 0.85, centerX: '50%', centerY: '100%' })
+              .translate({ x: -22 })
               .rotate({ angle: 7 })
           }.width('100%').justifyContent(FlexAlign.Center)
           Text('一个节拍，一起出发！')
@@ -164,7 +167,7 @@ struct TeamPage {
               .layoutWeight(1)
               .backgroundColor('#F1EBDF')
               .border({ width: 1, color: INK })
-              .borderRadius(5)
+              .borderRadius(5).shadow(CONTROL_SHADOW)
               .onChange((value: string) => {
                 this.displayName = value;
                 if (value.trim().length > 0) {
@@ -178,7 +181,7 @@ struct TeamPage {
               .fontSize(13)
               .fontWeight(900)
               .fontColor(INK)
-              .backgroundColor(TEAL)
+              .backgroundColor(BLUE)
               .border({ width: 1.5, color: INK })
               .borderRadius(5)
               .shadow({ radius: 0, offsetX: 2, offsetY: 2, color: INK })
@@ -189,7 +192,7 @@ struct TeamPage {
         .padding({ left: 12, right: 12, top: 9, bottom: 11 })
         .backgroundColor('#FFFDF7')
         .border({ width: 1.5, color: INK })
-        .borderRadius(7)
+        .borderRadius(7).shadow(CARD_SHADOW)
 
         Row() {
           Text('选择你的身份')
@@ -211,7 +214,7 @@ struct TeamPage {
               .backgroundColor(PAPER)
               .padding({ left: 7, right: 7, top: 3, bottom: 3 })
               .border({ width: 1, color: INK })
-              .borderRadius(3)
+              .borderRadius(3).shadow(CONTROL_SHADOW)
               .rotate({ angle: -2 })
             Text('创建队伍')
               .fontSize(28)
@@ -234,7 +237,7 @@ struct TeamPage {
           }
           .width('100%')
           .padding({ left: 16, right: 106, top: 14, bottom: 14 })
-          ComicCharacter({ avatar: 'teapot', portrait: true })
+          ComicCharacter({ avatar: 'lamp', pose: 'lamp' })
             .width(94)
             .height(94)
             .margin({ right: 6, bottom: 7 })
@@ -257,7 +260,7 @@ struct TeamPage {
               .backgroundColor(PAPER)
               .padding({ left: 7, right: 7, top: 3, bottom: 3 })
               .border({ width: 1, color: INK })
-              .borderRadius(3)
+              .borderRadius(3).shadow(CONTROL_SHADOW)
               .rotate({ angle: 2 })
             Text('加入队伍')
               .fontSize(28)
@@ -272,17 +275,17 @@ struct TeamPage {
               Text('扫码')
                 .fontSize(11)
                 .fontWeight(900)
-                .backgroundColor(TEAL)
+                .backgroundColor(BLUE)
                 .padding({ left: 7, right: 7, top: 4, bottom: 4 })
                 .border({ width: 1, color: INK })
-                .borderRadius(3)
+                .borderRadius(3).shadow(CONTROL_SHADOW)
               Text('6 位 CODE')
                 .fontSize(11)
                 .fontWeight(900)
                 .backgroundColor(PAPER)
                 .padding({ left: 7, right: 7, top: 4, bottom: 4 })
                 .border({ width: 1, color: INK })
-                .borderRadius(3)
+                .borderRadius(3).shadow(CONTROL_SHADOW)
             }.width('100%')
             Text('选择加入方式  ›')
               .fontSize(14)
@@ -292,7 +295,7 @@ struct TeamPage {
           }
           .width('100%')
           .padding({ left: 16, right: 106, top: 14, bottom: 14 })
-          ComicCharacter({ avatar: 'cloud', portrait: true })
+          ComicCharacter({ avatar: 'cloud', pose: 'cloud-phone' })
             .width(94)
             .height(94)
             .margin({ right: 6, bottom: 7 })
@@ -300,7 +303,7 @@ struct TeamPage {
         }
         .width('100%')
         .height(176)
-        .backgroundColor(LILAC)
+        .backgroundColor(WHITE)
         .border({ width: 2, color: INK })
         .borderRadius(8)
         .shadow({ radius: 0, offsetX: 3, offsetY: 4, color: INK })

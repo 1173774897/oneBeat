@@ -1,0 +1,78 @@
+{
+  "request": "参照 lilroll、mismatch、wave 的画风和配色，再设计三个人物；夸张走路动作，酷酷的表情。",
+  "created_date": "2026-10-03",
+  "mode": "built-in image_gen",
+  "use_case": "stylized-concept",
+  "style_reference_paths": [
+    "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/walk/lilroll/frame_01.png",
+    "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/walk/mismatch/frame_01.png",
+    "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/walk/wave/frame_01.png"
+  ],
+  "output_directory": "/Users/lizhe/work/oneBeat/designs/character-concepts/2026-10-03-exaggerated-walk",
+  "runtime_changes": "None; concept art only. Existing files were not overwritten.",
+  "concepts": [
+    {
+      "key": "orange-bucket-kick",
+      "name": "橘帽踢步客",
+      "prompt": "Use case: stylized-concept.\nAsset type: one new full-body walking character concept for the oneBeat 2D comic cast.\nInput images: Images 1, 2 and 3 are STYLE, COLOR and PROPORTION REFERENCES ONLY (lilroll, mismatch, wave). Invent a new distinct human character, not a restyled copy of any reference.\nPrimary request: design one cool human-like streetwear character whose exaggerated WALKING pose feels naturally part of these three characters' cast. Slightly quirky-cute, with non-realistic colored skin permitted.\nStyle: match the reference images closely: confident hand-inked variable black outer contours, finer interior fold lines, restrained short directional hatching, saturated flat cel colors with a few simple shadow planes. Large expressive head, compact torso, chunky clothing and substantial shoes, roughly 4–4.5 heads tall like the reference cast, not toddler chibi, not tall realistic fashion illustration. Simple readable features with half-lidded eyes and cool unbothered expression. No smile; no mouth needed.\nPalette: the cast's punchy violet, cyan/turquoise, tangerine red/orange, sunny yellow, black and ivory blocks. Clear saturated color relationships, not washed-out earthy tones. Do not use every color everywhere; keep each outfit focused.\nComposition: exactly one whole character on a square canvas, generous margins; hairstyle, hands and entire shoes fully visible. Eye-level camera ONLY, no overhead or low angle. Side-on or very slight three-quarter side view moving toward screen-right. Nose, visible pupil and gaze point straight ahead toward screen-right, never toward the viewer. Keep feet shown from the side with minimal perspective distortion.\nAction: a dramatically stylized but readable walking phase with a very large stride/gesture. At least one planted foot touching the ground; not running, flying, skateboarding or jumping. Exaggeration belongs to walking rhythm, not an action-fight pose.\nBackdrop: genuinely transparent RGBA background. Only the character and a tiny low contact shadow made of charcoal ink strokes beneath the planted shoe. No background scenery, solid white or black background, checkerboard pixels, glow, floor strip or cast-colored halo.\nAvoid: photorealism, 3D, clay, soft toy, glossy rendering, generic smooth vector sticker art, anime glamour proportions, robot/object-headed characters, giant sparkling eyes, smiles, looking at camera, extra props, any logos, words, name labels, badges, frames or watermark. One concept per image, not a montage.\nCharacter and action specification:\nConcept: a lavender-skinned youthful human with shaggy short ink-black hair partly tucked beneath an oversized tangerine bucket hat with an irregular floppy brim. Slanted half-lidded eye, relaxed cool face with no mouth. Roomy cobalt/cyan color-block windbreaker with black zip details over an ivory shirt; sunny yellow baggy knee-length cargo shorts, black crew socks, chunky violet and ivory sneakers with a small orange accent. Shape language: floppy round hat, boxy jacket, long bare shins.\nPose: an extremely long swaggering walk like reference 2 but with a new silhouette: the forward leg kicks nearly straight out toward screen-right at roughly knee/hip height, foot flexed toe-up; rear leg is diagonally extended down-left with the full sneaker planted. Torso leans slightly backward to balance. One elbow bends strongly forward in counter-swing, the other hand trails behind. This is the peak of a jaunty marching step, not a fighting kick; hands relaxed and cool. Keep the character's head profile facing forward, not turned to the camera.",
+      "referenced_image_paths": [
+        "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/walk/lilroll/frame_01.png",
+        "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/walk/mismatch/frame_01.png",
+        "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/walk/wave/frame_01.png"
+      ],
+      "transparent_background": true,
+      "generated_source": "/Users/lizhe/.codex/generated_images/01a0f634-5a2d-7ce1-9fb7-7ca18dcc1ab3/exec-a90dda37-7314-455f-ada0-2a153aa7c542.png",
+      "saved_output": "/Users/lizhe/work/oneBeat/designs/character-concepts/2026-10-03-exaggerated-walk/orange-bucket-kick.png",
+      "verified": {
+        "width": 1254,
+        "height": 1254,
+        "mode": "RGBA",
+        "alpha_min": 0,
+        "alpha_max": 255,
+        "all_corner_alpha": 0
+      }
+    },
+    {
+      "key": "twin-bun-highstep",
+      "name": "双丸子高步客",
+      "prompt": "Use case: stylized-concept.\nAsset type: one new full-body walking character concept for the oneBeat 2D comic cast.\nInput images: Images 1, 2 and 3 are STYLE, COLOR and PROPORTION REFERENCES ONLY (lilroll, mismatch, wave). Invent a new distinct human character, not a restyled copy of any reference.\nPrimary request: design one cool human-like streetwear character whose exaggerated WALKING pose feels naturally part of these three characters' cast. Slightly quirky-cute, with non-realistic colored skin permitted.\nStyle: match the reference images closely: confident hand-inked variable black outer contours, finer interior fold lines, restrained short directional hatching, saturated flat cel colors with a few simple shadow planes. Large expressive head, compact torso, chunky clothing and substantial shoes, roughly 4–4.5 heads tall like the reference cast, not toddler chibi, not tall realistic fashion illustration. Simple readable features with half-lidded eyes and cool unbothered expression. No smile; no mouth needed.\nPalette: the cast's punchy violet, cyan/turquoise, tangerine red/orange, sunny yellow, black and ivory blocks. Clear saturated color relationships, not washed-out earthy tones. Do not use every color everywhere; keep each outfit focused.\nComposition: exactly one whole character on a square canvas, generous margins; hairstyle, hands and entire shoes fully visible. Eye-level camera ONLY, no overhead or low angle. Side-on or very slight three-quarter side view moving toward screen-right. Nose, visible pupil and gaze point straight ahead toward screen-right, never toward the viewer. Keep feet shown from the side with minimal perspective distortion.\nAction: a dramatically stylized but readable walking phase with a very large stride/gesture. At least one planted foot touching the ground; not running, flying, skateboarding or jumping. Exaggeration belongs to walking rhythm, not an action-fight pose.\nBackdrop: genuinely transparent RGBA background. Only the character and a tiny low contact shadow made of charcoal ink strokes beneath the planted shoe. No background scenery, solid white or black background, checkerboard pixels, glow, floor strip or cast-colored halo.\nAvoid: photorealism, 3D, clay, soft toy, glossy rendering, generic smooth vector sticker art, anime glamour proportions, robot/object-headed characters, giant sparkling eyes, smiles, looking at camera, extra props, any logos, words, name labels, badges, frames or watermark. One concept per image, not a montage.\nCharacter and action specification:\nConcept: a cyan/turquoise-skinned youthful human with two small uneven dark-violet hair buns high behind the ears, short choppy fringe and one pale yellow fringe lock. Small simple half-lidded forward-facing eye, cool unimpressed mouthless face. Oversized hot coral-pink bomber with violet cuffs and black collar, ivory short tee underneath, broad loose black knee-length shorts with one violet pocket panel, ivory crew socks and bulky cyan/black/ivory sneakers with a few tangerine lace details. No braid hairstyle. Shape language: two compact buns, rounded oversized sleeves, broad shorts, chunky shoe silhouette.\nPose: a very exaggerated confident high-knee walking phase. The forward screen-right thigh is raised nearly horizontal, knee bent so its shoe hangs lower in front of the body, while the trailing leg is nearly straight and the rear screen-left shoe is firmly planted. Hips and shoulders gently counter-rotate; one hand casually buried in the bomber pocket, opposite elbow swings far behind with relaxed fingers. Upright body and level gaze look improbably calm despite the huge marching motion. Not a ballet pose, running or a jump.",
+      "referenced_image_paths": [
+        "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/walk/lilroll/frame_01.png",
+        "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/walk/mismatch/frame_01.png",
+        "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/walk/wave/frame_01.png"
+      ],
+      "transparent_background": true,
+      "generated_source": "/Users/lizhe/.codex/generated_images/01a0f634-5a2d-7ce1-9fb7-7ca18dcc1ab3/exec-b0d6b9eb-3159-40b6-8775-fe2130de585f.png",
+      "saved_output": "/Users/lizhe/work/oneBeat/designs/character-concepts/2026-10-03-exaggerated-walk/twin-bun-highstep.png",
+      "verified": {
+        "width": 1254,
+        "height": 1254,
+        "mode": "RGBA",
+        "alpha_min": 0,
+        "alpha_max": 255,
+        "all_corner_alpha": 0
+      }
+    },
+    {
+      "key": "long-sleeve-sway",
+      "name": "长袖慢摇客",
+      "prompt": "Use case: stylized-concept.\nAsset type: one new full-body walking character concept for the oneBeat 2D comic cast.\nInput images: Images 1, 2 and 3 are STYLE, COLOR and PROPORTION REFERENCES ONLY (lilroll, mismatch, wave). Invent a new distinct human character, not a restyled copy of any reference.\nPrimary request: design one cool human-like streetwear character whose exaggerated WALKING pose feels naturally part of these three characters' cast. Slightly quirky-cute, with non-realistic colored skin permitted.\nStyle: match the reference images closely: confident hand-inked variable black outer contours, finer interior fold lines, restrained short directional hatching, saturated flat cel colors with a few simple shadow planes. Large expressive head, compact torso, chunky clothing and substantial shoes, roughly 4–4.5 heads tall like the reference cast, not toddler chibi, not tall realistic fashion illustration. Simple readable features with half-lidded eyes and cool unbothered expression. No smile; no mouth needed.\nPalette: the cast's punchy violet, cyan/turquoise, tangerine red/orange, sunny yellow, black and ivory blocks. Clear saturated color relationships, not washed-out earthy tones. Do not use every color everywhere; keep each outfit focused.\nComposition: exactly one whole character on a square canvas, generous margins; hairstyle, hands and entire shoes fully visible. Eye-level camera ONLY, no overhead or low angle. Side-on or very slight three-quarter side view moving toward screen-right. Nose, visible pupil and gaze point straight ahead toward screen-right, never toward the viewer. Keep feet shown from the side with minimal perspective distortion.\nAction: a dramatically stylized but readable walking phase with a very large stride/gesture. At least one planted foot touching the ground; not running, flying, skateboarding or jumping. Exaggeration belongs to walking rhythm, not an action-fight pose.\nBackdrop: genuinely transparent RGBA background. Only the character and a tiny low contact shadow made of charcoal ink strokes beneath the planted shoe. No background scenery, solid white or black background, checkerboard pixels, glow, floor strip or cast-colored halo.\nAvoid: photorealism, 3D, clay, soft toy, glossy rendering, generic smooth vector sticker art, anime glamour proportions, robot/object-headed characters, giant sparkling eyes, smiles, looking at camera, extra props, any logos, words, name labels, badges, frames or watermark. One concept per image, not a montage.\nCharacter and action specification:\nConcept: a warm peach-skinned androgynous youthful human with a jagged lime-green short haircut, an uneven little front quiff and black undercut side. Eyelid almost a straight narrow line with a visible forward-pointing pupil; cool stoic expression, mouthless. A comically oversized violet open long-sleeve track jacket with sunny yellow lining, sleeves extending past the wrists with fingertips visible; plain turquoise fitted inner shirt, roomy ivory cropped trousers with large rolled cuffs, mismatched orange and violet socks, chunky red-orange and ivory canvas sneakers. Shape language: long flowing sleeve silhouette, bulky light-colored pants, flat angular hair.\nPose: a huge elastic long-stride walking phase, not a neutral stand. Forward right foot reaches far ahead just above the ground, rear left heel lifted with its forefoot still planted, knees loose. Torso leans conspicuously backward and hips push forward in a laid-back swagger; the very long sleeves swing broadly in opposite directions, one forward elbow bent with fingertips emerging, the other arm trails back. Jacket hem flares behind with motion but no drawn speed lines. Head stays level looking straight ahead, as if totally unbothered.",
+      "referenced_image_paths": [
+        "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/walk/lilroll/frame_01.png",
+        "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/walk/mismatch/frame_01.png",
+        "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/walk/wave/frame_01.png"
+      ],
+      "transparent_background": true,
+      "generated_source": "/Users/lizhe/.codex/generated_images/01a0f634-5a2d-7ce1-9fb7-7ca18dcc1ab3/exec-add7cb94-801d-41f0-927e-a3b0e81ffaa7.png",
+      "saved_output": "/Users/lizhe/work/oneBeat/designs/character-concepts/2026-10-03-exaggerated-walk/long-sleeve-sway.png",
+      "verified": {
+        "width": 1254,
+        "height": 1254,
+        "mode": "RGBA",
+        "alpha_min": 0,
+        "alpha_max": 255,
+        "all_corner_alpha": 0
+      }
+    }
+  ]
+}

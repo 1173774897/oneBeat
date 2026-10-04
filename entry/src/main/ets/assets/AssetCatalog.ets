@@ -1,4 +1,4 @@
-import { isAvatarAllowedForSession } from './CharacterCatalog';
+import { isAvatarAllowedForSession, isRandomAvatar, isRandomPoolCharacter } from './CharacterCatalog';
 
 export const WALK_FRAME_COUNT: number = 8;
 export const LILROLL_WALK_FRAME_COUNT: number = 16;
@@ -188,13 +188,17 @@ export function randomSideEntityIndex(isForeground: boolean, recentIndices: numb
   return pickFromPoolExcludingRecent(pool, windowed);
 }
 
-export type WalkerAvatarKey = 'cloud' | 'mismatch' | 'lilroll' | 'teapot' | 'wave' | 'scooter' | 'matchman';
+export type WalkerAvatarKey =
+  'cloud' | 'mismatch' | 'lilroll' | 'teapot' | 'wave' | 'scooter' | 'lamp' | 'braids' | 'boonie';
 
-export function walkFramePath(avatar: WalkerAvatarKey, frameIndex: number): string {
+export function walkFramePath(avatar: WalkerAvatarKey, frameIndex: number, colorSlot: number = 0): string {
   const count = avatar === 'lilroll' ? LILROLL_WALK_FRAME_COUNT :
     avatar === 'scooter' ? SCOOTER_WALK_FRAME_COUNT : WALK_FRAME_COUNT;
   const idx = (frameIndex % count) + 1;
   const suffix = idx < 10 ? `0${idx}` : `${idx}`;
+  if (isRandomPoolCharacter(avatar)) {
+    return `walk/${avatar}/palette_${colorSlot + 1}/frame_${suffix}.png`;
+  }
   return `walk/${avatar}/frame_${suffix}.png`;
 }
 
@@ -230,10 +234,14 @@ export function avatarForSlot(slot: number): WalkerAvatarKey {
   return slot % 2 === 0 ? 'cloud' : 'mismatch';
 }
 
-export function memberAvatar(avatarKey: string, slot: number): WalkerAvatarKey {
-  if (avatarKey === 'cloud' || avatarKey === 'mismatch' || avatarKey === 'lilroll' || avatarKey === 'teapot' ||
-    avatarKey === 'wave' || avatarKey === 'scooter' || avatarKey === 'matchman') {
-    return avatarKey;
+export function memberAvatar(avatarKey: string, slot: number, resolvedAvatarKey: string = ''): WalkerAvatarKey {
+  const key = avatarKey === 'matchman' ? 'lamp' : avatarKey;
+  if (isRandomAvatar(key) && isRandomPoolCharacter(resolvedAvatarKey)) {
+    return resolvedAvatarKey as WalkerAvatarKey;
+  }
+  if (key === 'cloud' || key === 'mismatch' || key === 'lilroll' || key === 'teapot' ||
+    key === 'wave' || key === 'scooter' || key === 'lamp' || key === 'braids' || key === 'boonie') {
+    return key;
   }
   return avatarForSlot(slot);
 }

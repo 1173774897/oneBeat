@@ -1,0 +1,238 @@
+{
+  "request": "统一为项目已有角色的漫画墨线风格；背景透明；去掉右下角文字框并补绘遮挡；加入线条接触阴影。",
+  "mode": "built-in image_gen",
+  "use_case": "style-transfer",
+  "created_date": "2026-10-02",
+  "output_directory": "/Users/lizhe/work/oneBeat/designs/braids-linework/2026-10-02",
+  "preservation": "原始输入和客户端 runtime 资源均未覆盖。本批采用逐帧 AI 修订，不保证像素级配准；循环衔接尚未实机验证。",
+  "style_references": [
+    "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/walk/mismatch/frame_01.png",
+    "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/walk/wave/frame_01.png",
+    "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/walk/lilroll/frame_01.png"
+  ],
+  "finish_reference": "/Users/lizhe/.codex/generated_images/01a0f634-5a2d-7ce1-9fb7-7ca18dcc1ab3/exec-84f263f6-ab53-4f8b-af05-3ceab9eb7b92.png",
+  "frames": [
+    {
+      "frame": "01",
+      "edit_target": "/Users/lizhe/Downloads/onebeatprocessing/cycling/braids_frames/frame_01.png",
+      "reference_roles": [
+        "Image 1: sole edit target and pose/framing/identity authority",
+        "Images 2–4: existing cast linework style references"
+      ],
+      "referenced_image_paths": [
+        "/Users/lizhe/Downloads/onebeatprocessing/cycling/braids_frames/frame_01.png",
+        "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/walk/mismatch/frame_01.png",
+        "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/walk/wave/frame_01.png",
+        "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/walk/lilroll/frame_01.png"
+      ],
+      "prompt": "Use case: style-transfer.\nAsset type: one transparent PNG animation frame for the oneBeat existing comic character cast.\nPrimary request: EDIT Image 1 only. Retouch its linework to match the established characters in Images 2–4, remove the entire gray background and lower-right white rounded text box, reconstruct any boot portions obscured by the box, and replace the blurred floor shadow with hand-drawn ink contact-shadow strokes.\nInput roles: Image 1 is the sole pose, framing, identity and color authority. Images 2–4 are ink/linework and cel-shading style references only; do not borrow their characters, clothes, poses or props.\nStyle: bold, slightly irregular variable-weight black outer contours, thinner confident interior lines, restrained short directional hatching in folds, hair and footwear; flat comic cel colors with restrained shadow planes. Same approachable hand-drawn comic finish as the reference cast, not smooth generic vector art, not 3D, not painterly. Keep hatching sparse, avoid making black areas muddy.\nPreserve: this exact character's slate-blue skin, thick black twin braids with ivory bands and ivory fringe streak, cool half-lidded eye and natural right-facing profile, gaze forward toward screen-right (never at the viewer), mouthless face, ivory loose jersey with brick-red sleeves and dark collar, black loose shorts, asymmetric ivory/black socks and violet chunky lace-up boots with ivory soles and toe caps. Keep the target's actual sock placement. Preserve original joint angles, hand shapes, braid motion, leg overlap and shoe orientation. No redesign or new facial expression.\nComposition: one whole character, eye-level camera, same normalized head/body/foot positions, scale, margins and ground baseline as Image 1. Square canvas, preferably 1254 × 1254. Do not crop hair or shoes. No sheet or multiple views.\nShadows: at the original ground baseline draw low, tapered, horizontally running charcoal/black ink strokes with a few closely spaced fine hatch lines. Dense and short directly under the planted sole; lighter, thinner sparse projected strokes beneath an airborne foot at ground level. Shadow must visibly be LINE DRAWN with transparent gaps, not a soft blurred gray ellipse, solid black oval, glow, floating shadow glued to an elevated sole, or long floor stripe.\nBackground: genuine RGBA transparency everywhere outside character and ink shadow, including gaps between braids and limbs. No gray, white, black or checkerboard background, no halo or ground plane.\nRemove all lower-right lettering and its rounded rectangle, restore obscured purple boot and ivory outsole using surrounding contours. No text, watermark, badge or border.\nChange only line rendering, background/text removal and contact-shadow rendering; keep every other detail faithful to Image 1.\nPose-specific constraints: Frame 01: wide rightward stride. Screen-left trailing black-sock boot raised/tilted; screen-right ivory-sock boot planted. Preserve the open stride and exact arm swing.",
+      "transparent_background": true,
+      "generated_source": "/Users/lizhe/.codex/generated_images/01a0f634-5a2d-7ce1-9fb7-7ca18dcc1ab3/exec-84f263f6-ab53-4f8b-af05-3ceab9eb7b92.png",
+      "saved_output": "/Users/lizhe/work/oneBeat/designs/braids-linework/2026-10-02/frame_01.png",
+      "verified": {
+        "width": 1254,
+        "height": 1254,
+        "mode": "RGBA",
+        "alpha_min": 0,
+        "alpha_max": 255,
+        "all_corner_alpha": 0
+      }
+    },
+    {
+      "frame": "02",
+      "edit_target": "/Users/lizhe/Downloads/onebeatprocessing/cycling/braids_frames/frame_02.png",
+      "reference_roles": [
+        "Image 1: sole edit target and pose/framing/identity authority",
+        "Images 2–4: existing cast linework style references",
+        "Image 5: revised frame 01 finish consistency only"
+      ],
+      "referenced_image_paths": [
+        "/Users/lizhe/Downloads/onebeatprocessing/cycling/braids_frames/frame_02.png",
+        "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/walk/mismatch/frame_01.png",
+        "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/walk/wave/frame_01.png",
+        "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/walk/lilroll/frame_01.png",
+        "/Users/lizhe/.codex/generated_images/01a0f634-5a2d-7ce1-9fb7-7ca18dcc1ab3/exec-84f263f6-ab53-4f8b-af05-3ceab9eb7b92.png"
+      ],
+      "prompt": "Use case: style-transfer.\nAsset type: one transparent PNG animation frame for the oneBeat existing comic character cast.\nPrimary request: EDIT Image 1 only. Retouch its linework to match the established characters in Images 2–4, remove the entire gray background and lower-right white rounded text box, reconstruct any boot portions obscured by the box, and replace the blurred floor shadow with hand-drawn ink contact-shadow strokes.\nInput roles: Image 1 is the sole pose, framing, identity and color authority. Images 2–4 are ink/linework and cel-shading style references only; do not borrow their characters, clothes, poses or props.\nStyle: bold, slightly irregular variable-weight black outer contours, thinner confident interior lines, restrained short directional hatching in folds, hair and footwear; flat comic cel colors with restrained shadow planes. Same approachable hand-drawn comic finish as the reference cast, not smooth generic vector art, not 3D, not painterly. Keep hatching sparse, avoid making black areas muddy.\nPreserve: this exact character's slate-blue skin, thick black twin braids with ivory bands and ivory fringe streak, cool half-lidded eye and natural right-facing profile, gaze forward toward screen-right (never at the viewer), mouthless face, ivory loose jersey with brick-red sleeves and dark collar, black loose shorts, asymmetric ivory/black socks and violet chunky lace-up boots with ivory soles and toe caps. Keep the target's actual sock placement. Preserve original joint angles, hand shapes, braid motion, leg overlap and shoe orientation. No redesign or new facial expression.\nComposition: one whole character, eye-level camera, same normalized head/body/foot positions, scale, margins and ground baseline as Image 1. Square canvas, preferably 1254 × 1254. Do not crop hair or shoes. No sheet or multiple views.\nShadows: at the original ground baseline draw low, tapered, horizontally running charcoal/black ink strokes with a few closely spaced fine hatch lines. Dense and short directly under the planted sole; lighter, thinner sparse projected strokes beneath an airborne foot at ground level. Shadow must visibly be LINE DRAWN with transparent gaps, not a soft blurred gray ellipse, solid black oval, glow, floating shadow glued to an elevated sole, or long floor stripe.\nBackground: genuine RGBA transparency everywhere outside character and ink shadow, including gaps between braids and limbs. No gray, white, black or checkerboard background, no halo or ground plane.\nRemove all lower-right lettering and its rounded rectangle, restore obscured purple boot and ivory outsole using surrounding contours. No text, watermark, badge or border.\nChange only line rendering, background/text removal and contact-shadow rendering; keep every other detail faithful to Image 1.\nInput Image 5: approved retouched frame 01, FINISH consistency reference only for outline weight, hatching, colors and thin ink shadow rendering. DO NOT copy Image 5's wide walking pose, foot positions, sock placements or limb overlap. Image 1's pose and sock arrangement are authoritative.\nPose-specific constraints: Frame 02: bent trailing leg with the black-sock boot lifted high behind on screen-left; the screen-right ivory-sock boot is planted. Preserve bent knees and narrower stride.",
+      "transparent_background": true,
+      "generated_source": "/Users/lizhe/.codex/generated_images/01a0f634-5a2d-7ce1-9fb7-7ca18dcc1ab3/exec-247ed261-5019-4a12-bb0d-9c5a38fb4997.png",
+      "saved_output": "/Users/lizhe/work/oneBeat/designs/braids-linework/2026-10-02/frame_02.png",
+      "verified": {
+        "width": 1254,
+        "height": 1254,
+        "mode": "RGBA",
+        "alpha_min": 0,
+        "alpha_max": 255,
+        "all_corner_alpha": 0
+      }
+    },
+    {
+      "frame": "03",
+      "edit_target": "/Users/lizhe/Downloads/onebeatprocessing/cycling/braids_frames/frame_03.png",
+      "reference_roles": [
+        "Image 1: sole edit target and pose/framing/identity authority",
+        "Images 2–4: existing cast linework style references",
+        "Image 5: revised frame 01 finish consistency only"
+      ],
+      "referenced_image_paths": [
+        "/Users/lizhe/Downloads/onebeatprocessing/cycling/braids_frames/frame_03.png",
+        "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/walk/mismatch/frame_01.png",
+        "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/walk/wave/frame_01.png",
+        "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/walk/lilroll/frame_01.png",
+        "/Users/lizhe/.codex/generated_images/01a0f634-5a2d-7ce1-9fb7-7ca18dcc1ab3/exec-84f263f6-ab53-4f8b-af05-3ceab9eb7b92.png"
+      ],
+      "prompt": "Use case: style-transfer.\nAsset type: one transparent PNG animation frame for the oneBeat existing comic character cast.\nPrimary request: EDIT Image 1 only. Retouch its linework to match the established characters in Images 2–4, remove the entire gray background and lower-right white rounded text box, reconstruct any boot portions obscured by the box, and replace the blurred floor shadow with hand-drawn ink contact-shadow strokes.\nInput roles: Image 1 is the sole pose, framing, identity and color authority. Images 2–4 are ink/linework and cel-shading style references only; do not borrow their characters, clothes, poses or props.\nStyle: bold, slightly irregular variable-weight black outer contours, thinner confident interior lines, restrained short directional hatching in folds, hair and footwear; flat comic cel colors with restrained shadow planes. Same approachable hand-drawn comic finish as the reference cast, not smooth generic vector art, not 3D, not painterly. Keep hatching sparse, avoid making black areas muddy.\nPreserve: this exact character's slate-blue skin, thick black twin braids with ivory bands and ivory fringe streak, cool half-lidded eye and natural right-facing profile, gaze forward toward screen-right (never at the viewer), mouthless face, ivory loose jersey with brick-red sleeves and dark collar, black loose shorts, asymmetric ivory/black socks and violet chunky lace-up boots with ivory soles and toe caps. Keep the target's actual sock placement. Preserve original joint angles, hand shapes, braid motion, leg overlap and shoe orientation. No redesign or new facial expression.\nComposition: one whole character, eye-level camera, same normalized head/body/foot positions, scale, margins and ground baseline as Image 1. Square canvas, preferably 1254 × 1254. Do not crop hair or shoes. No sheet or multiple views.\nShadows: at the original ground baseline draw low, tapered, horizontally running charcoal/black ink strokes with a few closely spaced fine hatch lines. Dense and short directly under the planted sole; lighter, thinner sparse projected strokes beneath an airborne foot at ground level. Shadow must visibly be LINE DRAWN with transparent gaps, not a soft blurred gray ellipse, solid black oval, glow, floating shadow glued to an elevated sole, or long floor stripe.\nBackground: genuine RGBA transparency everywhere outside character and ink shadow, including gaps between braids and limbs. No gray, white, black or checkerboard background, no halo or ground plane.\nRemove all lower-right lettering and its rounded rectangle, restore obscured purple boot and ivory outsole using surrounding contours. No text, watermark, badge or border.\nChange only line rendering, background/text removal and contact-shadow rendering; keep every other detail faithful to Image 1.\nInput Image 5: approved retouched frame 01, FINISH consistency reference only for outline weight, hatching, colors and thin ink shadow rendering. DO NOT copy Image 5's wide walking pose, foot positions, sock placements or limb overlap. Image 1's pose and sock arrangement are authoritative.\nPose-specific constraints: Frame 03: compact crossing/passing pose. The lifted black-sock boot crosses in front of the lower planted ivory-sock boot; retain the exact overlap and near arm hanging down. Do not open the stride.",
+      "transparent_background": true,
+      "generated_source": "/Users/lizhe/.codex/generated_images/01a0f634-5a2d-7ce1-9fb7-7ca18dcc1ab3/exec-8135b6cd-5d47-4bf7-9374-e297b757a026.png",
+      "saved_output": "/Users/lizhe/work/oneBeat/designs/braids-linework/2026-10-02/frame_03.png",
+      "verified": {
+        "width": 1254,
+        "height": 1254,
+        "mode": "RGBA",
+        "alpha_min": 0,
+        "alpha_max": 255,
+        "all_corner_alpha": 0
+      }
+    },
+    {
+      "frame": "04",
+      "edit_target": "/Users/lizhe/Downloads/onebeatprocessing/cycling/braids_frames/frame_04.png",
+      "reference_roles": [
+        "Image 1: sole edit target and pose/framing/identity authority",
+        "Images 2–4: existing cast linework style references",
+        "Image 5: revised frame 01 finish consistency only"
+      ],
+      "referenced_image_paths": [
+        "/Users/lizhe/Downloads/onebeatprocessing/cycling/braids_frames/frame_04.png",
+        "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/walk/mismatch/frame_01.png",
+        "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/walk/wave/frame_01.png",
+        "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/walk/lilroll/frame_01.png",
+        "/Users/lizhe/.codex/generated_images/01a0f634-5a2d-7ce1-9fb7-7ca18dcc1ab3/exec-84f263f6-ab53-4f8b-af05-3ceab9eb7b92.png"
+      ],
+      "prompt": "Use case: style-transfer.\nAsset type: one transparent PNG animation frame for the oneBeat existing comic character cast.\nPrimary request: EDIT Image 1 only. Retouch its linework to match the established characters in Images 2–4, remove the entire gray background and lower-right white rounded text box, reconstruct any boot portions obscured by the box, and replace the blurred floor shadow with hand-drawn ink contact-shadow strokes.\nInput roles: Image 1 is the sole pose, framing, identity and color authority. Images 2–4 are ink/linework and cel-shading style references only; do not borrow their characters, clothes, poses or props.\nStyle: bold, slightly irregular variable-weight black outer contours, thinner confident interior lines, restrained short directional hatching in folds, hair and footwear; flat comic cel colors with restrained shadow planes. Same approachable hand-drawn comic finish as the reference cast, not smooth generic vector art, not 3D, not painterly. Keep hatching sparse, avoid making black areas muddy.\nPreserve: this exact character's slate-blue skin, thick black twin braids with ivory bands and ivory fringe streak, cool half-lidded eye and natural right-facing profile, gaze forward toward screen-right (never at the viewer), mouthless face, ivory loose jersey with brick-red sleeves and dark collar, black loose shorts, asymmetric ivory/black socks and violet chunky lace-up boots with ivory soles and toe caps. Keep the target's actual sock placement. Preserve original joint angles, hand shapes, braid motion, leg overlap and shoe orientation. No redesign or new facial expression.\nComposition: one whole character, eye-level camera, same normalized head/body/foot positions, scale, margins and ground baseline as Image 1. Square canvas, preferably 1254 × 1254. Do not crop hair or shoes. No sheet or multiple views.\nShadows: at the original ground baseline draw low, tapered, horizontally running charcoal/black ink strokes with a few closely spaced fine hatch lines. Dense and short directly under the planted sole; lighter, thinner sparse projected strokes beneath an airborne foot at ground level. Shadow must visibly be LINE DRAWN with transparent gaps, not a soft blurred gray ellipse, solid black oval, glow, floating shadow glued to an elevated sole, or long floor stripe.\nBackground: genuine RGBA transparency everywhere outside character and ink shadow, including gaps between braids and limbs. No gray, white, black or checkerboard background, no halo or ground plane.\nRemove all lower-right lettering and its rounded rectangle, restore obscured purple boot and ivory outsole using surrounding contours. No text, watermark, badge or border.\nChange only line rendering, background/text removal and contact-shadow rendering; keep every other detail faithful to Image 1.\nInput Image 5: approved retouched frame 01, FINISH consistency reference only for outline weight, hatching, colors and thin ink shadow rendering. DO NOT copy Image 5's wide walking pose, foot positions, sock placements or limb overlap. Image 1's pose and sock arrangement are authoritative.\nPose-specific constraints: Frame 04: screen-left rear ivory-sock boot planted, screen-right forward black-sock boot elevated with its knee raised. Retain the elevated front foot and low arms.",
+      "transparent_background": true,
+      "generated_source": "/Users/lizhe/.codex/generated_images/01a0f634-5a2d-7ce1-9fb7-7ca18dcc1ab3/exec-8f7961da-08fe-41a1-82fc-269c83a476b5.png",
+      "saved_output": "/Users/lizhe/work/oneBeat/designs/braids-linework/2026-10-02/frame_04.png",
+      "verified": {
+        "width": 1254,
+        "height": 1254,
+        "mode": "RGBA",
+        "alpha_min": 0,
+        "alpha_max": 255,
+        "all_corner_alpha": 0
+      }
+    },
+    {
+      "frame": "05",
+      "edit_target": "/Users/lizhe/Downloads/onebeatprocessing/cycling/braids_frames/frame_05.png",
+      "reference_roles": [
+        "Image 1: sole edit target and pose/framing/identity authority",
+        "Images 2–4: existing cast linework style references",
+        "Image 5: revised frame 01 finish consistency only"
+      ],
+      "referenced_image_paths": [
+        "/Users/lizhe/Downloads/onebeatprocessing/cycling/braids_frames/frame_05.png",
+        "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/walk/mismatch/frame_01.png",
+        "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/walk/wave/frame_01.png",
+        "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/walk/lilroll/frame_01.png",
+        "/Users/lizhe/.codex/generated_images/01a0f634-5a2d-7ce1-9fb7-7ca18dcc1ab3/exec-84f263f6-ab53-4f8b-af05-3ceab9eb7b92.png"
+      ],
+      "prompt": "Use case: style-transfer.\nAsset type: one transparent PNG animation frame for the oneBeat existing comic character cast.\nPrimary request: EDIT Image 1 only. Retouch its linework to match the established characters in Images 2–4, remove the entire gray background and lower-right white rounded text box, reconstruct any boot portions obscured by the box, and replace the blurred floor shadow with hand-drawn ink contact-shadow strokes.\nInput roles: Image 1 is the sole pose, framing, identity and color authority. Images 2–4 are ink/linework and cel-shading style references only; do not borrow their characters, clothes, poses or props.\nStyle: bold, slightly irregular variable-weight black outer contours, thinner confident interior lines, restrained short directional hatching in folds, hair and footwear; flat comic cel colors with restrained shadow planes. Same approachable hand-drawn comic finish as the reference cast, not smooth generic vector art, not 3D, not painterly. Keep hatching sparse, avoid making black areas muddy.\nPreserve: this exact character's slate-blue skin, thick black twin braids with ivory bands and ivory fringe streak, cool half-lidded eye and natural right-facing profile, gaze forward toward screen-right (never at the viewer), mouthless face, ivory loose jersey with brick-red sleeves and dark collar, black loose shorts, asymmetric ivory/black socks and violet chunky lace-up boots with ivory soles and toe caps. Keep the target's actual sock placement. Preserve original joint angles, hand shapes, braid motion, leg overlap and shoe orientation. No redesign or new facial expression.\nComposition: one whole character, eye-level camera, same normalized head/body/foot positions, scale, margins and ground baseline as Image 1. Square canvas, preferably 1254 × 1254. Do not crop hair or shoes. No sheet or multiple views.\nShadows: at the original ground baseline draw low, tapered, horizontally running charcoal/black ink strokes with a few closely spaced fine hatch lines. Dense and short directly under the planted sole; lighter, thinner sparse projected strokes beneath an airborne foot at ground level. Shadow must visibly be LINE DRAWN with transparent gaps, not a soft blurred gray ellipse, solid black oval, glow, floating shadow glued to an elevated sole, or long floor stripe.\nBackground: genuine RGBA transparency everywhere outside character and ink shadow, including gaps between braids and limbs. No gray, white, black or checkerboard background, no halo or ground plane.\nRemove all lower-right lettering and its rounded rectangle, restore obscured purple boot and ivory outsole using surrounding contours. No text, watermark, badge or border.\nChange only line rendering, background/text removal and contact-shadow rendering; keep every other detail faithful to Image 1.\nInput Image 5: approved retouched frame 01, FINISH consistency reference only for outline weight, hatching, colors and thin ink shadow rendering. DO NOT copy Image 5's wide walking pose, foot positions, sock placements or limb overlap. Image 1's pose and sock arrangement are authoritative.\nPose-specific constraints: Frame 05: wide opposite stride: rear screen-left ivory-sock boot raised, front screen-right black-sock boot planted. Retain outstretched swinging arms.",
+      "transparent_background": true,
+      "generated_source": "/Users/lizhe/.codex/generated_images/01a0f634-5a2d-7ce1-9fb7-7ca18dcc1ab3/exec-737fd144-5464-41d3-b061-7553342d522e.png",
+      "saved_output": "/Users/lizhe/work/oneBeat/designs/braids-linework/2026-10-02/frame_05.png",
+      "verified": {
+        "width": 1254,
+        "height": 1254,
+        "mode": "RGBA",
+        "alpha_min": 0,
+        "alpha_max": 255,
+        "all_corner_alpha": 0
+      }
+    },
+    {
+      "frame": "06",
+      "edit_target": "/Users/lizhe/Downloads/onebeatprocessing/cycling/braids_frames/frame_06.png",
+      "reference_roles": [
+        "Image 1: sole edit target and pose/framing/identity authority",
+        "Images 2–4: existing cast linework style references",
+        "Image 5: revised frame 01 finish consistency only"
+      ],
+      "referenced_image_paths": [
+        "/Users/lizhe/Downloads/onebeatprocessing/cycling/braids_frames/frame_06.png",
+        "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/walk/mismatch/frame_01.png",
+        "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/walk/wave/frame_01.png",
+        "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/walk/lilroll/frame_01.png",
+        "/Users/lizhe/.codex/generated_images/01a0f634-5a2d-7ce1-9fb7-7ca18dcc1ab3/exec-84f263f6-ab53-4f8b-af05-3ceab9eb7b92.png"
+      ],
+      "prompt": "Use case: style-transfer.\nAsset type: one transparent PNG animation frame for the oneBeat existing comic character cast.\nPrimary request: EDIT Image 1 only. Retouch its linework to match the established characters in Images 2–4, remove the entire gray background and lower-right white rounded text box, reconstruct any boot portions obscured by the box, and replace the blurred floor shadow with hand-drawn ink contact-shadow strokes.\nInput roles: Image 1 is the sole pose, framing, identity and color authority. Images 2–4 are ink/linework and cel-shading style references only; do not borrow their characters, clothes, poses or props.\nStyle: bold, slightly irregular variable-weight black outer contours, thinner confident interior lines, restrained short directional hatching in folds, hair and footwear; flat comic cel colors with restrained shadow planes. Same approachable hand-drawn comic finish as the reference cast, not smooth generic vector art, not 3D, not painterly. Keep hatching sparse, avoid making black areas muddy.\nPreserve: this exact character's slate-blue skin, thick black twin braids with ivory bands and ivory fringe streak, cool half-lidded eye and natural right-facing profile, gaze forward toward screen-right (never at the viewer), mouthless face, ivory loose jersey with brick-red sleeves and dark collar, black loose shorts, asymmetric ivory/black socks and violet chunky lace-up boots with ivory soles and toe caps. Keep the target's actual sock placement. Preserve original joint angles, hand shapes, braid motion, leg overlap and shoe orientation. No redesign or new facial expression.\nComposition: one whole character, eye-level camera, same normalized head/body/foot positions, scale, margins and ground baseline as Image 1. Square canvas, preferably 1254 × 1254. Do not crop hair or shoes. No sheet or multiple views.\nShadows: at the original ground baseline draw low, tapered, horizontally running charcoal/black ink strokes with a few closely spaced fine hatch lines. Dense and short directly under the planted sole; lighter, thinner sparse projected strokes beneath an airborne foot at ground level. Shadow must visibly be LINE DRAWN with transparent gaps, not a soft blurred gray ellipse, solid black oval, glow, floating shadow glued to an elevated sole, or long floor stripe.\nBackground: genuine RGBA transparency everywhere outside character and ink shadow, including gaps between braids and limbs. No gray, white, black or checkerboard background, no halo or ground plane.\nRemove all lower-right lettering and its rounded rectangle, restore obscured purple boot and ivory outsole using surrounding contours. No text, watermark, badge or border.\nChange only line rendering, background/text removal and contact-shadow rendering; keep every other detail faithful to Image 1.\nInput Image 5: approved retouched frame 01, FINISH consistency reference only for outline weight, hatching, colors and thin ink shadow rendering. DO NOT copy Image 5's wide walking pose, foot positions, sock placements or limb overlap. Image 1's pose and sock arrangement are authoritative.\nPose-specific constraints: Frame 06: rear screen-left ivory-sock boot lifted behind, front screen-right black-sock boot planted, bent knees. Preserve lifted trailing leg and arm swing.",
+      "transparent_background": true,
+      "generated_source": "/Users/lizhe/.codex/generated_images/01a0f634-5a2d-7ce1-9fb7-7ca18dcc1ab3/exec-c1c71ce5-ad6e-4202-a100-ad696d9bebe0.png",
+      "saved_output": "/Users/lizhe/work/oneBeat/designs/braids-linework/2026-10-02/frame_06.png",
+      "verified": {
+        "width": 1254,
+        "height": 1254,
+        "mode": "RGBA",
+        "alpha_min": 0,
+        "alpha_max": 255,
+        "all_corner_alpha": 0
+      }
+    },
+    {
+      "frame": "07",
+      "edit_target": "/Users/lizhe/Downloads/onebeatprocessing/cycling/braids_frames/frame_07.png",
+      "reference_roles": [
+        "Image 1: sole edit target and pose/framing/identity authority",
+        "Images 2–4: existing cast linework style references",
+        "Image 5: revised frame 01 finish consistency only"
+      ],
+      "referenced_image_paths": [
+        "/Users/lizhe/Downloads/onebeatprocessing/cycling/braids_frames/frame_07.png",
+        "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/walk/mismatch/frame_01.png",
+        "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/walk/wave/frame_01.png",
+        "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/walk/lilroll/frame_01.png",
+        "/Users/lizhe/.codex/generated_images/01a0f634-5a2d-7ce1-9fb7-7ca18dcc1ab3/exec-84f263f6-ab53-4f8b-af05-3ceab9eb7b92.png"
+      ],
+      "prompt": "Use case: style-transfer.\nAsset type: one transparent PNG animation frame for the oneBeat existing comic character cast.\nPrimary request: EDIT Image 1 only. Retouch its linework to match the established characters in Images 2–4, remove the entire gray background and lower-right white rounded text box, reconstruct any boot portions obscured by the box, and replace the blurred floor shadow with hand-drawn ink contact-shadow strokes.\nInput roles: Image 1 is the sole pose, framing, identity and color authority. Images 2–4 are ink/linework and cel-shading style references only; do not borrow their characters, clothes, poses or props.\nStyle: bold, slightly irregular variable-weight black outer contours, thinner confident interior lines, restrained short directional hatching in folds, hair and footwear; flat comic cel colors with restrained shadow planes. Same approachable hand-drawn comic finish as the reference cast, not smooth generic vector art, not 3D, not painterly. Keep hatching sparse, avoid making black areas muddy.\nPreserve: this exact character's slate-blue skin, thick black twin braids with ivory bands and ivory fringe streak, cool half-lidded eye and natural right-facing profile, gaze forward toward screen-right (never at the viewer), mouthless face, ivory loose jersey with brick-red sleeves and dark collar, black loose shorts, asymmetric ivory/black socks and violet chunky lace-up boots with ivory soles and toe caps. Keep the target's actual sock placement. Preserve original joint angles, hand shapes, braid motion, leg overlap and shoe orientation. No redesign or new facial expression.\nComposition: one whole character, eye-level camera, same normalized head/body/foot positions, scale, margins and ground baseline as Image 1. Square canvas, preferably 1254 × 1254. Do not crop hair or shoes. No sheet or multiple views.\nShadows: at the original ground baseline draw low, tapered, horizontally running charcoal/black ink strokes with a few closely spaced fine hatch lines. Dense and short directly under the planted sole; lighter, thinner sparse projected strokes beneath an airborne foot at ground level. Shadow must visibly be LINE DRAWN with transparent gaps, not a soft blurred gray ellipse, solid black oval, glow, floating shadow glued to an elevated sole, or long floor stripe.\nBackground: genuine RGBA transparency everywhere outside character and ink shadow, including gaps between braids and limbs. No gray, white, black or checkerboard background, no halo or ground plane.\nRemove all lower-right lettering and its rounded rectangle, restore obscured purple boot and ivory outsole using surrounding contours. No text, watermark, badge or border.\nChange only line rendering, background/text removal and contact-shadow rendering; keep every other detail faithful to Image 1.\nInput Image 5: approved retouched frame 01, FINISH consistency reference only for outline weight, hatching, colors and thin ink shadow rendering. DO NOT copy Image 5's wide walking pose, foot positions, sock placements or limb overlap. Image 1's pose and sock arrangement are authoritative.\nPose-specific constraints: Frame 07: compact opposite passing pose: screen-right/front black-sock boot planted, rear ivory-sock boot lifted and partly hidden behind the leg. Retain near arm hanging down, tight leg overlap and braids.",
+      "transparent_background": true,
+      "generated_source": "/Users/lizhe/.codex/generated_images/01a0f634-5a2d-7ce1-9fb7-7ca18dcc1ab3/exec-96007009-8483-4211-809b-d565a4e511a0.png",
+      "saved_output": "/Users/lizhe/work/oneBeat/designs/braids-linework/2026-10-02/frame_07.png",
+      "verified": {
+        "width": 1254,
+        "height": 1254,
+        "mode": "RGBA",
+        "alpha_min": 0,
+        "alpha_max": 255,
+        "all_corner_alpha": 0
+      }
+    },
+    {
+      "frame": "08",
+      "edit_target": "/Users/lizhe/Downloads/onebeatprocessing/cycling/braids_frames/frame_08.png",
+      "reference_roles": [
+        "Image 1: sole edit target and pose/framing/identity authority",
+        "Images 2–4: existing cast linework style references",
+        "Image 5: revised frame 01 finish consistency only"
+      ],
+      "referenced_image_paths": [
+        "/Users/lizhe/Downloads/onebeatprocessing/cycling/braids_frames/frame_08.png",
+        "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/walk/mismatch/frame_01.png",
+        "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/walk/wave/frame_01.png",
+        "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/walk/lilroll/frame_01.png",
+        "/Users/lizhe/.codex/generated_images/01a0f634-5a2d-7ce1-9fb7-7ca18dcc1ab3/exec-84f263f6-ab53-4f8b-af05-3ceab9eb7b92.png"
+      ],
+      "prompt": "Use case: style-transfer.\nAsset type: one transparent PNG animation frame for the oneBeat existing comic character cast.\nPrimary request: EDIT Image 1 only. Retouch its linework to match the established characters in Images 2–4, remove the entire gray background and lower-right white rounded text box, reconstruct any boot portions obscured by the box, and replace the blurred floor shadow with hand-drawn ink contact-shadow strokes.\nInput roles: Image 1 is the sole pose, framing, identity and color authority. Images 2–4 are ink/linework and cel-shading style references only; do not borrow their characters, clothes, poses or props.\nStyle: bold, slightly irregular variable-weight black outer contours, thinner confident interior lines, restrained short directional hatching in folds, hair and footwear; flat comic cel colors with restrained shadow planes. Same approachable hand-drawn comic finish as the reference cast, not smooth generic vector art, not 3D, not painterly. Keep hatching sparse, avoid making black areas muddy.\nPreserve: this exact character's slate-blue skin, thick black twin braids with ivory bands and ivory fringe streak, cool half-lidded eye and natural right-facing profile, gaze forward toward screen-right (never at the viewer), mouthless face, ivory loose jersey with brick-red sleeves and dark collar, black loose shorts, asymmetric ivory/black socks and violet chunky lace-up boots with ivory soles and toe caps. Keep the target's actual sock placement. Preserve original joint angles, hand shapes, braid motion, leg overlap and shoe orientation. No redesign or new facial expression.\nComposition: one whole character, eye-level camera, same normalized head/body/foot positions, scale, margins and ground baseline as Image 1. Square canvas, preferably 1254 × 1254. Do not crop hair or shoes. No sheet or multiple views.\nShadows: at the original ground baseline draw low, tapered, horizontally running charcoal/black ink strokes with a few closely spaced fine hatch lines. Dense and short directly under the planted sole; lighter, thinner sparse projected strokes beneath an airborne foot at ground level. Shadow must visibly be LINE DRAWN with transparent gaps, not a soft blurred gray ellipse, solid black oval, glow, floating shadow glued to an elevated sole, or long floor stripe.\nBackground: genuine RGBA transparency everywhere outside character and ink shadow, including gaps between braids and limbs. No gray, white, black or checkerboard background, no halo or ground plane.\nRemove all lower-right lettering and its rounded rectangle, restore obscured purple boot and ivory outsole using surrounding contours. No text, watermark, badge or border.\nChange only line rendering, background/text removal and contact-shadow rendering; keep every other detail faithful to Image 1.\nInput Image 5: approved retouched frame 01, FINISH consistency reference only for outline weight, hatching, colors and thin ink shadow rendering. DO NOT copy Image 5's wide walking pose, foot positions, sock placements or limb overlap. Image 1's pose and sock arrangement are authoritative.\nPose-specific constraints: Frame 08: screen-left/back black-sock boot planted, screen-right/front ivory-sock boot elevated with forward knee raised. Preserve source arm swing and each foot's angle.",
+      "transparent_background": true,
+      "generated_source": "/Users/lizhe/.codex/generated_images/01a0f634-5a2d-7ce1-9fb7-7ca18dcc1ab3/exec-273afa90-67c8-4853-b355-9d600fe06962.png",
+      "saved_output": "/Users/lizhe/work/oneBeat/designs/braids-linework/2026-10-02/frame_08.png",
+      "verified": {
+        "width": 1254,
+        "height": 1254,
+        "mode": "RGBA",
+        "alpha_min": 0,
+        "alpha_max": 255,
+        "all_corner_alpha": 0
+      }
+    }
+  ]
+}

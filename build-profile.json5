@@ -5,13 +5,13 @@
         "name": "default",
         "type": "HarmonyOS",
         "material": {
-          "certpath": "/Users/lizhe/.ohos/config/default_oneBeat_G76brjwnnRKiP0WSHqGO9bjtPkZpfHkbQmB4FhqnPrw=.cer",
-          "keyAlias": "debugKey",
-          "keyPassword": "0000001B0B2CCE340F625E20ADA67AA10B3FF7DE1C415FFCFF549E1B162C5D84A224D358AB5ABA6CE2B4BE",
-          "profile": "/Users/lizhe/.ohos/config/default_oneBeat_G76brjwnnRKiP0WSHqGO9bjtPkZpfHkbQmB4FhqnPrw=.p7b",
+          "storeFile": "/Users/lizhe/work/oneBeatExtraFiles/onebeat_debug.p12",
+          "storePassword": "0000001A90F237EA083229C4149F2A506AFC52DE1BACFCDAFE5C910F6A7468ACC35A5430474167789558",
+          "keyAlias": "onebeat_debug",
+          "keyPassword": "0000001AB20652C927E522067A1E8DAB5E88942F9FADF411D309FD82673AB7A828720867A279D0B8B2A5",
           "signAlg": "SHA256withECDSA",
-          "storeFile": "/Users/lizhe/.ohos/config/default_oneBeat_G76brjwnnRKiP0WSHqGO9bjtPkZpfHkbQmB4FhqnPrw=.p12",
-          "storePassword": "0000001B63C98C7F871D9C11FD2998CA177647008B15695DDDE8FAF29DCEBE677530FCA3D808372B2C562E"
+          "profile": "/Users/lizhe/work/oneBeatExtraFiles/onebeat_debugDebug.p7b",
+          "certpath": "/Users/lizhe/work/oneBeatExtraFiles/onebeat_debug.cer"
         }
       }
     ],

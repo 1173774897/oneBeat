@@ -1,7 +1,7 @@
 export const DOMAIN: number = 0x0001;
 export const TAG: string = 'OneBeat';
 export const SESSION_TCP_PORT: number = 9527;
-export const PROTOCOL_VERSION: number = 1;
+export const PROTOCOL_VERSION: number = 2;
 /** 给音频渲染器和队员设备预留的同步准备时间，之后立即播放准备拍。 */
 export const TRANSPORT_PREROLL_MS: number = 350;
 /** 正式行进前播放的准备拍小节数。 */

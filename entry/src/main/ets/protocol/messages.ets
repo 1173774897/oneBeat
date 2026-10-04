@@ -11,6 +11,7 @@ export type MessageType =
   | 'MEMBER_UPDATE'
   | 'CLIENT_HELLO'
   | 'CLIENT_LEAVE'
+  | 'RANDOM_PREVIEW_COMPLETE'
   | 'LOBBY_READY';
 
 export type TransportState = 'idle' | 'countdown' | 'playing' | 'paused';
@@ -19,7 +20,13 @@ export interface SessionMember {
   id: string;
   displayName: string;
   avatarKey: string;
-  /** 回声影偶进入舞台后由队长分配；准备页不展示该颜色。 */
+  /** 随机角色由队长在大厅确定；大厅只显示剪影，行进页才读取真身。 */
+  resolvedAvatarKey?: string;
+  /** 每次随机抽取的队长版本；同一人物再次抽中也必须使用新版本。 */
+  randomDrawId?: number;
+  /** 胶片完成后统一显示剪影的队长单调时刻，不提前揭晓配色。 */
+  randomAvatarRevealAtLeaderMs?: number;
+  /** 随机角色的配色下标由队长在大厅分配，同角色优先不重复。 */
   colorSlot?: number;
   /** 队员在组队大厅已点「准备」 */
   lobbyReady?: boolean;
@@ -97,6 +104,11 @@ export interface ClientLeavePayload {
 
 export interface LobbyReadyPayload {
   ready: boolean;
+}
+
+/** 完成通知只携带抽取版本；队长从已认证连接推断队员与人物。 */
+export interface RandomPreviewCompletePayload {
+  drawId: number;
 }
 
 export interface MemberAvatarPayload {

@@ -1,6 +1,15 @@
 import { promptAction, router } from '@kit.ArkUI';
 import { AppSession } from '../app/AppSession';
-import { CORAL, INK, LILAC, PAPER, TEAL } from '../components/ComicKit';
+import {
+  CORAL,
+  INK,
+  LILAC,
+  PAPER,
+  WHITE,
+  CARD_SHADOW,
+  CONTROL_SHADOW
+} from '../components/ComicKit';
+import { isProDrumMachineAccessible } from '../store/EntitlementStore';
 import {
   buildDrumPattern,
   defaultDrumProgram,
@@ -70,6 +79,11 @@ struct DrumMachinePage {
   private contextStates: DrumContextState[] = [];
 
   aboutToAppear(): void {
+    if (!isProDrumMachineAccessible()) {
+      promptAction.showToast({ message: 'PRO 定制鼓机包含在畅游月卡中' });
+      router.back();
+      return;
+    }
     this.loadSavedPrograms();
     const controller = AppSession.get()?.controller;
     let program = defaultDrumProgram();
@@ -744,12 +758,12 @@ struct DrumMachinePage {
       Button({ type: ButtonType.Normal }) {
         Text('-').fontSize(22).fontWeight(900).fontColor(INK).lineHeight(24)
       }.width(34).height(32).padding(0).backgroundColor(PAPER)
-        .border({ width: 1, color: INK }).borderRadius(4).onClick(minus)
+        .border({ width: 1, color: INK }).borderRadius(4).shadow(CONTROL_SHADOW).onClick(minus)
       Text(`${value}`).width(30).textAlign(TextAlign.Center).fontSize(19).fontWeight(900)
       Button({ type: ButtonType.Normal }) {
         Text('+').fontSize(21).fontWeight(900).fontColor(INK).lineHeight(24)
       }.width(34).height(32).padding(0).backgroundColor(PAPER)
-        .border({ width: 1, color: INK }).borderRadius(4).onClick(plus)
+        .border({ width: 1, color: INK }).borderRadius(4).shadow(CONTROL_SHADOW).onClick(plus)
     }
   }
 
@@ -769,11 +783,11 @@ struct DrumMachinePage {
         }.width('100%').height(32).padding({ left: 10, right: 8 }).fontColor(INK)
         .backgroundColor(this.sections[sectionIndex].customRows === undefined &&
           this.sections[sectionIndex].patternIndex === patternIndex ? CORAL : PAPER)
-        .border({ width: 1, color: INK }).borderRadius(4)
+        .border({ width: 1, color: INK }).borderRadius(4).shadow(CONTROL_SHADOW)
         .onClick(() => this.updatePattern(sectionIndex, patternIndex))
       })
     }.width(this.dropdownMenuWidth).padding({ left: 4, right: 4, top: 5, bottom: 5 })
-    .backgroundColor(PAPER).border({ width: 1.5, color: INK }).borderRadius(6).clip(true)
+    .backgroundColor(PAPER).border({ width: 1.5, color: INK }).borderRadius(6).shadow(CARD_SHADOW)
   }
 
   @Builder
@@ -792,11 +806,11 @@ struct DrumMachinePage {
         }.width('100%').height(32).padding({ left: 10, right: 8 }).fontColor(INK)
         .backgroundColor(this.sections[sectionIndex].customFillRows === undefined &&
           this.sections[sectionIndex].fillIndex === fillIndex ? '#FFD36A' : PAPER)
-        .border({ width: 1, color: INK }).borderRadius(4)
+        .border({ width: 1, color: INK }).borderRadius(4).shadow(CONTROL_SHADOW)
         .onClick(() => this.updateFill(sectionIndex, fillIndex))
       })
     }.width(this.dropdownMenuWidth).padding({ left: 4, right: 4, top: 5, bottom: 5 })
-    .backgroundColor(PAPER).border({ width: 1.5, color: INK }).borderRadius(6).clip(true)
+    .backgroundColor(PAPER).border({ width: 1.5, color: INK }).borderRadius(6).shadow(CARD_SHADOW)
   }
 
   @Builder
@@ -813,11 +827,11 @@ struct DrumMachinePage {
           }.width('100%')
         }.width('100%').height(32).padding({ left: 10, right: 8 }).fontColor(INK)
         .backgroundColor(this.sections[sectionIndex].fillEvery === frequency ? LILAC : PAPER)
-        .border({ width: 1, color: INK }).borderRadius(4)
+        .border({ width: 1, color: INK }).borderRadius(4).shadow(CONTROL_SHADOW)
         .onClick(() => this.selectFillEvery(sectionIndex, optionIndex))
       })
     }.width(this.dropdownMenuWidth).padding({ left: 4, right: 4, top: 5, bottom: 5 })
-    .backgroundColor(PAPER).border({ width: 1.5, color: INK }).borderRadius(6).clip(true)
+    .backgroundColor(PAPER).border({ width: 1.5, color: INK }).borderRadius(6).shadow(CARD_SHADOW)
   }
 
   @Builder
@@ -854,7 +868,7 @@ struct DrumMachinePage {
         Button({ type: ButtonType.Normal }) {
           Text('×').fontSize(20).fontWeight(900).fontColor('#D83A2E').lineHeight(22)
         }.width(28).height(28).padding(0).backgroundColor('#FFF1E8')
-          .border({ width: 1, color: INK }).borderRadius(5)
+          .border({ width: 1, color: INK }).borderRadius(5).shadow(CONTROL_SHADOW)
           .onClick(() => this.requestDeleteSection(index))
         Text(this.selectedSection === index ? '⌃' : '⌄').fontSize(22).width(30).textAlign(TextAlign.Center)
           .onClick(() => this.selectedSection = index)
@@ -871,16 +885,16 @@ struct DrumMachinePage {
             }.width('100%')
           }.id(`dm-pattern-${index}`).layoutWeight(1).height(34).padding({ left: 8, right: 7 })
           .fontColor(INK).backgroundColor(PAPER)
-          .border({ width: 1, color: INK }).borderRadius(5)
+          .border({ width: 1, color: INK }).borderRadius(5).shadow(CONTROL_SHADOW)
           .onClick(() => this.openDropdownFromAnchor(`menu-pattern-${index}`, `dm-pattern-${index}`, 126))
           Button(this.previewTarget === `pattern-${index}` ? '停止' : '试听', { type: ButtonType.Normal })
             .width(54).height(34).padding(0).fontSize(13).fontWeight(FontWeight.Bold)
-            .fontColor(INK).backgroundColor(LILAC).border({ width: 1, color: INK }).borderRadius(5)
+            .fontColor(INK).backgroundColor(LILAC).border({ width: 1, color: INK }).borderRadius(5).shadow(CONTROL_SHADOW)
             .enabled(this.previewTarget.length === 0 || this.previewTarget === `pattern-${index}`)
             .onClick(() => { void this.previewSection(index, false); })
           Button('编辑', { type: ButtonType.Normal }).width(54).height(34).padding(0)
             .fontSize(13).fontWeight(FontWeight.Bold)
-            .fontColor(INK).backgroundColor(LILAC).border({ width: 1, color: INK }).borderRadius(5)
+            .fontColor(INK).backgroundColor(LILAC).border({ width: 1, color: INK }).borderRadius(5).shadow(CONTROL_SHADOW)
             .onClick(() => this.openEditor(index, 0))
         }.width('100%')
         Row({ space: 8 }) {
@@ -901,16 +915,16 @@ struct DrumMachinePage {
             }.width('100%')
           }.id(`dm-fill-${index}`).layoutWeight(1).height(34).padding({ left: 8, right: 7 })
           .fontColor(INK).backgroundColor(PAPER)
-          .border({ width: 1, color: INK }).borderRadius(5)
+          .border({ width: 1, color: INK }).borderRadius(5).shadow(CONTROL_SHADOW)
           .onClick(() => this.openDropdownFromAnchor(`menu-fill-${index}`, `dm-fill-${index}`, 126))
           Button(this.previewTarget === `fill-${index}` ? '停止' : '试听', { type: ButtonType.Normal })
             .width(54).height(34).padding(0).fontSize(13).fontWeight(FontWeight.Bold)
-            .fontColor(INK).backgroundColor(LILAC).border({ width: 1, color: INK }).borderRadius(5)
+            .fontColor(INK).backgroundColor(LILAC).border({ width: 1, color: INK }).borderRadius(5).shadow(CONTROL_SHADOW)
             .enabled(this.previewTarget.length === 0 || this.previewTarget === `fill-${index}`)
             .onClick(() => { void this.previewSection(index, true); })
           Button('编辑', { type: ButtonType.Normal }).width(54).height(34).padding(0)
             .fontSize(13).fontWeight(FontWeight.Bold)
-            .fontColor(INK).backgroundColor(LILAC).border({ width: 1, color: INK }).borderRadius(5)
+            .fontColor(INK).backgroundColor(LILAC).border({ width: 1, color: INK }).borderRadius(5).shadow(CONTROL_SHADOW)
             .onClick(() => this.openEditor(index, 1))
         }.width('100%')
         Row({ space: 7 }) {
@@ -923,7 +937,7 @@ struct DrumMachinePage {
             }.width('100%')
           }.id(`dm-frequency-${index}`).width(122).height(34).padding({ left: 8, right: 7 })
           .fontColor(INK).backgroundColor(PAPER)
-          .border({ width: 1, color: INK }).borderRadius(5)
+          .border({ width: 1, color: INK }).borderRadius(5).shadow(CONTROL_SHADOW)
           .onClick(() => this.openDropdownFromAnchor(`menu-frequency-${index}`, `dm-frequency-${index}`, 122))
           Blank()
         }.width('100%')
@@ -931,7 +945,7 @@ struct DrumMachinePage {
     }
     .width('100%').padding(12).backgroundColor('#FFFDF7')
     .border({ width: 1.5, color: INK }).borderRadius(7)
-    .shadow({ radius: 0, offsetX: 2, offsetY: 3, color: this.selectedSection === index ? CORAL : '#D8D0C1' })
+    .shadow(CARD_SHADOW)
   }
 
   @Builder
@@ -947,8 +961,8 @@ struct DrumMachinePage {
           Text(this.savedProgramStyle(saved)).fontSize(10).fontColor('#615B53')
         }.width('100%')
         Button('载入', { type: ButtonType.Normal }).width(48).height(20).padding(0).fontSize(9)
-          .fontWeight(FontWeight.Bold).fontColor(INK).backgroundColor('#BDE9E3')
-          .border({ width: 1, color: INK }).borderRadius(10)
+          .fontWeight(FontWeight.Bold).fontColor(INK).backgroundColor(WHITE)
+          .border({ width: 1, color: INK }).borderRadius(10).shadow(CONTROL_SHADOW)
           .onClick(() => this.loadSavedProgram(saved))
       }.width('100%').height('100%').padding(9)
       Button('×', { type: ButtonType.Normal }).width(23).height(23).padding(0).fontSize(18).fontWeight(900)
@@ -958,7 +972,7 @@ struct DrumMachinePage {
     }
     .width(116).height(82).backgroundColor('#FFFDF7')
     .border({ width: 1.3, color: INK }).borderRadius(6)
-    .shadow({ radius: 0, offsetX: 2, offsetY: 2, color: '#D4CBBE' })
+    .shadow(CARD_SHADOW)
   }
 
   @Builder
@@ -974,14 +988,14 @@ struct DrumMachinePage {
         Text('给这套鼓机编排起一个名字').fontSize(13).fontWeight(FontWeight.Bold).width('100%')
         TextInput({ text: this.saveName, placeholder: '例如：夜跑推进' })
           .height(44).fontSize(15).fontColor(INK).backgroundColor(PAPER)
-          .border({ width: 1.5, color: INK }).borderRadius(5).maxLength(16)
+          .border({ width: 1.5, color: INK }).borderRadius(5).shadow(CONTROL_SHADOW).maxLength(16)
           .onChange((value: string) => this.saveName = value)
         Row({ space: 9 }) {
           Button('取消', { type: ButtonType.Normal }).layoutWeight(1).height(42).fontSize(13).fontWeight(900)
-            .fontColor(INK).backgroundColor(PAPER).border({ width: 1.5, color: INK }).borderRadius(5)
+            .fontColor(INK).backgroundColor(PAPER).border({ width: 1.5, color: INK }).borderRadius(5).shadow(CONTROL_SHADOW)
             .onClick(() => this.saveDialogVisible = false)
           Button('保存', { type: ButtonType.Normal }).layoutWeight(1.4).height(42).fontSize(13).fontWeight(900)
-            .fontColor(INK).backgroundColor(CORAL).border({ width: 1.5, color: INK }).borderRadius(5)
+            .fontColor(INK).backgroundColor(CORAL).border({ width: 1.5, color: INK }).borderRadius(5).shadow(CONTROL_SHADOW)
             .onClick(() => this.confirmNamedSave())
         }.width('100%')
       }
@@ -998,16 +1012,17 @@ struct DrumMachinePage {
       Column({ space: 12 }) {
         Text('同名警告').fontSize(12).fontWeight(900).fontColor(PAPER).backgroundColor(INK)
           .padding({ left: 9, right: 9, top: 4, bottom: 4 }).rotate({ angle: -3 })
+          .shadow(CONTROL_SHADOW)
         Text('这个名字已经存在').fontSize(25).fontWeight(900).fontStyle(FontStyle.Italic).width('100%')
         Text(`继续保存会覆盖「${this.saveName.trim()}」的原有编排。`)
           .fontSize(13).fontWeight(FontWeight.Bold).lineHeight(20).width('100%')
         Divider().strokeWidth(1).color('#C8BFB1')
         Row({ space: 9 }) {
           Button('返回改名', { type: ButtonType.Normal }).layoutWeight(1).height(44).fontSize(13).fontWeight(900)
-            .fontColor(INK).backgroundColor(LILAC).border({ width: 1.5, color: INK }).borderRadius(5)
+            .fontColor(INK).backgroundColor(LILAC).border({ width: 1.5, color: INK }).borderRadius(5).shadow(CONTROL_SHADOW)
             .onClick(() => this.returnToRename())
           Button('覆盖保存', { type: ButtonType.Normal }).layoutWeight(1).height(44).fontSize(13).fontWeight(900)
-            .fontColor(INK).backgroundColor(CORAL).border({ width: 1.5, color: INK }).borderRadius(5)
+            .fontColor(INK).backgroundColor(CORAL).border({ width: 1.5, color: INK }).borderRadius(5).shadow(CONTROL_SHADOW)
             .onClick(() => this.persistNamedSave(true))
         }.width('100%')
       }
@@ -1057,7 +1072,7 @@ struct DrumMachinePage {
                 ForEach(this.editorStepIndexes(), (step: number) => {
                   Button('', { type: ButtonType.Normal }).layoutWeight(1).height(25).padding(0).borderRadius(3)
                     .backgroundColor(this.editorRows[trackIndex].charAt(step) === '1' ?
-                      (step % (this.beatUnit === 8 ? 2 : 4) === 0 ? CORAL : TEAL) : '#E9E2D5')
+                      (step % (this.beatUnit === 8 ? 2 : 4) === 0 ? CORAL : LILAC) : '#E9E2D5')
                     .border({ width: 1, color: INK }).onClick(() => this.toggleStep(trackIndex, step))
                 })
               }.layoutWeight(1)
@@ -1090,9 +1105,10 @@ struct DrumMachinePage {
             Text('定制鼓机').fontSize(30).fontWeight(900).fontStyle(FontStyle.Italic)
             Text(' PRO ').fontSize(10).fontWeight(FontWeight.Bold).fontColor(PAPER).backgroundColor(INK)
               .padding({ left: 5, right: 5, top: 3, bottom: 3 }).rotate({ angle: -4 })
+              .shadow(CONTROL_SHADOW)
             Blank()
             Button('保存', { type: ButtonType.Normal }).height(36).fontColor(INK).backgroundColor(CORAL)
-              .border({ width: 1.5, color: INK }).borderRadius(18).onClick(() => this.openSaveDialog())
+              .border({ width: 1.5, color: INK }).borderRadius(18).shadow(CONTROL_SHADOW).onClick(() => this.openSaveDialog())
           }.width('100%')
           Divider().strokeWidth(1).color('#D4CBBE')
           Row() {
@@ -1102,7 +1118,7 @@ struct DrumMachinePage {
               Text('横滑查看更多').fontSize(10).fontWeight(FontWeight.Bold)
               Text('→').fontSize(16).fontWeight(900)
             }.height(26).padding({ left: 9, right: 8 }).backgroundColor(LILAC)
-            .border({ width: 1, color: INK }).borderRadius(13)
+            .border({ width: 1, color: INK }).borderRadius(13).shadow(CONTROL_SHADOW)
           }.width('100%')
           Scroll() {
             Row({ space: 8 }) {
@@ -1112,7 +1128,7 @@ struct DrumMachinePage {
                   Text(style.caption).fontSize(9)
                 }.padding({ left: 12, right: 12, top: 7, bottom: 7 })
                 .backgroundColor(this.styleKey === style.key ? style.color : PAPER)
-                .border({ width: 1, color: INK }).borderRadius(5)
+                .border({ width: 1, color: INK }).borderRadius(5).shadow(CONTROL_SHADOW)
                 .onClick(() => this.chooseStyle(style.key))
               }, (style: DrumStyle) => style.key)
             }.padding({ bottom: 4 })
@@ -1123,7 +1139,7 @@ struct DrumMachinePage {
             ForEach([4, 3, 6], (beats: number) => {
               Button(`${beats}/${beats === 6 ? 8 : 4}`, { type: ButtonType.Normal }).layoutWeight(1).height(38)
                 .fontColor(INK).backgroundColor(this.beatsPerBar === beats ? CORAL : PAPER)
-                .border({ width: 1, color: INK }).borderRadius(4)
+                .border({ width: 1, color: INK }).borderRadius(4).shadow(CONTROL_SHADOW)
               .onClick(() => this.chooseMeter(beats, beats === 6 ? 8 : 4))
             })
           }.width('100%')
@@ -1133,7 +1149,7 @@ struct DrumMachinePage {
             Button({ type: ButtonType.Normal }) {
               Text('−').fontSize(22).fontWeight(900).fontColor(INK).lineHeight(24)
             }.width(38).height(38).padding(0).backgroundColor(PAPER)
-              .border({ width: 1, color: INK }).borderRadius(4)
+              .border({ width: 1, color: INK }).borderRadius(4).shadow(CONTROL_SHADOW)
               .enabled(this.isLeader() && this.bpm > 40)
               .onClick(() => { void this.changeBpm(-1); })
             Text(`${this.bpm}`).layoutWeight(1).textAlign(TextAlign.Center)
@@ -1141,7 +1157,7 @@ struct DrumMachinePage {
             Button({ type: ButtonType.Normal }) {
               Text('+').fontSize(21).fontWeight(900).fontColor(INK).lineHeight(24)
             }.width(38).height(38).padding(0).backgroundColor(PAPER)
-              .border({ width: 1, color: INK }).borderRadius(4)
+              .border({ width: 1, color: INK }).borderRadius(4).shadow(CONTROL_SHADOW)
               .enabled(this.isLeader() && this.bpm < 240)
               .onClick(() => { void this.changeBpm(1); })
           }.width('100%')
@@ -1157,16 +1173,16 @@ struct DrumMachinePage {
             this.sectionCard(index)
           }, (section: DrumSection) => `${section.id}-${section.patternIndex}-${section.repeats}-${section.fillEvery}`)
           Button('+ 新增段落', { type: ButtonType.Normal }).width('100%').height(46).fontSize(17).fontWeight(900)
-            .fontColor(INK).backgroundColor(LILAC).border({ width: 1.5, color: INK }).borderRadius(6)
+            .fontColor(INK).backgroundColor(LILAC).border({ width: 1.5, color: INK }).borderRadius(6).shadow(CONTROL_SHADOW)
             .onClick(() => this.addSection())
           Row({ space: 8 }) {
             Button(this.previewTarget === 'song' ? '■ 停止整曲' : '▶ 试听整曲',
               { type: ButtonType.Normal }).layoutWeight(1).height(48)
-              .fontColor(INK).backgroundColor('#BDE9E3').border({ width: 1.5, color: INK }).borderRadius(6)
+              .fontColor(INK).backgroundColor(WHITE).border({ width: 1.5, color: INK }).borderRadius(6).shadow(CONTROL_SHADOW)
               .enabled(this.previewTarget.length === 0 || this.previewTarget === 'song')
               .onClick(() => { void this.togglePreview(); })
             Button(this.saving ? '应用中…' : '应用到队伍 ›', { type: ButtonType.Normal }).layoutWeight(1.4).height(48)
-              .fontColor(INK).fontWeight(900).backgroundColor(CORAL).border({ width: 1.5, color: INK }).borderRadius(6)
+              .fontColor(INK).fontWeight(900).backgroundColor(CORAL).border({ width: 1.5, color: INK }).borderRadius(6).shadow(CONTROL_SHADOW)
               .enabled(!this.saving).onClick(() => { void this.applyToTeam(); })
           }.width('100%')
           Text('节奏、加花与段落会作为轻量事件同步；每台设备使用本地鼓组采样播放。')
@@ -1181,7 +1197,7 @@ struct DrumMachinePage {
             Row() {
               Text('点击右上角“保存”，命名后会出现在这里。').fontSize(12).fontColor('#716A61')
             }.width('100%').height(58).padding({ left: 12, right: 12 })
-            .backgroundColor('#FFFDF7').border({ width: 1, color: '#C8BFB1' }).borderRadius(6)
+            .backgroundColor('#FFFDF7').border({ width: 1, color: '#C8BFB1' }).borderRadius(6).shadow(CONTROL_SHADOW)
           } else {
             Scroll() {
               Row({ space: 9 }) {

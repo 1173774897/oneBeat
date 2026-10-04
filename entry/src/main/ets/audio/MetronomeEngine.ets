@@ -18,6 +18,7 @@ import { DrumSampleBank } from './DrumSampleBank';
 const SAMPLE_RATE: number = 44100;
 const BYTES_PER_SAMPLE: number = 2;
 const AUDIO_PREROLL_MS: number = 220;
+const AUDIO_CALLBACK_STALL_MS: number = 1500;
 
 export type BeatCallback = (beatIndex: number, beatInBar: number, scheduledAtMonoMs: number) => void;
 
@@ -42,6 +43,11 @@ interface RenderedBar {
 export class MetronomeEngine {
   private renderer: audio.AudioRenderer | undefined = undefined;
   private rendererStarted: boolean = false;
+  private rendererOperation: Promise<void> = Promise.resolve();
+  private recoveringAudio: boolean = false;
+  private writeCallbackCount: number = 0;
+  private observedWriteCallbackCount: number = 0;
+  private lastWriteProgressMs: number = 0;
   private accentBuffer: ArrayBuffer = ClickSound.buildAccentBuffer();
   private weakBuffer: ArrayBuffer = ClickSound.buildWeakBuffer();
   private beatCallback: BeatCallback = () => {
@@ -63,6 +69,7 @@ export class MetronomeEngine {
   private customProgramRaw: string = '';
   private customProgram: DrumProgram | undefined = undefined;
   private customProgramLooping: boolean = true;
+  private configurationToken: number = 0;
   private sampleBank: Map<string, ArrayBuffer> = new Map();
   private pendingSequence: RenderedBar[] = [];
   private pendingSequenceLooping: boolean = true;
@@ -95,11 +102,14 @@ export class MetronomeEngine {
   private lastTimestampQueryMonoMs: number = -1;
 
   private readonly writeDataCallback: audio.AudioRendererWriteDataCallback = (data: ArrayBuffer) => {
+    this.writeCallbackCount++;
     this.fillAudioData(data);
     return audio.AudioDataCallbackResult.VALID;
   };
 
   configure(rhythm: number, soundId: number): void {
+    this.configurationToken++;
+    const leavingProgram = this.customProgram !== undefined;
     const rhythmChanged = this.rhythm !== rhythm;
     const soundChanged = this.soundId !== soundId;
     this.rhythm = rhythm;
@@ -115,17 +125,23 @@ export class MetronomeEngine {
     if (rhythmChanged) {
       this.pattern = BuiltInRhythmFactory.create(this.rhythm, this.beatsPerBar);
     }
-    if (rhythmChanged || soundChanged || this.pendingSequence.length === 0) {
+    if (leavingProgram || rhythmChanged || soundChanged || this.pendingSequence.length === 0) {
       this.rebuildPendingSequence([this.pattern], true);
     }
   }
 
   async configureProgram(raw: string, looping: boolean = true): Promise<void> {
+    // Even an already-applied request must invalidate older sample loads: a
+    // late one-shot preview must never replace the walking transport's loop.
+    const token = ++this.configurationToken;
     if (raw.length === 0 || (raw === this.customProgramRaw && looping === this.customProgramLooping)) {
       return;
     }
     const program = parseDrumProgram(raw);
     const bank = await DrumSampleBank.loadStyle(program.styleKey);
+    if (token !== this.configurationToken) {
+      return;
+    }
     this.customProgramRaw = raw;
     this.customProgram = program;
     this.customProgramLooping = looping;
@@ -230,6 +246,20 @@ export class MetronomeEngine {
       rendererInfo: rendererInfo
     });
     created.on('writeData', this.writeDataCallback);
+    created.on('stateChange', (state: audio.AudioState) => {
+      if (this.renderer !== created) { return; }
+      console.info(`MetronomeEngine renderer state=${state}, running=${this.running}, token=${this.runToken}`);
+      this.rendererStarted = state === audio.AudioState.STATE_RUNNING;
+    });
+    created.on('audioInterrupt', (event: audio.InterruptEvent) => {
+      if (this.renderer !== created) { return; }
+      console.warn(`MetronomeEngine audio interrupt: hint=${event.hintType}, force=${event.forceType}, token=${this.runToken}`);
+      // A forced pause must remain paused until the system grants focus back.
+      // Restarting immediately would compete with calls or other audio owners.
+      if (event.hintType === audio.InterruptHint.INTERRUPT_HINT_RESUME && this.running) {
+        void this.recoverAudio('focus resumed');
+      }
+    });
     this.renderer = created;
   }
 
@@ -241,6 +271,8 @@ export class MetronomeEngine {
     if (renderer !== undefined) {
       try {
         renderer.off('writeData', this.writeDataCallback);
+        renderer.off('stateChange');
+        renderer.off('audioInterrupt');
         await renderer.release();
       } catch (err) {
         const e = err as BusinessError;
@@ -324,11 +356,16 @@ export class MetronomeEngine {
 
   private async startAudioStream(localStart: number, beatIndex: number,
     countInBeats: number, token: number): Promise<void> {
+    await this.queueRendererOperation(() => this.startAudioStreamNow(localStart, beatIndex, countInBeats, token));
+  }
+
+  private async startAudioStreamNow(localStart: number, beatIndex: number,
+    countInBeats: number, token: number): Promise<void> {
     const renderer = this.renderer;
     if (renderer === undefined || token !== this.runToken || !this.running) {
       return;
     }
-    await this.haltRenderer();
+    await this.haltRendererNow();
     if (token !== this.runToken || !this.running) {
       return;
     }
@@ -339,11 +376,16 @@ export class MetronomeEngine {
     } catch (_e) {
       // Some older renderers do not expose flush in the stopped state.
     }
+    if (token !== this.runToken || !this.running) { return; }
 
+    this.resetAudioTimestampState();
     this.prepareAudioCursor(beatIndex, countInBeats);
     this.audioLeadSamples = Math.max(0,
       Math.round((localStart - MonotonicClock.nowMs()) * SAMPLE_RATE / 1000));
-    this.audioTimelineLeadFrames = this.audioLeadSamples;
+    // Recovery rejoins the current beat while the original visual/session
+    // timeline keeps advancing; flushed hardware frames start from zero again.
+    this.audioTimelineLeadFrames = this.audioLeadSamples -
+      Math.round((localStart - this.transportStartLocalMs) * SAMPLE_RATE / 1000);
     if (rendererPositionReset) {
       this.audioTimestampBaseFrame = 0;
       this.audioTimestampBaseReady = true;
@@ -356,6 +398,8 @@ export class MetronomeEngine {
         return;
       }
       this.rendererStarted = true;
+      this.observedWriteCallbackCount = this.writeCallbackCount;
+      this.lastWriteProgressMs = MonotonicClock.nowMs();
       this.primeAudioTimestamp(renderer);
       try {
         this.lastUnderflowCount = renderer.getUnderflowCountSync();
@@ -370,8 +414,21 @@ export class MetronomeEngine {
   }
 
   private async haltRenderer(): Promise<void> {
+    await this.queueRendererOperation(() => this.haltRendererNow());
+  }
+
+  private queueRendererOperation(operation: () => Promise<void>): Promise<void> {
+    // A delayed pause/stop must finish before the next start, otherwise it can
+    // stop the new stream after the UI has already resumed walking.
+    const queued = this.rendererOperation.then(operation, operation);
+    this.rendererOperation = queued.catch(() => {});
+    return queued;
+  }
+
+  private async haltRendererNow(): Promise<void> {
     const renderer = this.renderer;
-    if (renderer === undefined || !this.rendererStarted) {
+    if (renderer === undefined || (renderer.state !== audio.AudioState.STATE_RUNNING &&
+      renderer.state !== audio.AudioState.STATE_PAUSED)) {
       return;
     }
     this.rendererStarted = false;
@@ -405,6 +462,7 @@ export class MetronomeEngine {
     }
     interval = 60000 / this.transportBpm;
     this.nextBeatAtMs += interval;
+    this.checkAudioProgress(now);
     const wait = Math.max(0, this.nextBeatAtMs - MonotonicClock.nowMs());
     this.timerId = setTimeout(() => this.emitBeatAndScheduleNext(token), wait);
   }
@@ -634,6 +692,43 @@ export class MetronomeEngine {
       }
     } catch (_e) {
       // Diagnostics must never disturb the transport.
+    }
+  }
+
+  private checkAudioProgress(nowMs: number): void {
+    const renderer = this.renderer;
+    if (!this.audioStreaming || renderer === undefined || this.recoveringAudio ||
+      renderer.state !== audio.AudioState.STATE_RUNNING || this.activeSequenceFinished) {
+      return;
+    }
+    if (this.observedWriteCallbackCount !== this.writeCallbackCount) {
+      this.observedWriteCallbackCount = this.writeCallbackCount;
+      this.lastWriteProgressMs = nowMs;
+      return;
+    }
+    if (nowMs - this.lastWriteProgressMs >= AUDIO_CALLBACK_STALL_MS) {
+      void this.recoverAudio(`writeData stalled for ${Math.round(nowMs - this.lastWriteProgressMs)}ms`);
+    }
+  }
+
+  private async recoverAudio(reason: string): Promise<void> {
+    if (!this.running || this.recoveringAudio || this.activeSequenceFinished) { return; }
+    this.recoveringAudio = true;
+    const token = this.runToken;
+    const now = MonotonicClock.nowMs();
+    const interval = 60000 / this.transportBpm;
+    const skipped = Math.max(0, Math.ceil((now - this.nextBeatAtMs) / interval));
+    const beatIndex = this.beatIndex + skipped;
+    const localStart = this.nextBeatAtMs + skipped * interval;
+    const countInBeats = Math.max(0,
+      this.transportStartBeatIndex + this.transportCountInBeats - beatIndex);
+    console.warn(`MetronomeEngine audio recovery: ${reason}, beat=${beatIndex}, token=${token}`);
+    try {
+      await this.startAudioStream(localStart, beatIndex, countInBeats, token);
+    } catch (err) {
+      console.warn(`MetronomeEngine audio recovery failed: ${(err as Error).message}`);
+    } finally {
+      this.recoveringAudio = false;
     }
   }
 }

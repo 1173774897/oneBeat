@@ -1,0 +1,6 @@
+<svg width="29" height="18" viewBox="0 0 29 18" xmlns="http://www.w3.org/2000/svg">
+  <!-- A 28 x 17 ticket plus 1 px hard ink shadow; label text stays native ArkUI. -->
+  <path d="M0 3H3V0H25V3H28V14H25V17H3V14H0Z" fill="#171B1F" transform="translate(1 1)"/>
+  <path d="M0 3H3V0H25V3H28V14H25V17H3V14H0Z" fill="#171B1F"/>
+  <path d="M1.2 4.2H4.2V1.2H23.8V4.2H26.8V12.8H23.8V15.8H4.2V12.8H1.2Z" fill="#FFFDF8"/>
+</svg>

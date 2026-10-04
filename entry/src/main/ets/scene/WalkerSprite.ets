@@ -3,7 +3,8 @@ import { LilrollWalkerLayers } from './LilrollWalkerLayers';
 import { TeapotWalkerLayers } from './TeapotWalkerLayers';
 import { WaveWalkerLayers } from './WaveWalkerLayers';
 import { ScooterWalkerLayers } from './ScooterWalkerLayers';
-import { MatchmanWalkerLayers } from './MatchmanWalkerLayers';
+import { LampWalkerLayers } from './LampWalkerLayers';
+import { RandomPoolWalkerLayers } from './RandomPoolWalkerLayers';
 
 const CLOUD_SCALE: number = 0.7;
 const BASE_WALKER_SIZE: number = 140;
@@ -13,6 +14,7 @@ const CLOUD_WALKER_SIZE: number = BASE_WALKER_SIZE * CLOUD_SCALE;
 export struct WalkerSprite {
   @Prop @Watch('onFrameChanged') frameIndex: number = 0;
   @Prop avatar: WalkerAvatarKey = 'cloud';
+  @Prop colorSlot: number = 0;
 
   onFrameChanged(): void {
     // Prop watch keeps the stack in sync when frameIndex updates.
@@ -93,8 +95,14 @@ export struct WalkerSprite {
       WaveWalkerLayers({ frameIndex: this.frameIndex });
     } else if (this.avatar === 'scooter') {
       ScooterWalkerLayers({ frameIndex: this.frameIndex });
-    } else if (this.avatar === 'matchman') {
-      MatchmanWalkerLayers({ frameIndex: this.frameIndex });
+    } else if (this.avatar === 'lamp') {
+      LampWalkerLayers({ frameIndex: this.frameIndex });
+    } else if (this.avatar === 'braids' || this.avatar === 'boonie') {
+      RandomPoolWalkerLayers({
+        frameIndex: this.frameIndex,
+        avatar: this.avatar,
+        colorSlot: this.colorSlot
+      });
     } else {
       this.mismatchLayers();
     }

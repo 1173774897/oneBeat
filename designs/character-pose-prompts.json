@@ -1,0 +1,111 @@
+{
+  "mode": "built-in image_gen; transparent_background=true",
+  "reference_image": "/Users/lizhe/Downloads/c8e2d1329917bd2703fbb8da1a7917a1.jpg",
+  "identity_reference_directory": "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/comic/characters",
+  "output_directory": "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/comic/poses",
+  "final_identity_constraints": {
+    "wave": "No eyeglasses and no mouth. Preserve her original character identity; eyes and cheek blush carry the expression."
+  },
+  "prompts": [
+    {
+      "asset": "teapot",
+      "prompt": "Use case: illustration-story. Asset type: transparent PNG pose for OneBeat's illustrated mobile UI. Input image 1 is the exact character identity reference; image 2 is the UI style reference only. Redraw the referenced character in the new action below. Style: polished American comic editorial illustration, friendly rounded silhouette, bold clean near-black ink contours, flat opaque colors, sparing hand-ink hatching, cream highlights. Keep the recognizable anatomy, clothing and facial features of this character. Full body and all props fully visible, centered, tightly framed with only 5% transparent margins, portrait composition. Genuinely transparent background with alpha, not a checkerboard or colored backdrop; no text, no watermark, no extra character, no speed lines. Maintain character colors but use coral/lilac/cream on new props; no new green scenery. Pose: Sitting on a low coral stool, gently playing a cream and coral tambourine. Both brown boots grounded, not walking. Preserve mint teapot head with lid, handle, spout, pink apron and striped skirt."
+    },
+    {
+      "asset": "cloud",
+      "prompt": "Use case: illustration-story. Asset type: transparent PNG pose for OneBeat's illustrated mobile UI. Input image 1 is the exact character identity reference; image 2 is the UI style reference only. Redraw the referenced character in the new action below. Style: polished American comic editorial illustration, friendly rounded silhouette, bold clean near-black ink contours, flat opaque colors, sparing hand-ink hatching, cream highlights. Keep the recognizable anatomy, clothing and facial features of this character. Full body and all props fully visible, centered, tightly framed with only 5% transparent margins, portrait composition. Genuinely transparent background with alpha, not a checkerboard or colored backdrop; no text, no watermark, no extra character, no speed lines. Maintain character colors but use coral/lilac/cream on new props; no new green scenery. Pose: Sitting on a lilac stool, playing a coral hand drum held between the knees. Preserve single eye, white cloud hair, rainbow clip, wings, cyan body and cream shoes. Not walking."
+    },
+    {
+      "asset": "mismatch",
+      "prompt": "Use case: illustration-story. Asset type: transparent PNG pose for OneBeat's illustrated mobile UI. Input image 1 is the exact character identity reference; image 2 is the UI style reference only. Redraw the referenced character in the new action below. Style: polished American comic editorial illustration, friendly rounded silhouette, bold clean near-black ink contours, flat opaque colors, sparing hand-ink hatching, cream highlights. Keep the recognizable anatomy, clothing and facial features of this character. Full body and all props fully visible, centered, tightly framed with only 5% transparent margins, portrait composition. Genuinely transparent background with alpha, not a checkerboard or colored backdrop; no text, no watermark, no extra character, no speed lines. Maintain character colors but use coral/lilac/cream on new props; no new green scenery. Pose: Standing firmly, facing slightly right, RIGHT hand raised inviting a friendly high-five, other hand on hip. Preserve cyan skin and beanie, black-white striped shirt, denim shorts, red shoes, orange and purple elbow pads. Not walking."
+    },
+    {
+      "asset": "wave",
+      "prompt": "Use case: illustration-story. Asset type: transparent PNG character pose for OneBeat mobile UI. Image 1 is the exact identity reference; image 2 is a style guide only. Redraw the SAME character in the action below, preserving the recognizable anatomy and clothing. Polished American comic editorial illustration, clean thick near-black outlines, friendly rounded silhouette, opaque flat fills, subtle ink hatching only within the figure. Full body and all props visible. Centered portrait composition with 5% transparent margins. TRANSPARENT ALPHA BACKGROUND: only character and props; absolutely no backdrop, glow, gradients outside silhouette, shadow outside silhouette, checkerboard, scenery, text, watermark or extra character. Props coral/lilac/cream. Pose: Standing firmly in place, facing slightly left, one hand raised for a friendly high-five and the other hand on hip. Feet parallel, no walking stride. Keep pink-purple bob haircut, round glasses, yellow overalls, cyan shirt and colorful sneakers."
+    },
+    {
+      "asset": "matchman",
+      "prompt": "Use case: illustration-story. Asset type: transparent PNG character pose for OneBeat mobile UI. Image 1 is the exact identity reference; image 2 is a style guide only. Redraw the SAME character in the action below, preserving the recognizable anatomy and clothing. Polished American comic editorial illustration, clean thick near-black outlines, friendly rounded silhouette, opaque flat fills, subtle ink hatching only within the figure. Full body and all props visible. Centered portrait composition with 5% transparent margins. TRANSPARENT ALPHA BACKGROUND: only character and props; absolutely no backdrop, glow, gradients outside silhouette, shadow outside silhouette, checkerboard, scenery, text, watermark or extra character. Props coral/lilac/cream. Pose: Standing still as a cheerful metronome conductor, one hand holding a short coral conductor baton and the other keeping the beat. Preserve the very simple dark round head, half-lidded eyes, cyan skinny limbs, dark angular crown with cyan chevron, cream sneakers. No human face or new clothes."
+    },
+    {
+      "asset": "scooter",
+      "prompt": "Use case: illustration-story. Asset type: transparent PNG character pose for OneBeat mobile UI. Image 1 is the exact identity reference; image 2 is a style guide only. Redraw the SAME character in the action below, preserving the recognizable anatomy and clothing. Polished American comic editorial illustration, clean thick near-black outlines, friendly rounded silhouette, opaque flat fills, subtle ink hatching only within the figure. Full body and all props visible. Centered portrait composition with 5% transparent margins. TRANSPARENT ALPHA BACKGROUND: only character and props; absolutely no backdrop, glow, gradients outside silhouette, shadow outside silhouette, checkerboard, scenery, text, watermark or extra character. Props coral/lilac/cream. Pose: Sitting relaxed on a low lilac stool with the skateboard resting upright by one knee, holding it with one hand, other hand giving a thumbs up. Keep helmet, sunglasses, lime hoodie, black shorts, white socks, black shoes. Both feet still on ground, no pushing motion."
+    },
+    {
+      "asset": "lilroll",
+      "prompt": "Use case: illustration-story. Asset type: transparent PNG character pose for OneBeat mobile UI. Image 1 is the exact identity reference; image 2 is a style guide only. Redraw the SAME character in the action below, preserving the recognizable anatomy and clothing. Polished American comic editorial illustration, clean thick near-black outlines, friendly rounded silhouette, opaque flat fills, subtle ink hatching only within the figure. Full body and all props visible. Centered portrait composition with 5% transparent margins. TRANSPARENT ALPHA BACKGROUND: only character and props; absolutely no backdrop, glow, gradients outside silhouette, shadow outside silhouette, checkerboard, scenery, text, watermark or extra character. Props coral/lilac/cream. Pose: Sitting on a coral bench, leaning forward to adjust a purple roller-skate strap, as a warm-up preparation scene. Keep lavender skin, purple hoodie, green helmet and roller skates, orange knee pads, black pants. All limbs and skates fully visible, not skating."
+    },
+    {
+      "asset": "cloud-phone",
+      "prompt": "Use case: illustration-story. Asset type: transparent PNG character pose for OneBeat mobile UI. Image 1 is the exact identity reference; image 2 is a style guide only. Redraw the SAME character in the action below, preserving the recognizable anatomy and clothing. Polished American comic editorial illustration, clean thick near-black outlines, friendly rounded silhouette, opaque flat fills, subtle ink hatching only within the figure. Full body and all props visible. Centered portrait composition with 5% transparent margins. TRANSPARENT ALPHA BACKGROUND: only character and props; absolutely no backdrop, glow, gradients outside silhouette, shadow outside silhouette, checkerboard, scenery, text, watermark or extra character. Props coral/lilac/cream. Pose: Standing still, looking happily at a small coral mobile phone held in one hand, other hand waving welcome. Keep single-eye cyan body, white cloud hair with rainbow clip, small white wings and cream shoes. No walking stride."
+    },
+    {
+      "asset": "mismatch-ticket",
+      "prompt": "Use case: illustration-story. Asset type: transparent PNG character pose for OneBeat mobile UI. Image 1 is the exact identity reference; image 2 is a style guide only. Redraw the SAME character in the action below, preserving the recognizable anatomy and clothing. Polished American comic editorial illustration, clean thick near-black outlines, friendly rounded silhouette, opaque flat fills, subtle ink hatching only within the figure. Full body and all props visible. Centered portrait composition with 5% transparent margins. TRANSPARENT ALPHA BACKGROUND: only character and props; absolutely no backdrop, glow, gradients outside silhouette, shadow outside silhouette, checkerboard, scenery, text, watermark or extra character. Props coral/lilac/cream. Pose: Standing still as a friendly shopkeeper, offering two plain cream tickets with coral edges in one hand, the other hand presenting them. Keep cyan skin and beanie, black and white striped shirt, purple/orange elbow pads, denim shorts and red sneakers. No walking stride, no text on tickets."
+    }
+  ],
+  "refinements": [
+    {
+      "assets": [
+        "wave",
+        "mismatch"
+      ],
+      "prompt": "Use case: background-extraction. Edit this exact character illustration into a clean transparent UI cutout. Keep the character's identity, pose, props, full body, outfit and ink outlines unchanged. REMOVE ALL glow, haze, dark backdrop, colored gradients and background light effects around the silhouette and raised hand. Make all character fills fully opaque, with transparent alpha only outside the character. Crisp ink contours. Only the same figure and its small flat gesture marks on genuinely transparent background. No atmospheric gradients anywhere."
+    },
+    {
+      "asset": "wave",
+      "prompt": "Use case: precise-object-edit. Edit this OneBeat Wave character illustration. Remove the black round eyeglasses completely: remove both frames, lenses, bridge and temples. Wave DOES NOT wear glasses. Keep her existing large friendly eyes clearly visible in the same position and style, without any circular frame around them. Keep everything else unchanged: pink-purple bob haircut, smiling expression, raised hand greeting/high-five pose, yellow overalls, cyan shirt, colorful sneakers, full body, ink line style, flat colors. Maintain genuinely transparent alpha background and opaque character fills. No new accessories, no glasses, no text."
+    },
+    {
+      "asset": "wave",
+      "prompt": "Use case: precise-object-edit. Edit ONLY the mouth area of this Wave character illustration. Wave's original design has NO MOUTH and NO GLASSES. Completely remove the open smiling mouth including lips, black outline, dark opening, tongue and teeth. Fill that region seamlessly with the same surrounding flat skin tone, giving her a clean minimal mouthless face with ONLY eyes, small nose and subtle cheek blush. Keep her existing eyes, face shape, raised-hand greeting pose, pink-purple bob haircut, yellow overalls, cyan shirt and colorful sneakers unchanged. Do not reintroduce eyeglasses, do not draw a new smile or mouth line. Preserve genuinely transparent alpha background and full body framing."
+    }
+  ],
+  "final_files": [
+    {
+      "key": "teapot",
+      "source": "/Users/lizhe/.codex/generated_images/01a0f634-5a2d-7ce1-9fb7-7ca18dcc1ab3/exec-ec943881-741d-4dd2-a999-fc550ba265e2.png",
+      "dest": "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/comic/poses/teapot.png"
+    },
+    {
+      "key": "cloud",
+      "source": "/Users/lizhe/.codex/generated_images/01a0f634-5a2d-7ce1-9fb7-7ca18dcc1ab3/exec-c6071328-ada4-423d-a039-3a92334f4af5.png",
+      "dest": "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/comic/poses/cloud.png"
+    },
+    {
+      "key": "mismatch",
+      "source": "/Users/lizhe/.codex/generated_images/01a0f634-5a2d-7ce1-9fb7-7ca18dcc1ab3/exec-f6196bb7-b9eb-4b60-8daf-de66a7d2e978.png",
+      "dest": "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/comic/poses/mismatch.png"
+    },
+    {
+      "key": "wave",
+      "source": "/Users/lizhe/.codex/generated_images/01a0f634-5a2d-7ce1-9fb7-7ca18dcc1ab3/exec-65560c75-ce34-46a8-91e2-ad217a2c36ff.png",
+      "dest": "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/comic/poses/wave.png"
+    },
+    {
+      "key": "matchman",
+      "source": "/Users/lizhe/.codex/generated_images/01a0f634-5a2d-7ce1-9fb7-7ca18dcc1ab3/exec-dbdc910c-2c3e-4d50-996b-8d752c7f691a.png",
+      "dest": "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/comic/poses/matchman.png"
+    },
+    {
+      "key": "scooter",
+      "source": "/Users/lizhe/.codex/generated_images/01a0f634-5a2d-7ce1-9fb7-7ca18dcc1ab3/exec-259979f6-5534-49d2-9ec1-36423f0a6d09.png",
+      "dest": "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/comic/poses/scooter.png"
+    },
+    {
+      "key": "lilroll",
+      "source": "/Users/lizhe/.codex/generated_images/01a0f634-5a2d-7ce1-9fb7-7ca18dcc1ab3/exec-ac57776c-210d-49a2-b089-41822bb161c8.png",
+      "dest": "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/comic/poses/lilroll.png"
+    },
+    {
+      "key": "cloud-phone",
+      "source": "/Users/lizhe/.codex/generated_images/01a0f634-5a2d-7ce1-9fb7-7ca18dcc1ab3/exec-28ba2170-bb76-4672-87cb-0b821c43589c.png",
+      "dest": "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/comic/poses/cloud-phone.png"
+    },
+    {
+      "key": "mismatch-ticket",
+      "source": "/Users/lizhe/.codex/generated_images/01a0f634-5a2d-7ce1-9fb7-7ca18dcc1ab3/exec-01d9e569-7058-45ab-b2ec-55a7c7379686.png",
+      "dest": "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/comic/poses/mismatch-ticket.png"
+    }
+  ]
+}

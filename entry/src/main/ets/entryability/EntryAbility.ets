@@ -5,11 +5,15 @@ import { DOMAIN, TAG } from '../common/Constants';
 import { DrumSampleBank } from '../audio/DrumSampleBank';
 import { AppSession } from '../app/AppSession';
 import { SessionBackgroundKeeper } from '../session/SessionBackgroundKeeper';
+import { initializeEntitlementCache, isSceneAccessible } from '../store/EntitlementStore';
+import { startStoreColdStartBootstrap } from '../store/StoreBootstrapSync';
+import { bindStoreSessionPersistenceContext } from '../store/StoreSessionPersistence';
 
 export default class EntryAbility extends UIAbility {
   onCreate(_want: Want, _launchParam: AbilityConstant.LaunchParam): void {
     hilog.info(DOMAIN, TAG, 'EntryAbility onCreate');
     SessionBackgroundKeeper.initialize(this.context);
+    bindStoreSessionPersistenceContext(this.context);
     DrumSampleBank.initialize(this.context.resourceManager);
     AppStorage.setOrCreate('sessionEpoch', 0);
     AppStorage.setOrCreate('lastTransportMessage', '');
@@ -19,8 +23,14 @@ export default class EntryAbility extends UIAbility {
     AppStorage.setOrCreate('beatStartedAtMs', 0);
     AppStorage.setOrCreate('safeAreaTop', 0);
     AppStorage.setOrCreate('safeAreaBottom', 0);
-    AppStorage.setOrCreate('selectedSceneKey', 'neon_street');
+    AppStorage.setOrCreate('storeEntitlementEpoch', 0);
+    initializeEntitlementCache();
+    const storedScene = AppStorage.get<string>('selectedSceneKey') ?? 'sunset_coast';
+    AppStorage.setOrCreate('selectedSceneKey', isSceneAccessible(storedScene) ? storedScene : 'sunset_coast');
     AppStorage.setOrCreate('playerDisplayName', '');
+    void startStoreColdStartBootstrap().catch((error: Object) => {
+      hilog.warn(DOMAIN, TAG, `Store cold start bootstrap failed: ${JSON.stringify(error)}`);
+    });
   }
 
   onDestroy(): void {

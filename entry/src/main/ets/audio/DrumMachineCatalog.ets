@@ -33,15 +33,15 @@ export const DRUM_STYLES: DrumStyle[] = [
   { key: 'rock', name: '摇滚', caption: '硬朗推进', color: '#FF674F' },
   { key: 'psychedelic', name: '迷幻', caption: '漂浮脉冲', color: '#BBA6FF' },
   { key: 'jazz', name: '爵士', caption: '轻摆律动', color: '#F2C65D' },
-  { key: 'funk', name: '放克', caption: '切分弹性', color: '#58C9C9' },
+  { key: 'funk', name: '放克', caption: '切分弹性', color: '#A9C9F2' },
   { key: 'disco', name: '迪斯科', caption: '闪亮四拍', color: '#FF8FB7' },
-  { key: 'hiphop', name: '嘻哈', caption: '松弛重拍', color: '#A6D46A' },
+  { key: 'hiphop', name: '嘻哈', caption: '松弛重拍', color: '#EBC8B0' },
   { key: 'trap', name: '陷阱', caption: '半拍滚镲', color: '#8EA8FF' },
   { key: 'house', name: '浩室', caption: '稳定舞步', color: '#FF9257' },
-  { key: 'techno', name: '科技舞曲', caption: '机械驱动', color: '#60C3A5' },
+  { key: 'techno', name: '科技舞曲', caption: '机械驱动', color: '#BED0EC' },
   { key: 'dnb', name: '鼓打贝斯', caption: '高速碎拍', color: '#D48CFF' },
   { key: 'latin', name: '拉丁', caption: '热烈打击', color: '#FFD05A' },
-  { key: 'reggae', name: '雷鬼', caption: '反拍摇摆', color: '#7CCF75' }
+  { key: 'reggae', name: '雷鬼', caption: '反拍摇摆', color: '#F3D993' }
 ];
 
 export const DRUM_TRACKS: DrumTrack[] = [

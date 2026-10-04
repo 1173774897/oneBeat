@@ -202,7 +202,7 @@ export class AppSession {
       return this.controller.leaderHost;
     }
     this.controller.soloTeam = false;
-    this.controller.removeSoloPartner();
+    this.controller.removeSoloBots();
     return await this.leaderBootstrap(displayName);
   }
 

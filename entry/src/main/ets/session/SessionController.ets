@@ -15,6 +15,7 @@ import {
   PingPayload,
   PingResponse,
   PongPayload,
+  RandomPreviewCompletePayload,
   SessionMember,
   SessionSnapshotPayload,
   TransportPausePayload,
@@ -39,7 +40,12 @@ import {
   isAvatarAllowedForSession,
   isDuplicatableAvatar,
   isExclusiveTakenByOther,
+  isRandomAvatar,
+  isRandomPoolCharacter,
+  normalizeAvatarKey,
   pickFallbackAvatar,
+  pickRandomCharacterKey,
+  pickRandomColorSlot,
   rosterKeysForLobby
 } from '../assets/CharacterCatalog';
 
@@ -47,8 +53,10 @@ export type SessionUiListener = () => void;
 
 const SOLO_BOT_ID_PREFIX: string = 'solo-bot-';
 const SOLO_BOT_DISPLAY_NAME: string = '人机';
-const SOLO_DEFAULT_BOT_COUNT: number = 2;
 export const SOLO_MAX_BOT_COUNT: number = 7;
+// Publish a future deadline so peers use clock sync, not packet arrival order,
+// to switch their roster avatars. Late packets reveal immediately on receipt.
+const RANDOM_AVATAR_REVEAL_LEAD_MS: number = 250;
 
 export class SessionController {
   readonly sessionId: string;
@@ -66,6 +74,11 @@ export class SessionController {
   };
   private resyncTimer: number = -1;
   private heartbeatSweepTimer: number = -1;
+  private nextRandomDrawId: number = 0;
+  private nextSoloBotNumber: number = 0;
+  private randomAvatarRevealTimer: number = -1;
+  private randomAvatarRevealsActive: boolean = true;
+  private readonly revealedRandomAvatars: Map<string, number> = new Map();
 
   bpm: number = 120;
   beatsPerBar: number = 4;
@@ -76,7 +89,7 @@ export class SessionController {
   lobbyDeparted: boolean = false;
   localMemberId: string = '';
   soundId: number = 0;
-  sceneKey: string = 'neon_street';
+  sceneKey: string = 'sunset_coast';
   state: TransportState = 'idle';
   beatIndex: number = 0;
   leaderHost: string = '';
@@ -93,9 +106,9 @@ export class SessionController {
     this.sessionId = sessionId;
     this.isLeader = isLeader;
     this.displayName = displayName;
-    this.sceneKey = this.normalizeSceneKey(AppStorage.get<string>('selectedSceneKey') ?? 'neon_street');
+    this.sceneKey = this.normalizeSceneKey(AppStorage.get<string>('selectedSceneKey') ?? 'sunset_coast');
     if (isLeader) {
-      this.connectionMembers.set('leader', {
+      const leaderMember: SessionMember = {
         id: 'leader',
         displayName: displayName,
         avatarKey: this.avatarKey,
@@ -103,7 +116,9 @@ export class SessionController {
         lobbyReady: false,
         rttMs: 0,
         offsetMs: 0
-      });
+      };
+      this.assignAvatarIdentity(leaderMember, this.avatarKey);
+      this.connectionMembers.set('leader', leaderMember);
     }
   }
 
@@ -152,6 +167,117 @@ export class SessionController {
     return !this.soloTeam && this.isLeader && this.allTeamMembersLobbyReady();
   }
 
+  private assignAvatarIdentity(member: SessionMember, key: string): void {
+    const normalized = normalizeAvatarKey(key);
+    member.avatarKey = normalized;
+    if (!isRandomAvatar(normalized)) {
+      member.resolvedAvatarKey = undefined;
+      member.colorSlot = -1;
+      member.randomDrawId = undefined;
+      member.randomAvatarRevealAtLeaderMs = undefined;
+      return;
+    }
+    // The leader owns the result: the film can reveal its shared silhouette,
+    // while the actual character colors remain hidden until leaving the lobby.
+    const resolved = pickRandomCharacterKey();
+    member.resolvedAvatarKey = resolved;
+    member.colorSlot = pickRandomColorSlot(this.getMembers(), resolved, member.id);
+    member.randomDrawId = ++this.nextRandomDrawId;
+    member.randomAvatarRevealAtLeaderMs = undefined;
+  }
+
+  /** Complete only this device's draw (or its solo bot); the leader owns publication. */
+  async completeRandomAvatarPreview(memberId: string, drawId: number): Promise<void> {
+    if (!this.randomAvatarRevealsActive || this.lobbyDeparted ||
+      (memberId !== this.getLocalMemberId() &&
+        !(this.isLeader && this.soloTeam && SessionController.isSoloBotMemberId(memberId)))) {
+      return;
+    }
+    const member = this.connectionMembers.get(memberId);
+    if (member === undefined || !isRandomAvatar(member.avatarKey) || member.randomDrawId !== drawId ||
+      !Number.isSafeInteger(drawId) || drawId <= 0) {
+      return;
+    }
+    if (this.isLeader) {
+      await this.publishRandomAvatarReveal(memberId, drawId);
+    } else {
+      await this.sendToLeader(createMessage('RANDOM_PREVIEW_COMPLETE', { drawId } as RandomPreviewCompletePayload));
+    }
+  }
+
+  private async publishRandomAvatarReveal(memberId: string, drawId: number): Promise<void> {
+    const member = this.connectionMembers.get(memberId);
+    if (!this.isLeader || !this.randomAvatarRevealsActive || this.lobbyDeparted ||
+      typeof drawId !== 'number' || !Number.isSafeInteger(drawId) || drawId <= 0 ||
+      member === undefined || !isRandomAvatar(member.avatarKey) || member.randomDrawId !== drawId ||
+      !isRandomPoolCharacter(member.resolvedAvatarKey ?? '') ||
+      member.randomAvatarRevealAtLeaderMs !== undefined) {
+      return;
+    }
+    // A stale/cancelled completion cannot publish a newer draw, even when both
+    // happened to resolve to the same character. Duplicate acknowledgements are idempotent.
+    member.randomAvatarRevealAtLeaderMs = MonotonicClock.nowMs() +
+      (this.soloTeam ? 0 : RANDOM_AVATAR_REVEAL_LEAD_MS);
+    await this.broadcastSnapshot();
+  }
+
+  /** Shared roster visibility, latched per draw so small clock corrections cannot hide it again. */
+  isMemberRandomAvatarRevealed(memberId: string): boolean {
+    const member = this.connectionMembers.get(memberId);
+    return member !== undefined && isRandomAvatar(member.avatarKey) &&
+      isRandomPoolCharacter(member.resolvedAvatarKey ?? '') &&
+      this.revealedRandomAvatars.get(memberId) === member.randomDrawId &&
+      member.randomDrawId !== undefined;
+  }
+
+  private stopRandomAvatarRevealTimer(): void {
+    if (this.randomAvatarRevealTimer >= 0) {
+      clearTimeout(this.randomAvatarRevealTimer);
+      this.randomAvatarRevealTimer = -1;
+    }
+  }
+
+  private scheduleRandomAvatarReveals(): void {
+    this.stopRandomAvatarRevealTimer();
+    if (!this.randomAvatarRevealsActive) {
+      this.revealedRandomAvatars.clear();
+      return;
+    }
+    const leaderNow = MonotonicClock.nowMs() + (this.isLeader ? 0 : this.getOffsetMs());
+    let nextDelay: number = Number.POSITIVE_INFINITY;
+    this.revealedRandomAvatars.forEach((drawId: number, id: string) => {
+      const member = this.connectionMembers.get(id);
+      if (member === undefined || member.randomDrawId !== drawId || !isRandomAvatar(member.avatarKey)) {
+        this.revealedRandomAvatars.delete(id);
+      }
+    });
+    this.connectionMembers.forEach((member: SessionMember) => {
+      const drawId = member.randomDrawId ?? 0;
+      const revealAt = member.randomAvatarRevealAtLeaderMs;
+      if (!isRandomAvatar(member.avatarKey) || !isRandomPoolCharacter(member.resolvedAvatarKey ?? '') ||
+        !Number.isSafeInteger(drawId) || drawId <= 0 || revealAt === undefined ||
+        !Number.isFinite(revealAt) || revealAt < 0) {
+        this.revealedRandomAvatars.delete(member.id);
+        return;
+      }
+      if (this.revealedRandomAvatars.get(member.id) === drawId) {
+        return;
+      }
+      if (revealAt <= leaderNow) {
+        this.revealedRandomAvatars.set(member.id, drawId);
+      } else {
+        nextDelay = Math.min(nextDelay, revealAt - leaderNow);
+      }
+    });
+    if (Number.isFinite(nextDelay)) {
+      this.randomAvatarRevealTimer = setTimeout(() => {
+        this.randomAvatarRevealTimer = -1;
+        this.scheduleRandomAvatarReveals();
+        this.notifyUi();
+      }, Math.max(1, Math.ceil(nextDelay)));
+    }
+  }
+
   private canAssignAvatarToMember(memberId: string, key: string): boolean {
     if (!isAvatarAllowedForSession(key, this.soloTeam)) {
       return false;
@@ -185,21 +311,22 @@ export class SessionController {
         return;
       }
       if (member.avatarKey === lockedKey) {
-        member.avatarKey = pickFallbackAvatar(this.getMembers(), id, this.soloTeam);
+        this.assignAvatarIdentity(member, pickFallbackAvatar(this.getMembers(), id, this.soloTeam));
       }
     });
   }
 
   async updateMemberAvatar(memberId: string, key: string): Promise<void> {
-    if (!this.canAssignAvatarToMember(memberId, key)) {
+    const normalized = normalizeAvatarKey(key);
+    if (!this.canAssignAvatarToMember(memberId, normalized)) {
       return;
     }
     if (this.soloTeam && this.isLeader) {
       const member = this.connectionMembers.get(memberId);
       if (member !== undefined) {
-        member.avatarKey = key;
+        this.assignAvatarIdentity(member, normalized);
         if (memberId === 'leader') {
-          this.avatarKey = key;
+          this.avatarKey = normalized;
         }
         await this.broadcastSnapshot();
       }
@@ -211,7 +338,7 @@ export class SessionController {
     if (this.isLocalLobbyReady()) {
       return;
     }
-    await this.updateAvatar(key);
+    await this.updateAvatar(normalized);
   }
 
   async setLobbyReady(ready: boolean): Promise<void> {
@@ -249,7 +376,6 @@ export class SessionController {
     this.lobbyDeparted = false;
     this.connectionMembers.forEach((member: SessionMember) => {
       member.lobbyReady = false;
-      member.colorSlot = -1;
     });
     AppStorage.setOrCreate('lastTransportMessage', '');
     await this.broadcastSnapshot();
@@ -294,7 +420,7 @@ export class SessionController {
   }
 
   canAddSoloBot(): boolean {
-    return this.getAvailableAvatarsForNewSoloBot().length > 0;
+    return this.getSoloBotCount() < SOLO_MAX_BOT_COUNT && this.getAvailableAvatarsForNewSoloBot().length > 0;
   }
 
   getAvailableAvatarsForNewSoloBot(): string[] {
@@ -332,72 +458,10 @@ export class SessionController {
     return ids;
   }
 
-  private listSoloBotAvatarKeysInOrder(): string[] {
-    const keys: string[] = [];
-    const ids = this.listSoloBotIdsSorted();
-    for (let i = 0; i < ids.length; i++) {
-      const member = this.connectionMembers.get(ids[i]);
-      if (member !== undefined) {
-        keys.push(member.avatarKey);
-      }
-    }
-    return keys;
-  }
-
-  private applySoloBotsWithAvatars(avatarKeys: string[]): void {
-    this.purgeSoloBotsAndLegacy();
-    for (let i = 0; i < avatarKeys.length; i++) {
-      const id = `${SOLO_BOT_ID_PREFIX}${i + 1}`;
-      this.connectionMembers.set(id, {
-        id: id,
-        displayName: SOLO_BOT_DISPLAY_NAME,
-        avatarKey: avatarKeys[i],
-        colorSlot: -1,
-        lobbyReady: false,
-        rttMs: 0,
-        offsetMs: 0
-      });
-    }
-  }
-
-  private defaultSoloBotAvatarsForLeader(): string[] {
-    const picked: string[] = [];
-    const synthetic: SessionMember[] = [{
-      id: 'leader',
-      displayName: '',
-      avatarKey: this.avatarKey,
-      colorSlot: -1,
-      lobbyReady: false,
-      rttMs: 0,
-      offsetMs: 0
-    }];
-    const roster = rosterKeysForLobby(true);
-    for (let i = 0; i < roster.length && picked.length < SOLO_DEFAULT_BOT_COUNT; i++) {
-      const key = roster[i];
-      if (!isAvatarAllowedForSession(key, true)) {
-        continue;
-      }
-      if (isExclusiveTakenByOther(synthetic, key, '')) {
-        continue;
-      }
-      picked.push(key);
-      synthetic.push({
-        id: `solo-bot-${picked.length}`,
-        displayName: SOLO_BOT_DISPLAY_NAME,
-        avatarKey: key,
-        colorSlot: -1,
-        lobbyReady: false,
-        rttMs: 0,
-        offsetMs: 0
-      });
-    }
-    return picked;
-  }
-
-  private purgeSoloBotsAndLegacy(): void {
+  private purgeSoloBots(): void {
     const removeIds: string[] = [];
     this.connectionMembers.forEach((_member: SessionMember, id: string) => {
-      if (SessionController.isSoloBotMemberId(id) || id === 'solo-partner' || id === 'solo-lilroll') {
+      if (SessionController.isSoloBotMemberId(id)) {
         removeIds.push(id);
       }
     });
@@ -406,10 +470,10 @@ export class SessionController {
     }
   }
 
-  /** 单人模式：队长 + 可增减的人机队友 */
+  /** 单人模式默认仅创建玩家；人机必须由玩家在大厅或行进页主动添加。 */
   ensureSoloWalkPair(leaderName: string): void {
-    this.purgeSoloBotsAndLegacy();
-    this.connectionMembers.set('leader', {
+    this.purgeSoloBots();
+    const leaderMember: SessionMember = {
       id: 'leader',
       displayName: leaderName,
       avatarKey: this.avatarKey,
@@ -417,41 +481,47 @@ export class SessionController {
       lobbyReady: false,
       rttMs: 0,
       offsetMs: 0
-    });
-    this.applySoloBotsWithAvatars(this.defaultSoloBotAvatarsForLeader());
+    };
+    this.assignAvatarIdentity(leaderMember, this.avatarKey);
+    this.connectionMembers.set('leader', leaderMember);
     this.notifyUi();
   }
 
-  async addSoloBotWithNextAvatar(): Promise<void> {
+  async addSoloBotWithNextAvatar(): Promise<string | undefined> {
     if (!this.isLeader || !this.soloTeam) {
-      return;
+      return undefined;
     }
     const available = this.getAvailableAvatarsForNewSoloBot();
     if (available.length === 0) {
-      return;
+      return undefined;
     }
-    const nextAvatars = this.listSoloBotAvatarKeysInOrder();
-    nextAvatars.push(available[0]);
-    this.applySoloBotsWithAvatars(nextAvatars);
+    const ids = this.listSoloBotIdsSorted();
+    const lastId = ids.length > 0 ? ids[ids.length - 1] : '';
+    const lastNumber = lastId.length > 0 ? parseInt(lastId.substring(SOLO_BOT_ID_PREFIX.length), 10) : 0;
+    // Member IDs identify a lifetime, not a reusable roster slot. Reusing an
+    // ID after removal would reuse preview caches and admit stale callbacks.
+    this.nextSoloBotNumber = Math.max(this.nextSoloBotNumber, lastNumber) + 1;
+    const newBotId = `${SOLO_BOT_ID_PREFIX}${this.nextSoloBotNumber}`;
+    const member: SessionMember = {
+      id: newBotId,
+      displayName: SOLO_BOT_DISPLAY_NAME,
+      avatarKey: available[0],
+      colorSlot: -1,
+      lobbyReady: false,
+      rttMs: 0,
+      offsetMs: 0
+    };
+    this.assignAvatarIdentity(member, available[0]);
+    this.connectionMembers.set(newBotId, member);
     await this.broadcastSnapshot();
+    return newBotId;
   }
 
   async removeSoloBotById(id: string): Promise<void> {
     if (!this.isLeader || !this.soloTeam || !SessionController.isSoloBotMemberId(id)) {
       return;
     }
-    const nextAvatars: string[] = [];
-    const ids = this.listSoloBotIdsSorted();
-    for (let i = 0; i < ids.length; i++) {
-      if (ids[i] === id) {
-        continue;
-      }
-      const member = this.connectionMembers.get(ids[i]);
-      if (member !== undefined) {
-        nextAvatars.push(member.avatarKey);
-      }
-    }
-    this.applySoloBotsWithAvatars(nextAvatars);
+    this.connectionMembers.delete(id);
     await this.broadcastSnapshot();
   }
 
@@ -467,33 +537,8 @@ export class SessionController {
     await this.removeSoloBotById(ids[ids.length - 1]);
   }
 
-  removeSoloPartner(): void {
-    this.purgeSoloBotsAndLegacy();
-    this.notifyUi();
-  }
-
-  /** 旧版 solo-partner / solo-lilroll 迁移为 solo-bot-* */
-  reconcileSoloLegacyBots(): void {
-    if (!this.soloTeam || !this.isLeader) {
-      return;
-    }
-    if (!this.connectionMembers.has('solo-partner') && !this.connectionMembers.has('solo-lilroll')) {
-      return;
-    }
-    const avatars: string[] = [];
-    if (this.connectionMembers.has('solo-partner')) {
-      const m = this.connectionMembers.get('solo-partner');
-      if (m !== undefined) {
-        avatars.push(m.avatarKey);
-      }
-    }
-    if (this.connectionMembers.has('solo-lilroll')) {
-      const m = this.connectionMembers.get('solo-lilroll');
-      if (m !== undefined) {
-        avatars.push(m.avatarKey);
-      }
-    }
-    this.applySoloBotsWithAvatars(avatars.length > 0 ? avatars : this.defaultSoloBotAvatarsForLeader());
+  removeSoloBots(): void {
+    this.purgeSoloBots();
     this.notifyUi();
   }
 
@@ -509,6 +554,7 @@ export class SessionController {
   }
 
   async startLeader(host: string): Promise<void> {
+    this.randomAvatarRevealsActive = true;
     if (!this.soloTeam && this.p2pInvitation === undefined) {
       throw new Error('P2P 房间尚未初始化');
     }
@@ -536,6 +582,7 @@ export class SessionController {
     port: number,
     invitation: P2pRoomInvitation
   ): Promise<void> {
+    this.randomAvatarRevealsActive = true;
     validateP2pRoomInvitation(invitation);
     this.leaderHost = host;
     this.tcpPort = port;
@@ -554,11 +601,15 @@ export class SessionController {
       return await this.sendPing(id, clientMono);
     });
     this.clockSync.applySample(sync);
+    this.scheduleRandomAvatarReveals();
     this.startResyncLoop();
     this.notifyUi();
   }
 
   async disconnect(): Promise<void> {
+    this.randomAvatarRevealsActive = false;
+    this.stopRandomAvatarRevealTimer();
+    this.revealedRandomAvatars.clear();
     this.stopResyncLoop();
     if (this.isLeader) {
       this.stopHeartbeatSweep();
@@ -586,25 +637,25 @@ export class SessionController {
   }
 
   async updateAvatar(key: string): Promise<void> {
-    if (!isAllowedAvatarKey(key, this.soloTeam)) { return; }
+    const normalized = normalizeAvatarKey(key);
+    if (!isAllowedAvatarKey(normalized, this.soloTeam)) { return; }
     const memberId = this.getLocalMemberId();
-    if (!this.soloTeam && memberId.length > 0 && !this.canAssignAvatarToMember(memberId, key)) {
+    if (!this.soloTeam && memberId.length > 0 && !this.canAssignAvatarToMember(memberId, normalized)) {
       return;
     }
     if (this.isLocalLobbyReady()) {
       return;
     }
-    this.avatarKey = key;
+    this.avatarKey = normalized;
     if (this.isLeader) {
       const member = this.connectionMembers.get('leader');
       if (member !== undefined) {
-        member.avatarKey = key;
-        member.colorSlot = -1;
+        this.assignAvatarIdentity(member, normalized);
       }
       await this.broadcastSnapshot();
     } else {
       await this.sendToLeader(createMessage('MEMBER_UPDATE', {
-        displayName: this.displayName, avatarKey: key
+        displayName: this.displayName, avatarKey: normalized
       } as ClientHelloPayload));
     }
   }
@@ -719,6 +770,7 @@ export class SessionController {
     if (!this.isLeader) {
       return;
     }
+    this.scheduleRandomAvatarReveals();
     const payload: SessionSnapshotPayload = {
       sessionId: this.sessionId,
       bpm: this.bpm,
@@ -765,10 +817,19 @@ export class SessionController {
       if (member === undefined || member.lobbyReady === true) {
         return;
       }
-      if (this.canAssignAvatarToMember(connection.id, update.avatarKey)) {
-        member.avatarKey = update.avatarKey;
-        member.colorSlot = -1;
+      const normalized = normalizeAvatarKey(update.avatarKey);
+      if (this.canAssignAvatarToMember(connection.id, normalized)) {
+        this.assignAvatarIdentity(member, normalized);
         void this.broadcastSnapshot();
+      }
+      return;
+    }
+    if (message.type === 'RANDOM_PREVIEW_COMPLETE') {
+      const completed = message.payload as RandomPreviewCompletePayload;
+      if (completed !== undefined && completed !== null) {
+        // Never trust a payload member id or avatar: the authenticated socket
+        // owns exactly one member, and the leader already assigned its result.
+        void this.publishRandomAvatarReveal(connection.id, completed.drawId);
       }
       return;
     }
@@ -799,15 +860,19 @@ export class SessionController {
         this.usedAuthNonces.add(hello.nonce);
       }
       this.authenticatedConnections.add(connection.id);
+      const requestedAvatar = normalizeAvatarKey(hello.avatarKey);
+      const allowedAvatar = isAllowedAvatarKey(requestedAvatar, this.soloTeam)
+        ? requestedAvatar : defaultSessionAvatar();
       const member: SessionMember = {
         id: connection.id,
         displayName: hello.displayName,
-        avatarKey: isAllowedAvatarKey(hello.avatarKey, this.soloTeam) ? hello.avatarKey : defaultSessionAvatar(),
+        avatarKey: allowedAvatar,
         colorSlot: -1,
         lobbyReady: false,
         rttMs: 0,
         offsetMs: 0
       };
+      this.assignAvatarIdentity(member, allowedAvatar);
       this.connectionMembers.set(connection.id, member);
       void this.broadcastSnapshot();
       return;
@@ -893,7 +958,7 @@ export class SessionController {
     this.beatUnit = snapshot.beatUnit ?? 4;
     this.rhythm = snapshot.rhythm ?? 0;
     this.drumProgram = snapshot.drumProgram ?? '';
-    this.sceneKey = this.normalizeSceneKey(snapshot.sceneKey ?? 'neon_street');
+    this.sceneKey = this.normalizeSceneKey(snapshot.sceneKey ?? 'sunset_coast');
     AppStorage.setOrCreate('selectedSceneKey', this.sceneKey);
     this.soundId = snapshot.soundId;
     this.state = snapshot.state;
@@ -910,11 +975,12 @@ export class SessionController {
         this.avatarKey = localMember.avatarKey;
       }
     }
+    this.scheduleRandomAvatarReveals();
     this.notifyUi();
   }
 
   private normalizeSceneKey(key: string): string {
-    return key === 'sunset_coast' ? 'sunset_coast' : 'neon_street';
+    return key === 'neon_street' ? 'neon_street' : 'sunset_coast';
   }
 
   private async sendPing(id: string, clientMono: number): Promise<PingResponse> {
@@ -1005,6 +1071,7 @@ export class SessionController {
       } else {
         this.clockSync.applySample(sample);
       }
+      this.scheduleRandomAvatarReveals();
       this.notifyUi();
     } catch (_e) {
       // ignore transient resync errors

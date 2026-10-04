@@ -1,11 +1,24 @@
 import { SessionMember } from '../protocol/messages';
+import { isCharacterAccessible } from '../store/EntitlementStore';
 
-export const MATCHMAN_AVATAR_KEY: string = 'matchman';
+export const RANDOM_AVATAR_KEY: string = 'random';
+export const LAMP_AVATAR_KEY: string = 'lamp';
+
+/** Adding a random character only requires one entry here plus its walk/palette assets. */
+export const RANDOM_CHARACTER_KEYS: string[] = ['braids', 'boonie'];
 
 export const TEAM_ROSTER_KEYS: string[] =
-  ['matchman', 'mismatch', 'cloud', 'teapot', 'wave', 'scooter'];
+  [RANDOM_AVATAR_KEY, 'mismatch', 'cloud', 'teapot', 'wave', 'scooter', 'lilroll', LAMP_AVATAR_KEY];
 
-export const SOLO_ONLY_ROSTER_KEYS: string[] = ['lilroll'];
+export const SOLO_ONLY_ROSTER_KEYS: string[] = [];
+
+/** 旧存档/联机仍可能带 matchman，统一映射为现在的台灯角色。 */
+export function normalizeAvatarKey(key: string): string {
+  if (key === 'matchman') {
+    return LAMP_AVATAR_KEY;
+  }
+  return key;
+}
 
 export function rosterKeysForLobby(soloTeam: boolean): string[] {
   if (soloTeam) {
@@ -15,11 +28,65 @@ export function rosterKeysForLobby(soloTeam: boolean): string[] {
 }
 
 export function defaultSessionAvatar(): string {
-  return MATCHMAN_AVATAR_KEY;
+  return RANDOM_AVATAR_KEY;
+}
+
+export function isRandomAvatar(key: string): boolean {
+  return normalizeAvatarKey(key) === RANDOM_AVATAR_KEY;
+}
+
+export function isRandomPoolCharacter(key: string): boolean {
+  return RANDOM_CHARACTER_KEYS.indexOf(key) >= 0;
+}
+
+export function randomPaletteCount(key: string): number {
+  return isRandomPoolCharacter(key) ? 2 : 0;
+}
+
+export function pickRandomCharacterKey(): string {
+  if (RANDOM_CHARACTER_KEYS.length === 0) {
+    return '';
+  }
+  return RANDOM_CHARACTER_KEYS[Math.floor(Math.random() * RANDOM_CHARACTER_KEYS.length)];
+}
+
+export function pickRandomColorSlot(
+  members: SessionMember[],
+  resolvedAvatarKey: string,
+  excludeMemberId: string
+): number {
+  const count = randomPaletteCount(resolvedAvatarKey);
+  if (count <= 0) {
+    return -1;
+  }
+  const used: boolean[] = [];
+  for (let i = 0; i < count; i++) {
+    used.push(false);
+  }
+  for (let i = 0; i < members.length; i++) {
+    const member = members[i];
+    if (member.id === excludeMemberId || !isRandomAvatar(member.avatarKey) ||
+      member.resolvedAvatarKey !== resolvedAvatarKey) {
+      continue;
+    }
+    const slot = member.colorSlot ?? -1;
+    if (slot >= 0 && slot < count) {
+      used[slot] = true;
+    }
+  }
+  const start = Math.floor(Math.random() * count);
+  for (let offset = 0; offset < count; offset++) {
+    const candidate = (start + offset) % count;
+    if (!used[candidate]) {
+      return candidate;
+    }
+  }
+  // Every palette is already represented, so repetition is now intentional.
+  return start;
 }
 
 export function isDuplicatableAvatar(key: string): boolean {
-  return key === MATCHMAN_AVATAR_KEY;
+  return isRandomAvatar(key);
 }
 
 export function isExclusiveAvatar(key: string): boolean {
@@ -27,34 +94,21 @@ export function isExclusiveAvatar(key: string): boolean {
 }
 
 export function isCharacterOwned(key: string): boolean {
-  if (key === MATCHMAN_AVATAR_KEY) {
-    return true;
-  }
-  if (AppStorage.get<boolean>('storePassActive') === true) {
-    return true;
-  }
-  const raw = AppStorage.get<string>('storeOwnedCharacters') ?? '';
-  if (raw.length === 0) {
-    return defaultOwnedCharacterKeys().indexOf(key) >= 0;
-  }
-  try {
-    const owned = JSON.parse(raw) as string[];
-    return owned.indexOf(key) >= 0;
-  } catch (_e) {
-    return defaultOwnedCharacterKeys().indexOf(key) >= 0;
-  }
+  const normalized = normalizeAvatarKey(key);
+  return isRandomAvatar(normalized) || isCharacterAccessible(normalized);
 }
 
 export function defaultOwnedCharacterKeys(): string[] {
-  return [MATCHMAN_AVATAR_KEY, 'cloud', 'mismatch', 'teapot', 'wave', 'scooter'];
+  return [];
 }
 
 export function isRosterAvatarKey(key: string, soloTeam: boolean): boolean {
-  return rosterKeysForLobby(soloTeam).indexOf(key) >= 0;
+  return rosterKeysForLobby(soloTeam).indexOf(normalizeAvatarKey(key)) >= 0;
 }
 
 export function isAvatarAllowedForSession(key: string, soloTeam: boolean): boolean {
-  return isRosterAvatarKey(key, soloTeam) && isCharacterOwned(key);
+  const normalized = normalizeAvatarKey(key);
+  return isRosterAvatarKey(normalized, soloTeam) && isCharacterOwned(normalized);
 }
 
 export function isExclusiveTakenByOther(
@@ -62,15 +116,16 @@ export function isExclusiveTakenByOther(
   avatarKey: string,
   excludeMemberId: string
 ): boolean {
-  if (!isExclusiveAvatar(avatarKey)) {
+  const key = normalizeAvatarKey(avatarKey);
+  if (!isExclusiveAvatar(key)) {
     return false;
   }
   for (let i = 0; i < members.length; i++) {
-    const m = members[i];
-    if (m.id === excludeMemberId) {
+    const member = members[i];
+    if (member.id === excludeMemberId) {
       continue;
     }
-    if (m.avatarKey === avatarKey) {
+    if (normalizeAvatarKey(member.avatarKey) === key) {
       return true;
     }
   }
@@ -83,12 +138,13 @@ export function getExclusiveAvatarsLockedByReadyMembers(
 ): Set<string> {
   const locked: Set<string> = new Set();
   for (let i = 0; i < members.length; i++) {
-    const m = members[i];
-    if (m.id === excludeMemberId) {
+    const member = members[i];
+    if (member.id === excludeMemberId) {
       continue;
     }
-    if (m.lobbyReady === true && isExclusiveAvatar(m.avatarKey)) {
-      locked.add(m.avatarKey);
+    const key = normalizeAvatarKey(member.avatarKey);
+    if (member.lobbyReady === true && isExclusiveAvatar(key)) {
+      locked.add(key);
     }
   }
   return locked;
@@ -112,7 +168,7 @@ export function pickFallbackAvatar(members: SessionMember[], excludeMemberId: st
       return key;
     }
   }
-  return MATCHMAN_AVATAR_KEY;
+  return RANDOM_AVATAR_KEY;
 }
 
 export type CharacterPickState = 'selectable' | 'taken' | 'unowned' | 'lockedByReady' | 'selfReadyLocked';
@@ -123,6 +179,7 @@ export function characterPickState(
   editingMemberId: string,
   soloTeam: boolean
 ): CharacterPickState {
+  const rosterKey = normalizeAvatarKey(key);
   let editingReady = false;
   for (let i = 0; i < members.length; i++) {
     if (members[i].id === editingMemberId) {
@@ -133,28 +190,33 @@ export function characterPickState(
   if (editingReady) {
     return 'selfReadyLocked';
   }
-  if (!isCharacterOwned(key) || !isAvatarAllowedForSession(key, soloTeam)) {
+  if (!isCharacterOwned(rosterKey) || !isAvatarAllowedForSession(rosterKey, soloTeam)) {
     return 'unowned';
   }
   const readyLocked = getExclusiveAvatarsLockedByReadyMembers(members, editingMemberId);
-  if (readyLocked.has(key)) {
+  if (readyLocked.has(rosterKey)) {
     return 'lockedByReady';
   }
-  if (isExclusiveTakenByOther(members, key, editingMemberId)) {
+  if (isExclusiveTakenByOther(members, rosterKey, editingMemberId)) {
     return 'taken';
   }
   return 'selectable';
 }
 
 export function sortRosterKeysForPicker(keys: string[]): string[] {
-  const dup: string[] = [];
-  const rest: string[] = [];
+  const available: string[] = [];
+  const locked: string[] = [];
   for (let i = 0; i < keys.length; i++) {
-    if (keys[i] === MATCHMAN_AVATAR_KEY) {
-      dup.push(keys[i]);
+    if (isCharacterOwned(keys[i])) {
+      available.push(keys[i]);
     } else {
-      rest.push(keys[i]);
+      locked.push(keys[i]);
     }
   }
-  return dup.concat(rest);
+  const fallbackIndex = available.indexOf(RANDOM_AVATAR_KEY);
+  if (fallbackIndex > 0) {
+    available.splice(fallbackIndex, 1);
+    available.unshift(RANDOM_AVATAR_KEY);
+  }
+  return available.concat(locked);
 }

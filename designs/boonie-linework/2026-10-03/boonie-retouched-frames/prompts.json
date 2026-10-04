@@ -1,0 +1,302 @@
+{
+  "request": "统一为现有人物的线条风格，透明背景，去掉右下角文字框并补绘遮挡区域，添加线条画的接触阴影。",
+  "created_date": "2026-10-03",
+  "mode": "built-in image_gen",
+  "use_case": "style-transfer",
+  "output_directory": "/Users/lizhe/work/oneBeat/designs/boonie-linework/2026-10-03",
+  "style_reference_paths": [
+    "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/walk/lilroll/frame_01.png",
+    "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/walk/mismatch/frame_01.png",
+    "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/walk/wave/frame_01.png"
+  ],
+  "finish_reference": "/Users/lizhe/.codex/generated_images/01a0f634-5a2d-7ce1-9fb7-7ca18dcc1ab3/exec-9c593eda-e41f-4e03-9018-accebdfecf60.png",
+  "preservation": "原始输入未覆盖；未替换客户端 runtime 资源或修改代码。逐帧 AI 修订并非像素级描摹，动画循环衔接和定位尚未实机验证。",
+  "frames": [
+    {
+      "frame": "01",
+      "edit_target": "/Users/lizhe/Downloads/onebeatprocessing/cycling/boonie_frames/frame_01.png",
+      "input_roles": [
+        "Image 1: sole edit target and pose/framing/identity authority",
+        "Images 2–4: existing cast ink-rendering references"
+      ],
+      "referenced_image_paths": [
+        "/Users/lizhe/Downloads/onebeatprocessing/cycling/boonie_frames/frame_01.png",
+        "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/walk/lilroll/frame_01.png",
+        "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/walk/mismatch/frame_01.png",
+        "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/walk/wave/frame_01.png"
+      ],
+      "prompt": "Use case: style-transfer.\nAsset type: one transparent animation-frame PNG for the oneBeat comic cast.\nPrimary request: EDIT Image 1 only: match its ink rendering to the existing characters in Images 2–4, remove the whole pale background and lower-right black \"AI生成\" lettering and rounded box, reconstruct any obscured shoe, and draw natural line-art ground contact shadows.\nInput roles: Image 1 is the only pose, proportions, framing and character-identity authority. Images 2–4 (lilroll, mismatch, wave) are linework and comic-rendering references only. Do not borrow their clothing, facial features, poses or props.\nStyle: bold, mildly irregular variable-weight black contours, thinner confident interior folds, restrained short fine directional hatch marks on hat, clothing and footwear, saturated flat cel colors with a few simple shadow planes. Hand-drawn comic ink like the established cast, not soft 3D, painterly, generic anime or overly clean vector art. Add restrained hatching without clutter.\nPreserve exactly: floppy orange bucket/boonie hat shape and tilt, shaggy black hair, lavender skin, cool half-lidded eye, mouthless natural right-facing profile looking forward toward screen-right (never at camera), bright blue loose windbreaker with ivory sleeve panels and black bands, black zip and pockets, ivory undershirt, yellow cargo shorts with their actual pockets/folds, black socks, chunky violet/ivory/orange/black lace-up sneakers. Preserve each frame's own jacket opening, body rotation, hat angle, hands and original joint angles. No costume or facial redesign, no changed palette.\nComposition: single whole character, square canvas preferably 1254×1254. Keep Image 1's normalized scale, margins, head/body/hand/foot positions and ground baseline. Preserve both shoe orientations, exact raised-foot height and arm swing. Eye-level viewpoint, no camera perspective change, no reframing or cropping.\nBackground: genuinely transparent RGBA, including gaps around fingers, sleeve and legs. No remaining pale background, no halo, white/gray/black canvas or checkerboard texture.\nContact shadows: very low, tapered charcoal/black ink strokes with fine horizontal hatching and visible transparent gaps at the original ground baseline. A dense short patch beneath the planted sole, or a tiny dense patch where a trailing toe actually contacts the floor. Keep much lighter if adding an airborne foot's projected shadow, always on the ground baseline. No blur, solid filled oval, glow, floor strip, long ground line or floating shadow attached to a raised shoe.\nRemove all lower-right text and its rounded outline COMPLETELY, including where black glyphs or box lines overlap the violet panels, black laces and ivory outsole. Reconstruct the shoe's underlying contours/colors using the original target's visible portions.\nChange only ink/line rendering, modest cel shading, background and label removal, and line-drawn contact shadows. Keep all other elements faithful. Output one frame, no collage, words, logos, watermark, badge, frame or additional objects.\nPose-specific constraints: Frame 01: huge straight-leg forward kick toward screen-right with sneaker toe-up and well above the ground. Screen-left back sneaker is planted. Near arm stretches forward almost horizontally with a fist, rear arm swings back down-left. Preserve the exact target's broad stride and sleeve silhouette.",
+      "transparent_background": true,
+      "generated_source": "/Users/lizhe/.codex/generated_images/01a0f634-5a2d-7ce1-9fb7-7ca18dcc1ab3/exec-9c593eda-e41f-4e03-9018-accebdfecf60.png",
+      "saved_output": "/Users/lizhe/work/oneBeat/designs/boonie-linework/2026-10-03/frame_01.png",
+      "verified": {
+        "source": "/Users/lizhe/.codex/generated_images/01a0f634-5a2d-7ce1-9fb7-7ca18dcc1ab3/exec-9c593eda-e41f-4e03-9018-accebdfecf60.png",
+        "width": 1254,
+        "height": 1254,
+        "mode": "RGBA",
+        "alpha_extrema": [
+          0,
+          255
+        ],
+        "corner_alpha": [
+          0,
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "frame": "02",
+      "edit_target": "/Users/lizhe/Downloads/onebeatprocessing/cycling/boonie_frames/frame_02.png",
+      "input_roles": [
+        "Image 1: sole edit target and pose/framing/identity authority",
+        "Images 2–4: existing cast ink-rendering references",
+        "Image 5: retouched frame 01 finish only, never pose"
+      ],
+      "referenced_image_paths": [
+        "/Users/lizhe/Downloads/onebeatprocessing/cycling/boonie_frames/frame_02.png",
+        "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/walk/lilroll/frame_01.png",
+        "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/walk/mismatch/frame_01.png",
+        "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/walk/wave/frame_01.png",
+        "/Users/lizhe/.codex/generated_images/01a0f634-5a2d-7ce1-9fb7-7ca18dcc1ab3/exec-9c593eda-e41f-4e03-9018-accebdfecf60.png"
+      ],
+      "prompt": "Use case: style-transfer.\nAsset type: one transparent animation-frame PNG for the oneBeat comic cast.\nPrimary request: EDIT Image 1 only: match its ink rendering to the existing characters in Images 2–4, remove the whole pale background and lower-right black \"AI生成\" lettering and rounded box, reconstruct any obscured shoe, and draw natural line-art ground contact shadows.\nInput roles: Image 1 is the only pose, proportions, framing and character-identity authority. Images 2–4 (lilroll, mismatch, wave) are linework and comic-rendering references only. Do not borrow their clothing, facial features, poses or props.\nStyle: bold, mildly irregular variable-weight black contours, thinner confident interior folds, restrained short fine directional hatch marks on hat, clothing and footwear, saturated flat cel colors with a few simple shadow planes. Hand-drawn comic ink like the established cast, not soft 3D, painterly, generic anime or overly clean vector art. Add restrained hatching without clutter.\nPreserve exactly: floppy orange bucket/boonie hat shape and tilt, shaggy black hair, lavender skin, cool half-lidded eye, mouthless natural right-facing profile looking forward toward screen-right (never at camera), bright blue loose windbreaker with ivory sleeve panels and black bands, black zip and pockets, ivory undershirt, yellow cargo shorts with their actual pockets/folds, black socks, chunky violet/ivory/orange/black lace-up sneakers. Preserve each frame's own jacket opening, body rotation, hat angle, hands and original joint angles. No costume or facial redesign, no changed palette.\nComposition: single whole character, square canvas preferably 1254×1254. Keep Image 1's normalized scale, margins, head/body/hand/foot positions and ground baseline. Preserve both shoe orientations, exact raised-foot height and arm swing. Eye-level viewpoint, no camera perspective change, no reframing or cropping.\nBackground: genuinely transparent RGBA, including gaps around fingers, sleeve and legs. No remaining pale background, no halo, white/gray/black canvas or checkerboard texture.\nContact shadows: very low, tapered charcoal/black ink strokes with fine horizontal hatching and visible transparent gaps at the original ground baseline. A dense short patch beneath the planted sole, or a tiny dense patch where a trailing toe actually contacts the floor. Keep much lighter if adding an airborne foot's projected shadow, always on the ground baseline. No blur, solid filled oval, glow, floor strip, long ground line or floating shadow attached to a raised shoe.\nRemove all lower-right text and its rounded outline COMPLETELY, including where black glyphs or box lines overlap the violet panels, black laces and ivory outsole. Reconstruct the shoe's underlying contours/colors using the original target's visible portions.\nChange only ink/line rendering, modest cel shading, background and label removal, and line-drawn contact shadows. Keep all other elements faithful. Output one frame, no collage, words, logos, watermark, badge, frame or additional objects.\nImage 5: retouched frame 01, FINISH reference ONLY for matching ink weight, fine hatching and contact-shadow rendering. Do not copy its wide kick, foot positions or arm swing. The pose and framing of Image 1 remain authoritative; these animation phases must stay distinct.\nPose-specific constraints: Frame 02: narrower passing/push-off phase: screen-right forward sneaker lies flat on the ground, screen-left rear sneaker hangs almost vertical toe-down close to the ground. The rear shin is bent backward nearly horizontal. Near forward fist is lowered around waist level, back fist hangs low. Reconstruct the planted shoe toe/upper obscured by the lower-right text and box. DO NOT copy a high forward kick.",
+      "transparent_background": true,
+      "generated_source": "/Users/lizhe/.codex/generated_images/01a0f634-5a2d-7ce1-9fb7-7ca18dcc1ab3/exec-4b615ee4-f821-4168-af48-14076890f5bd.png",
+      "saved_output": "/Users/lizhe/work/oneBeat/designs/boonie-linework/2026-10-03/frame_02.png",
+      "verified": {
+        "source": "/Users/lizhe/.codex/generated_images/01a0f634-5a2d-7ce1-9fb7-7ca18dcc1ab3/exec-4b615ee4-f821-4168-af48-14076890f5bd.png",
+        "width": 1254,
+        "height": 1254,
+        "mode": "RGBA",
+        "alpha_extrema": [
+          0,
+          255
+        ],
+        "corner_alpha": [
+          0,
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "frame": "03",
+      "edit_target": "/Users/lizhe/Downloads/onebeatprocessing/cycling/boonie_frames/frame_03.png",
+      "input_roles": [
+        "Image 1: sole edit target and pose/framing/identity authority",
+        "Images 2–4: existing cast ink-rendering references",
+        "Image 5: retouched frame 01 finish only, never pose"
+      ],
+      "referenced_image_paths": [
+        "/Users/lizhe/Downloads/onebeatprocessing/cycling/boonie_frames/frame_03.png",
+        "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/walk/lilroll/frame_01.png",
+        "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/walk/mismatch/frame_01.png",
+        "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/walk/wave/frame_01.png",
+        "/Users/lizhe/.codex/generated_images/01a0f634-5a2d-7ce1-9fb7-7ca18dcc1ab3/exec-9c593eda-e41f-4e03-9018-accebdfecf60.png"
+      ],
+      "prompt": "Use case: style-transfer.\nAsset type: one transparent animation-frame PNG for the oneBeat comic cast.\nPrimary request: EDIT Image 1 only: match its ink rendering to the existing characters in Images 2–4, remove the whole pale background and lower-right black \"AI生成\" lettering and rounded box, reconstruct any obscured shoe, and draw natural line-art ground contact shadows.\nInput roles: Image 1 is the only pose, proportions, framing and character-identity authority. Images 2–4 (lilroll, mismatch, wave) are linework and comic-rendering references only. Do not borrow their clothing, facial features, poses or props.\nStyle: bold, mildly irregular variable-weight black contours, thinner confident interior folds, restrained short fine directional hatch marks on hat, clothing and footwear, saturated flat cel colors with a few simple shadow planes. Hand-drawn comic ink like the established cast, not soft 3D, painterly, generic anime or overly clean vector art. Add restrained hatching without clutter.\nPreserve exactly: floppy orange bucket/boonie hat shape and tilt, shaggy black hair, lavender skin, cool half-lidded eye, mouthless natural right-facing profile looking forward toward screen-right (never at camera), bright blue loose windbreaker with ivory sleeve panels and black bands, black zip and pockets, ivory undershirt, yellow cargo shorts with their actual pockets/folds, black socks, chunky violet/ivory/orange/black lace-up sneakers. Preserve each frame's own jacket opening, body rotation, hat angle, hands and original joint angles. No costume or facial redesign, no changed palette.\nComposition: single whole character, square canvas preferably 1254×1254. Keep Image 1's normalized scale, margins, head/body/hand/foot positions and ground baseline. Preserve both shoe orientations, exact raised-foot height and arm swing. Eye-level viewpoint, no camera perspective change, no reframing or cropping.\nBackground: genuinely transparent RGBA, including gaps around fingers, sleeve and legs. No remaining pale background, no halo, white/gray/black canvas or checkerboard texture.\nContact shadows: very low, tapered charcoal/black ink strokes with fine horizontal hatching and visible transparent gaps at the original ground baseline. A dense short patch beneath the planted sole, or a tiny dense patch where a trailing toe actually contacts the floor. Keep much lighter if adding an airborne foot's projected shadow, always on the ground baseline. No blur, solid filled oval, glow, floor strip, long ground line or floating shadow attached to a raised shoe.\nRemove all lower-right text and its rounded outline COMPLETELY, including where black glyphs or box lines overlap the violet panels, black laces and ivory outsole. Reconstruct the shoe's underlying contours/colors using the original target's visible portions.\nChange only ink/line rendering, modest cel shading, background and label removal, and line-drawn contact shadows. Keep all other elements faithful. Output one frame, no collage, words, logos, watermark, badge, frame or additional objects.\nImage 5: retouched frame 01, FINISH reference ONLY for matching ink weight, fine hatching and contact-shadow rendering. Do not copy its wide kick, foot positions or arm swing. The pose and framing of Image 1 remain authoritative; these animation phases must stay distinct.\nPose-specific constraints: Frame 03: forward knee bent and raised, screen-right sneaker elevated and angled gently toe-down; screen-left back sneaker planted. Near arm hangs down-left, far fist bends forward near lower chest. The box crosses near the raised sneaker's toe: restore it. Preserve knee bend and original lifted-foot height, NOT a straight-leg kick.",
+      "transparent_background": true,
+      "generated_source": "/Users/lizhe/.codex/generated_images/01a0f634-5a2d-7ce1-9fb7-7ca18dcc1ab3/exec-c31123dd-21e4-40fc-b33e-22366b04288e.png",
+      "saved_output": "/Users/lizhe/work/oneBeat/designs/boonie-linework/2026-10-03/frame_03.png",
+      "verified": {
+        "source": "/Users/lizhe/.codex/generated_images/01a0f634-5a2d-7ce1-9fb7-7ca18dcc1ab3/exec-c31123dd-21e4-40fc-b33e-22366b04288e.png",
+        "width": 1254,
+        "height": 1254,
+        "mode": "RGBA",
+        "alpha_extrema": [
+          0,
+          255
+        ],
+        "corner_alpha": [
+          0,
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "frame": "04",
+      "edit_target": "/Users/lizhe/Downloads/onebeatprocessing/cycling/boonie_frames/frame_04.png",
+      "input_roles": [
+        "Image 1: sole edit target and pose/framing/identity authority",
+        "Images 2–4: existing cast ink-rendering references",
+        "Image 5: retouched frame 01 finish only, never pose"
+      ],
+      "referenced_image_paths": [
+        "/Users/lizhe/Downloads/onebeatprocessing/cycling/boonie_frames/frame_04.png",
+        "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/walk/lilroll/frame_01.png",
+        "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/walk/mismatch/frame_01.png",
+        "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/walk/wave/frame_01.png",
+        "/Users/lizhe/.codex/generated_images/01a0f634-5a2d-7ce1-9fb7-7ca18dcc1ab3/exec-9c593eda-e41f-4e03-9018-accebdfecf60.png"
+      ],
+      "prompt": "Use case: style-transfer.\nAsset type: one transparent animation-frame PNG for the oneBeat comic cast.\nPrimary request: EDIT Image 1 only: match its ink rendering to the existing characters in Images 2–4, remove the whole pale background and lower-right black \"AI生成\" lettering and rounded box, reconstruct any obscured shoe, and draw natural line-art ground contact shadows.\nInput roles: Image 1 is the only pose, proportions, framing and character-identity authority. Images 2–4 (lilroll, mismatch, wave) are linework and comic-rendering references only. Do not borrow their clothing, facial features, poses or props.\nStyle: bold, mildly irregular variable-weight black contours, thinner confident interior folds, restrained short fine directional hatch marks on hat, clothing and footwear, saturated flat cel colors with a few simple shadow planes. Hand-drawn comic ink like the established cast, not soft 3D, painterly, generic anime or overly clean vector art. Add restrained hatching without clutter.\nPreserve exactly: floppy orange bucket/boonie hat shape and tilt, shaggy black hair, lavender skin, cool half-lidded eye, mouthless natural right-facing profile looking forward toward screen-right (never at camera), bright blue loose windbreaker with ivory sleeve panels and black bands, black zip and pockets, ivory undershirt, yellow cargo shorts with their actual pockets/folds, black socks, chunky violet/ivory/orange/black lace-up sneakers. Preserve each frame's own jacket opening, body rotation, hat angle, hands and original joint angles. No costume or facial redesign, no changed palette.\nComposition: single whole character, square canvas preferably 1254×1254. Keep Image 1's normalized scale, margins, head/body/hand/foot positions and ground baseline. Preserve both shoe orientations, exact raised-foot height and arm swing. Eye-level viewpoint, no camera perspective change, no reframing or cropping.\nBackground: genuinely transparent RGBA, including gaps around fingers, sleeve and legs. No remaining pale background, no halo, white/gray/black canvas or checkerboard texture.\nContact shadows: very low, tapered charcoal/black ink strokes with fine horizontal hatching and visible transparent gaps at the original ground baseline. A dense short patch beneath the planted sole, or a tiny dense patch where a trailing toe actually contacts the floor. Keep much lighter if adding an airborne foot's projected shadow, always on the ground baseline. No blur, solid filled oval, glow, floor strip, long ground line or floating shadow attached to a raised shoe.\nRemove all lower-right text and its rounded outline COMPLETELY, including where black glyphs or box lines overlap the violet panels, black laces and ivory outsole. Reconstruct the shoe's underlying contours/colors using the original target's visible portions.\nChange only ink/line rendering, modest cel shading, background and label removal, and line-drawn contact shadows. Keep all other elements faithful. Output one frame, no collage, words, logos, watermark, badge, frame or additional objects.\nImage 5: retouched frame 01, FINISH reference ONLY for matching ink weight, fine hatching and contact-shadow rendering. Do not copy its wide kick, foot positions or arm swing. The pose and framing of Image 1 remain authoritative; these animation phases must stay distinct.\nPose-specific constraints: Frame 04: broad forward straight-leg high step. Screen-right raised sneaker toe-up; screen-left back sneaker planted. Near arm swings back down-left while far forward elbow is bent and fist held near chest. Keep target-specific hand positions and jacket front; do not copy frame 01's extended near forward arm.",
+      "transparent_background": true,
+      "generated_source": "/Users/lizhe/.codex/generated_images/01a0f634-5a2d-7ce1-9fb7-7ca18dcc1ab3/exec-608c7347-d486-4078-89ed-2f083dce569a.png",
+      "saved_output": "/Users/lizhe/work/oneBeat/designs/boonie-linework/2026-10-03/frame_04.png",
+      "verified": {
+        "source": "/Users/lizhe/.codex/generated_images/01a0f634-5a2d-7ce1-9fb7-7ca18dcc1ab3/exec-608c7347-d486-4078-89ed-2f083dce569a.png",
+        "width": 1254,
+        "height": 1254,
+        "mode": "RGBA",
+        "alpha_extrema": [
+          0,
+          255
+        ],
+        "corner_alpha": [
+          0,
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "frame": "05",
+      "edit_target": "/Users/lizhe/Downloads/onebeatprocessing/cycling/boonie_frames/frame_05.png",
+      "input_roles": [
+        "Image 1: sole edit target and pose/framing/identity authority",
+        "Images 2–4: existing cast ink-rendering references",
+        "Image 5: retouched frame 01 finish only, never pose"
+      ],
+      "referenced_image_paths": [
+        "/Users/lizhe/Downloads/onebeatprocessing/cycling/boonie_frames/frame_05.png",
+        "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/walk/lilroll/frame_01.png",
+        "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/walk/mismatch/frame_01.png",
+        "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/walk/wave/frame_01.png",
+        "/Users/lizhe/.codex/generated_images/01a0f634-5a2d-7ce1-9fb7-7ca18dcc1ab3/exec-9c593eda-e41f-4e03-9018-accebdfecf60.png"
+      ],
+      "prompt": "Use case: style-transfer.\nAsset type: one transparent animation-frame PNG for the oneBeat comic cast.\nPrimary request: EDIT Image 1 only: match its ink rendering to the existing characters in Images 2–4, remove the whole pale background and lower-right black \"AI生成\" lettering and rounded box, reconstruct any obscured shoe, and draw natural line-art ground contact shadows.\nInput roles: Image 1 is the only pose, proportions, framing and character-identity authority. Images 2–4 (lilroll, mismatch, wave) are linework and comic-rendering references only. Do not borrow their clothing, facial features, poses or props.\nStyle: bold, mildly irregular variable-weight black contours, thinner confident interior folds, restrained short fine directional hatch marks on hat, clothing and footwear, saturated flat cel colors with a few simple shadow planes. Hand-drawn comic ink like the established cast, not soft 3D, painterly, generic anime or overly clean vector art. Add restrained hatching without clutter.\nPreserve exactly: floppy orange bucket/boonie hat shape and tilt, shaggy black hair, lavender skin, cool half-lidded eye, mouthless natural right-facing profile looking forward toward screen-right (never at camera), bright blue loose windbreaker with ivory sleeve panels and black bands, black zip and pockets, ivory undershirt, yellow cargo shorts with their actual pockets/folds, black socks, chunky violet/ivory/orange/black lace-up sneakers. Preserve each frame's own jacket opening, body rotation, hat angle, hands and original joint angles. No costume or facial redesign, no changed palette.\nComposition: single whole character, square canvas preferably 1254×1254. Keep Image 1's normalized scale, margins, head/body/hand/foot positions and ground baseline. Preserve both shoe orientations, exact raised-foot height and arm swing. Eye-level viewpoint, no camera perspective change, no reframing or cropping.\nBackground: genuinely transparent RGBA, including gaps around fingers, sleeve and legs. No remaining pale background, no halo, white/gray/black canvas or checkerboard texture.\nContact shadows: very low, tapered charcoal/black ink strokes with fine horizontal hatching and visible transparent gaps at the original ground baseline. A dense short patch beneath the planted sole, or a tiny dense patch where a trailing toe actually contacts the floor. Keep much lighter if adding an airborne foot's projected shadow, always on the ground baseline. No blur, solid filled oval, glow, floor strip, long ground line or floating shadow attached to a raised shoe.\nRemove all lower-right text and its rounded outline COMPLETELY, including where black glyphs or box lines overlap the violet panels, black laces and ivory outsole. Reconstruct the shoe's underlying contours/colors using the original target's visible portions.\nChange only ink/line rendering, modest cel shading, background and label removal, and line-drawn contact shadows. Keep all other elements faithful. Output one frame, no collage, words, logos, watermark, badge, frame or additional objects.\nImage 5: retouched frame 01, FINISH reference ONLY for matching ink weight, fine hatching and contact-shadow rendering. Do not copy its wide kick, foot positions or arm swing. The pose and framing of Image 1 remain authoritative; these animation phases must stay distinct.\nPose-specific constraints: Frame 05: very broad forward extended leg, screen-right sneaker raised and toe-up; screen-left back sneaker planted. Near arm swings backward down-left, far elbow bends forward with fist near chest. Keep this frame's exact stride length, shin slope, shoe angle, hat position and jacket opening, not frame 04's geometry.",
+      "transparent_background": true,
+      "generated_source": "/Users/lizhe/.codex/generated_images/01a0f634-5a2d-7ce1-9fb7-7ca18dcc1ab3/exec-7e0327ff-f244-406d-a417-920729c1a728.png",
+      "saved_output": "/Users/lizhe/work/oneBeat/designs/boonie-linework/2026-10-03/frame_05.png",
+      "verified": {
+        "source": "/Users/lizhe/.codex/generated_images/01a0f634-5a2d-7ce1-9fb7-7ca18dcc1ab3/exec-7e0327ff-f244-406d-a417-920729c1a728.png",
+        "width": 1254,
+        "height": 1254,
+        "mode": "RGBA",
+        "alpha_extrema": [
+          0,
+          255
+        ],
+        "corner_alpha": [
+          0,
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "frame": "06",
+      "edit_target": "/Users/lizhe/Downloads/onebeatprocessing/cycling/boonie_frames/frame_06.png",
+      "input_roles": [
+        "Image 1: sole edit target and pose/framing/identity authority",
+        "Images 2–4: existing cast ink-rendering references",
+        "Image 5: retouched frame 01 finish only, never pose"
+      ],
+      "referenced_image_paths": [
+        "/Users/lizhe/Downloads/onebeatprocessing/cycling/boonie_frames/frame_06.png",
+        "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/walk/lilroll/frame_01.png",
+        "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/walk/mismatch/frame_01.png",
+        "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/walk/wave/frame_01.png",
+        "/Users/lizhe/.codex/generated_images/01a0f634-5a2d-7ce1-9fb7-7ca18dcc1ab3/exec-9c593eda-e41f-4e03-9018-accebdfecf60.png"
+      ],
+      "prompt": "Use case: style-transfer.\nAsset type: one transparent animation-frame PNG for the oneBeat comic cast.\nPrimary request: EDIT Image 1 only: match its ink rendering to the existing characters in Images 2–4, remove the whole pale background and lower-right black \"AI生成\" lettering and rounded box, reconstruct any obscured shoe, and draw natural line-art ground contact shadows.\nInput roles: Image 1 is the only pose, proportions, framing and character-identity authority. Images 2–4 (lilroll, mismatch, wave) are linework and comic-rendering references only. Do not borrow their clothing, facial features, poses or props.\nStyle: bold, mildly irregular variable-weight black contours, thinner confident interior folds, restrained short fine directional hatch marks on hat, clothing and footwear, saturated flat cel colors with a few simple shadow planes. Hand-drawn comic ink like the established cast, not soft 3D, painterly, generic anime or overly clean vector art. Add restrained hatching without clutter.\nPreserve exactly: floppy orange bucket/boonie hat shape and tilt, shaggy black hair, lavender skin, cool half-lidded eye, mouthless natural right-facing profile looking forward toward screen-right (never at camera), bright blue loose windbreaker with ivory sleeve panels and black bands, black zip and pockets, ivory undershirt, yellow cargo shorts with their actual pockets/folds, black socks, chunky violet/ivory/orange/black lace-up sneakers. Preserve each frame's own jacket opening, body rotation, hat angle, hands and original joint angles. No costume or facial redesign, no changed palette.\nComposition: single whole character, square canvas preferably 1254×1254. Keep Image 1's normalized scale, margins, head/body/hand/foot positions and ground baseline. Preserve both shoe orientations, exact raised-foot height and arm swing. Eye-level viewpoint, no camera perspective change, no reframing or cropping.\nBackground: genuinely transparent RGBA, including gaps around fingers, sleeve and legs. No remaining pale background, no halo, white/gray/black canvas or checkerboard texture.\nContact shadows: very low, tapered charcoal/black ink strokes with fine horizontal hatching and visible transparent gaps at the original ground baseline. A dense short patch beneath the planted sole, or a tiny dense patch where a trailing toe actually contacts the floor. Keep much lighter if adding an airborne foot's projected shadow, always on the ground baseline. No blur, solid filled oval, glow, floor strip, long ground line or floating shadow attached to a raised shoe.\nRemove all lower-right text and its rounded outline COMPLETELY, including where black glyphs or box lines overlap the violet panels, black laces and ivory outsole. Reconstruct the shoe's underlying contours/colors using the original target's visible portions.\nChange only ink/line rendering, modest cel shading, background and label removal, and line-drawn contact shadows. Keep all other elements faithful. Output one frame, no collage, words, logos, watermark, badge, frame or additional objects.\nImage 5: retouched frame 01, FINISH reference ONLY for matching ink weight, fine hatching and contact-shadow rendering. Do not copy its wide kick, foot positions or arm swing. The pose and framing of Image 1 remain authoritative; these animation phases must stay distinct.\nPose-specific constraints: Frame 06: narrower opposite arm-swing push-off phase. Screen-right forward sneaker is fully planted and screen-left trailing sneaker almost vertical toe-down at the ground, rear knee bent backward. Near arm hangs down-left, far fist bends ahead near waist. Restore the planted forward sneaker beneath overlapping label and box lines. Preserve target arm and knee angles; no high-kick substitution.",
+      "transparent_background": true,
+      "generated_source": "/Users/lizhe/.codex/generated_images/01a0f634-5a2d-7ce1-9fb7-7ca18dcc1ab3/exec-3fad789c-94e8-4759-bf76-c7325080efee.png",
+      "saved_output": "/Users/lizhe/work/oneBeat/designs/boonie-linework/2026-10-03/frame_06.png",
+      "verified": {
+        "source": "/Users/lizhe/.codex/generated_images/01a0f634-5a2d-7ce1-9fb7-7ca18dcc1ab3/exec-3fad789c-94e8-4759-bf76-c7325080efee.png",
+        "width": 1254,
+        "height": 1254,
+        "mode": "RGBA",
+        "alpha_extrema": [
+          0,
+          255
+        ],
+        "corner_alpha": [
+          0,
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "frame": "07",
+      "edit_target": "/Users/lizhe/Downloads/onebeatprocessing/cycling/boonie_frames/frame_07.png",
+      "input_roles": [
+        "Image 1: sole edit target and pose/framing/identity authority",
+        "Images 2–4: existing cast ink-rendering references",
+        "Image 5: retouched frame 01 finish only, never pose"
+      ],
+      "referenced_image_paths": [
+        "/Users/lizhe/Downloads/onebeatprocessing/cycling/boonie_frames/frame_07.png",
+        "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/walk/lilroll/frame_01.png",
+        "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/walk/mismatch/frame_01.png",
+        "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/walk/wave/frame_01.png",
+        "/Users/lizhe/.codex/generated_images/01a0f634-5a2d-7ce1-9fb7-7ca18dcc1ab3/exec-9c593eda-e41f-4e03-9018-accebdfecf60.png"
+      ],
+      "prompt": "Use case: style-transfer.\nAsset type: one transparent animation-frame PNG for the oneBeat comic cast.\nPrimary request: EDIT Image 1 only: match its ink rendering to the existing characters in Images 2–4, remove the whole pale background and lower-right black \"AI生成\" lettering and rounded box, reconstruct any obscured shoe, and draw natural line-art ground contact shadows.\nInput roles: Image 1 is the only pose, proportions, framing and character-identity authority. Images 2–4 (lilroll, mismatch, wave) are linework and comic-rendering references only. Do not borrow their clothing, facial features, poses or props.\nStyle: bold, mildly irregular variable-weight black contours, thinner confident interior folds, restrained short fine directional hatch marks on hat, clothing and footwear, saturated flat cel colors with a few simple shadow planes. Hand-drawn comic ink like the established cast, not soft 3D, painterly, generic anime or overly clean vector art. Add restrained hatching without clutter.\nPreserve exactly: floppy orange bucket/boonie hat shape and tilt, shaggy black hair, lavender skin, cool half-lidded eye, mouthless natural right-facing profile looking forward toward screen-right (never at camera), bright blue loose windbreaker with ivory sleeve panels and black bands, black zip and pockets, ivory undershirt, yellow cargo shorts with their actual pockets/folds, black socks, chunky violet/ivory/orange/black lace-up sneakers. Preserve each frame's own jacket opening, body rotation, hat angle, hands and original joint angles. No costume or facial redesign, no changed palette.\nComposition: single whole character, square canvas preferably 1254×1254. Keep Image 1's normalized scale, margins, head/body/hand/foot positions and ground baseline. Preserve both shoe orientations, exact raised-foot height and arm swing. Eye-level viewpoint, no camera perspective change, no reframing or cropping.\nBackground: genuinely transparent RGBA, including gaps around fingers, sleeve and legs. No remaining pale background, no halo, white/gray/black canvas or checkerboard texture.\nContact shadows: very low, tapered charcoal/black ink strokes with fine horizontal hatching and visible transparent gaps at the original ground baseline. A dense short patch beneath the planted sole, or a tiny dense patch where a trailing toe actually contacts the floor. Keep much lighter if adding an airborne foot's projected shadow, always on the ground baseline. No blur, solid filled oval, glow, floor strip, long ground line or floating shadow attached to a raised shoe.\nRemove all lower-right text and its rounded outline COMPLETELY, including where black glyphs or box lines overlap the violet panels, black laces and ivory outsole. Reconstruct the shoe's underlying contours/colors using the original target's visible portions.\nChange only ink/line rendering, modest cel shading, background and label removal, and line-drawn contact shadows. Keep all other elements faithful. Output one frame, no collage, words, logos, watermark, badge, frame or additional objects.\nImage 5: retouched frame 01, FINISH reference ONLY for matching ink weight, fine hatching and contact-shadow rendering. Do not copy its wide kick, foot positions or arm swing. The pose and framing of Image 1 remain authoritative; these animation phases must stay distinct.\nPose-specific constraints: Frame 07: forward right knee raised/bent, raised sneaker is nearly horizontal and well clear of ground. Screen-left back sneaker planted. Near arm swings forward with fist beside raised thigh, rear fist hangs back low. Keep raised-foot height, exact knee bend, hand positions and rear-view jacket panel, not frame 03's different arm swing.",
+      "transparent_background": true,
+      "generated_source": "/Users/lizhe/.codex/generated_images/01a0f634-5a2d-7ce1-9fb7-7ca18dcc1ab3/exec-83d4e435-9dea-4698-8765-8c704a9362ce.png",
+      "saved_output": "/Users/lizhe/work/oneBeat/designs/boonie-linework/2026-10-03/frame_07.png",
+      "verified": {
+        "source": "/Users/lizhe/.codex/generated_images/01a0f634-5a2d-7ce1-9fb7-7ca18dcc1ab3/exec-83d4e435-9dea-4698-8765-8c704a9362ce.png",
+        "width": 1254,
+        "height": 1254,
+        "mode": "RGBA",
+        "alpha_extrema": [
+          0,
+          255
+        ],
+        "corner_alpha": [
+          0,
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "frame": "08",
+      "edit_target": "/Users/lizhe/Downloads/onebeatprocessing/cycling/boonie_frames/frame_08.png",
+      "input_roles": [
+        "Image 1: sole edit target and pose/framing/identity authority",
+        "Images 2–4: existing cast ink-rendering references",
+        "Image 5: retouched frame 01 finish only, never pose"
+      ],
+      "referenced_image_paths": [
+        "/Users/lizhe/Downloads/onebeatprocessing/cycling/boonie_frames/frame_08.png",
+        "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/walk/lilroll/frame_01.png",
+        "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/walk/mismatch/frame_01.png",
+        "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/walk/wave/frame_01.png",
+        "/Users/lizhe/.codex/generated_images/01a0f634-5a2d-7ce1-9fb7-7ca18dcc1ab3/exec-9c593eda-e41f-4e03-9018-accebdfecf60.png"
+      ],
+      "prompt": "Use case: style-transfer.\nAsset type: one transparent animation-frame PNG for the oneBeat comic cast.\nPrimary request: EDIT Image 1 only: match its ink rendering to the existing characters in Images 2–4, remove the whole pale background and lower-right black \"AI生成\" lettering and rounded box, reconstruct any obscured shoe, and draw natural line-art ground contact shadows.\nInput roles: Image 1 is the only pose, proportions, framing and character-identity authority. Images 2–4 (lilroll, mismatch, wave) are linework and comic-rendering references only. Do not borrow their clothing, facial features, poses or props.\nStyle: bold, mildly irregular variable-weight black contours, thinner confident interior folds, restrained short fine directional hatch marks on hat, clothing and footwear, saturated flat cel colors with a few simple shadow planes. Hand-drawn comic ink like the established cast, not soft 3D, painterly, generic anime or overly clean vector art. Add restrained hatching without clutter.\nPreserve exactly: floppy orange bucket/boonie hat shape and tilt, shaggy black hair, lavender skin, cool half-lidded eye, mouthless natural right-facing profile looking forward toward screen-right (never at camera), bright blue loose windbreaker with ivory sleeve panels and black bands, black zip and pockets, ivory undershirt, yellow cargo shorts with their actual pockets/folds, black socks, chunky violet/ivory/orange/black lace-up sneakers. Preserve each frame's own jacket opening, body rotation, hat angle, hands and original joint angles. No costume or facial redesign, no changed palette.\nComposition: single whole character, square canvas preferably 1254×1254. Keep Image 1's normalized scale, margins, head/body/hand/foot positions and ground baseline. Preserve both shoe orientations, exact raised-foot height and arm swing. Eye-level viewpoint, no camera perspective change, no reframing or cropping.\nBackground: genuinely transparent RGBA, including gaps around fingers, sleeve and legs. No remaining pale background, no halo, white/gray/black canvas or checkerboard texture.\nContact shadows: very low, tapered charcoal/black ink strokes with fine horizontal hatching and visible transparent gaps at the original ground baseline. A dense short patch beneath the planted sole, or a tiny dense patch where a trailing toe actually contacts the floor. Keep much lighter if adding an airborne foot's projected shadow, always on the ground baseline. No blur, solid filled oval, glow, floor strip, long ground line or floating shadow attached to a raised shoe.\nRemove all lower-right text and its rounded outline COMPLETELY, including where black glyphs or box lines overlap the violet panels, black laces and ivory outsole. Reconstruct the shoe's underlying contours/colors using the original target's visible portions.\nChange only ink/line rendering, modest cel shading, background and label removal, and line-drawn contact shadows. Keep all other elements faithful. Output one frame, no collage, words, logos, watermark, badge, frame or additional objects.\nImage 5: retouched frame 01, FINISH reference ONLY for matching ink weight, fine hatching and contact-shadow rendering. Do not copy its wide kick, foot positions or arm swing. The pose and framing of Image 1 remain authoritative; these animation phases must stay distinct.\nPose-specific constraints: Frame 08: broad forward straight-leg step with screen-right shoe elevated toe-up and screen-left sneaker planted. Near forearm stretches forward at upper-waist/chest height, rear arm hangs back down-left. Preserve this frame's own stride, rear-view jacket folds and arm extension instead of using frame 01's pose.",
+      "transparent_background": true,
+      "generated_source": "/Users/lizhe/.codex/generated_images/01a0f634-5a2d-7ce1-9fb7-7ca18dcc1ab3/exec-8bc046a7-8a58-4fb3-b8a5-8a006b38d49c.png",
+      "saved_output": "/Users/lizhe/work/oneBeat/designs/boonie-linework/2026-10-03/frame_08.png",
+      "verified": {
+        "source": "/Users/lizhe/.codex/generated_images/01a0f634-5a2d-7ce1-9fb7-7ca18dcc1ab3/exec-8bc046a7-8a58-4fb3-b8a5-8a006b38d49c.png",
+        "width": 1254,
+        "height": 1254,
+        "mode": "RGBA",
+        "alpha_extrema": [
+          0,
+          255
+        ],
+        "corner_alpha": [
+          0,
+          0,
+          0,
+          0
+        ]
+      }
+    }
+  ]
+}

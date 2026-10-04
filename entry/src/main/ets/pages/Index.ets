@@ -1,11 +1,18 @@
 import { router } from '@kit.ArkUI';
-import { ComicButton, ComicCharacter, PAPER, LILAC, TEAL } from '../components/ComicKit';
+import { ComicButton, ComicCharacter, PAPER, INK, LILAC, WHITE } from '../components/ComicKit';
+import { ensureStoreBootstrapReady } from '../store/StoreBootstrapSync';
+
+const HOME_BUTTON_SHADOW: ShadowOptions = { radius: 0, offsetX: 2, offsetY: 3, color: INK };
 
 @Entry
 @Component
 struct Index {
   @StorageLink('safeAreaTop') topSafeInset: number = 0;
   @StorageLink('safeAreaBottom') bottomSafeInset: number = 0;
+
+  aboutToAppear(): void {
+    void ensureStoreBootstrapReady();
+  }
 
   private goSolo(): void {
     router.pushUrl({
@@ -35,9 +42,11 @@ struct Index {
           Text('GOOD PEOPLE. SAME BEAT!').fontSize(12).fontWeight(900)
             .backgroundColor(PAPER).padding(5).align(Alignment.BottomEnd)
         }.width('100%').height(245).clip(true)
-        ComicButton({ label: '多人练习', action: () => this.goTeam() })
-        ComicButton({ label: '单人练习', fill: TEAL, action: () => this.goSolo() })
-        ComicButton({ label: '收藏小铺', fill: LILAC, action: () => {
+        ComicButton({ label: '多人练习', inkShadow: HOME_BUTTON_SHADOW,
+          action: () => this.goTeam() })
+        ComicButton({ label: '单人练习', fill: WHITE, inkShadow: HOME_BUTTON_SHADOW,
+          action: () => this.goSolo() })
+        ComicButton({ label: '收藏小铺', fill: LILAC, inkShadow: HOME_BUTTON_SHADOW, action: () => {
           router.pushUrl({ url: 'pages/StorePage' });
         } })
         Row() {

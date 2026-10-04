@@ -2,7 +2,17 @@ import { router, promptAction } from '@kit.ArkUI';
 import { AppSession } from '../app/AppSession';
 import { SessionController } from '../session/SessionController';
 import { SessionMember } from '../protocol/messages';
-import { ComicCharacter, PAPER, INK, CORAL, LILAC } from '../components/ComicKit';
+import {
+  ComicCharacter,
+  revealedAvatarAsset,
+  PAPER,
+  INK,
+  CORAL,
+  LILAC,
+  WHITE,
+  CARD_SHADOW,
+  CONTROL_SHADOW
+} from '../components/ComicKit';
 import { WalkScene } from '../scene/WalkScene';
 
 const COUNTDOWN_FONT_SIZE: number = 138;
@@ -37,7 +47,7 @@ struct MainPage {
   @State countdownOpacity: number = 0;
   @StorageLink('safeAreaTop') topSafeInset: number = 0;
   @StorageLink('safeAreaBottom') bottomSafeInset: number = 0;
-  @StorageLink('selectedSceneKey') sceneKey: string = 'neon_street';
+  @StorageLink('selectedSceneKey') sceneKey: string = 'sunset_coast';
   @State soloTeam: boolean = false;
   private sounds: string[] = ['电子', '清脆', '低音'];
   private visualTimer: number = -1;
@@ -68,10 +78,6 @@ struct MainPage {
     this.beat = storedBeatInBar > 0 ? storedBeatInBar - 1 : -1;
     this.sync = c.soloTeam ? '本机练习' : c.isLeader ? '队长时钟' : `同步 ${c.getSyncQuality()}`;
     this.soloTeam = c.soloTeam;
-    if (c.soloTeam && c.isLeader) {
-      c.reconcileSoloLegacyBots();
-      this.members = c.getMembers();
-    }
     this.refreshVisualTransport();
     if (!c.soloTeam && !c.isLeader && !c.lobbyDeparted) {
       this.returnToLobby();
@@ -228,6 +234,7 @@ struct MainPage {
         Row() {
           Text('先等等！').fontSize(13).fontWeight(900).fontColor(PAPER)
             .backgroundColor(INK).padding({ left: 9, right: 9, top: 4, bottom: 4 })
+            .shadow(CONTROL_SHADOW)
             .rotate({ angle: -2 })
           Blank()
           Text('×').fontSize(22).fontWeight(900).width(32).height(32).textAlign(TextAlign.Center)
@@ -239,11 +246,11 @@ struct MainPage {
         Row({ space: 10 }) {
           Button('继续行进', { type: ButtonType.Normal })
             .layoutWeight(1).height(46).fontSize(15).fontWeight(900).fontColor(INK)
-            .backgroundColor(PAPER).border({ width: 1.5, color: INK }).borderRadius(6)
+            .backgroundColor(PAPER).border({ width: 1.5, color: INK }).borderRadius(6).shadow(CONTROL_SHADOW)
             .onClick(() => this.showExitConfirm = false)
           Button('退出队伍', { type: ButtonType.Normal })
             .layoutWeight(1).height(46).fontSize(15).fontWeight(900).fontColor(INK)
-            .backgroundColor(CORAL).border({ width: 1.5, color: INK }).borderRadius(6)
+            .backgroundColor(CORAL).border({ width: 1.5, color: INK }).borderRadius(6).shadow(CONTROL_SHADOW)
             .onClick(() => { void this.exitSessionToHome(); })
         }.width('100%')
       }
@@ -268,6 +275,7 @@ struct MainPage {
         Text('一起行进').fontSize(28).fontWeight(900).fontStyle(FontStyle.Italic)
         Text(' LIVE ').fontSize(10).fontWeight(FontWeight.Bold).fontColor(PAPER)
           .backgroundColor(CORAL).padding({ left: 4, right: 4, top: 2, bottom: 2 }).rotate({ angle: -4 })
+          .shadow(CONTROL_SHADOW)
         Blank()
         Circle().width(8).height(8).fill('#38B68D')
         Text(this.sync).fontSize(10).fontWeight(FontWeight.Bold).maxLines(1)
@@ -302,9 +310,8 @@ struct MainPage {
       }.width('100%')
     }
     .width('100%').padding({ left: 14, right: 14, top: 8 + this.topSafeInset, bottom: 8 })
-    .backgroundColor('#F5EBD6F5')
-    .border({ width: { bottom: 3 }, color: INK })
-    .shadow({ radius: 0, offsetY: 5, color: '#66171B1F' })
+    .backgroundColor(WHITE)
+    .border({ width: { bottom: 3 }, color: INK }).shadow(CARD_SHADOW)
     .translate({ y: this.chromeVisible ? 0 : -155 - this.topSafeInset })
     .opacity(this.chromeVisible ? 1 : 0)
   }
@@ -319,7 +326,10 @@ struct MainPage {
               ForEach(this.members, (m: SessionMember) => {
                 Column({ space: 2 }) {
                   Stack({ alignContent: Alignment.TopEnd }) {
-                    ComicCharacter({ avatar: m.avatarKey, portrait: true }).width(34).height(34)
+                    ComicCharacter({
+                      avatar: revealedAvatarAsset(m.avatarKey, m.resolvedAvatarKey ?? '', m.colorSlot ?? 0),
+                      portrait: true
+                    }).width(34).height(34)
                     if (this.soloTeam && this.leader && SessionController.isSoloBotMemberId(m.id)) {
                       Text('×')
                         .fontSize(11)
@@ -329,7 +339,7 @@ struct MainPage {
                         .height(16)
                         .textAlign(TextAlign.Center)
                         .backgroundColor(INK)
-                        .borderRadius(8)
+                        .borderRadius(8).shadow(CARD_SHADOW)
                         .margin({ top: 1, right: 1 })
                         .onClick(() => { void this.removeSoloBotSlot(m.id); })
                     }
@@ -353,7 +363,7 @@ struct MainPage {
                   .width(34)
                   .height(34)
                   .border({ width: 1.5, color: INK })
-                  .borderRadius(4)
+                  .borderRadius(4).shadow(CONTROL_SHADOW)
                   .backgroundColor(PAPER)
                   .opacity(this.canAddSoloBotSlot() ? 1 : 0.42)
                   .hitTestBehavior(this.canAddSoloBotSlot() ? HitTestMode.Default : HitTestMode.None)
@@ -368,27 +378,27 @@ struct MainPage {
           .height(56)
           .clip(false)
         }.width('100%')
-          .backgroundColor(LILAC).border({ width: 1, color: INK }).borderRadius(5).clip(false)
+          .backgroundColor(LILAC).border({ width: 1, color: INK }).borderRadius(5).shadow(CARD_SHADOW).clip(false)
       }
       Row({ space: 10 }) {
         Column({ space: 2 }) {
-          Button('♪').width(38).height(38).backgroundColor(PAPER).fontColor(INK).border({ width: 1.5, color: INK }).borderRadius(5)
+          Button('♪').width(38).height(38).backgroundColor(PAPER).fontColor(INK).border({ width: 1.5, color: INK }).borderRadius(5).shadow(CONTROL_SHADOW)
             .enabled(this.leader).onClick(() => { void AppSession.get()?.controller.updateSoundId(this.sound + 1); })
           Text(this.sounds[this.sound]).fontSize(9).fontWeight(FontWeight.Bold)
         }
         Button('−').width(38).height(38).backgroundColor(PAPER).fontColor(INK).fontSize(22)
-          .border({ width: 1.5, color: INK }).borderRadius(5)
+          .border({ width: 1.5, color: INK }).borderRadius(5).shadow(CONTROL_SHADOW)
           .enabled(this.leader && this.bpm > 40).onClick(() => { void AppSession.get()?.controller.updateBpm(this.bpm - 1); })
         Button(this.state === 'playing' || this.state === 'countdown' ? 'Ⅱ' : '▶')
           .width(68).height(68).backgroundColor(CORAL).fontColor(INK).fontSize(27)
           .border({ width: 2, color: INK }).borderRadius(34).shadow({ radius: 0, offsetX: 3, offsetY: 3, color: INK })
           .enabled(this.leader && !this.busy).onClick(() => { void this.toggle(); })
         Button('+').width(38).height(38).backgroundColor(PAPER).fontColor(INK).fontSize(22)
-          .border({ width: 1.5, color: INK }).borderRadius(5)
+          .border({ width: 1.5, color: INK }).borderRadius(5).shadow(CONTROL_SHADOW)
           .enabled(this.leader && this.bpm < 240).onClick(() => { void AppSession.get()?.controller.updateBpm(this.bpm + 1); })
         Column({ space: 2 }) {
           Button('人').width(38).height(38).backgroundColor(this.showMembers ? LILAC : PAPER).fontColor(INK)
-            .border({ width: 1.5, color: INK }).borderRadius(5).onClick(() => this.showMembers = !this.showMembers)
+            .border({ width: 1.5, color: INK }).borderRadius(5).shadow(CONTROL_SHADOW).onClick(() => this.showMembers = !this.showMembers)
           Text(`${this.members.length} 队员`).fontSize(9).fontWeight(FontWeight.Bold)
         }
       }.width('100%').justifyContent(FlexAlign.SpaceBetween).alignItems(VerticalAlign.Center)
@@ -398,9 +408,9 @@ struct MainPage {
         .fontSize(10).fontWeight(FontWeight.Bold).fontStyle(FontStyle.Italic).letterSpacing(0.5)
     }
     .width('100%').padding({ left: 14, right: 14, top: 8, bottom: 12 + this.bottomSafeInset })
-    .backgroundColor('#F5EBD6F5')
+    .backgroundColor(WHITE)
     .border({ width: { top: 3 }, color: INK })
-    .shadow({ radius: 0, offsetY: -5, color: '#66171B1F' })
+    .shadow({ radius: 0, offsetX: 3, offsetY: -4, color: INK })
     .translate({ y: this.chromeVisible ? 0 : 190 + this.bottomSafeInset })
     .opacity(this.chromeVisible ? 1 : 0)
   }

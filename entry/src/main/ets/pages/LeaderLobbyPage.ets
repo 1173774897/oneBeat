@@ -4,6 +4,7 @@ import { router, promptAction } from '@kit.ArkUI';
 import { AppSession } from '../app/AppSession';
 import { SessionController } from '../session/SessionController';
 import { SessionMember } from '../protocol/messages';
+import { RandomCharacterFilm, RANDOM_FILM_HEIGHT } from '../components/RandomCharacterFilm';
 import {
   avatarDisplayName,
   ComicButton,
@@ -12,13 +13,19 @@ import {
   INK,
   CORAL,
   LILAC,
-  TEAL
+  WHITE,
+  BLUE,
+  CARD_SHADOW,
+  CONTROL_SHADOW
 } from '../components/ComicKit';
 import {
   CharacterPickState,
   characterPickState,
   isCharacterOwned,
   isDuplicatableAvatar,
+  isExclusiveTakenByOther,
+  isRandomAvatar,
+  isRandomPoolCharacter,
   rosterKeysForLobby,
   sortRosterKeysForPicker
 } from '../assets/CharacterCatalog';
@@ -31,6 +38,12 @@ import {
   verifyTeamNetworkAccess
 } from '../network/join/TeamNetworkPermissions';
 import { DrumProgram, parseDrumProgram, styleByKey } from '../audio/DrumMachineCatalog';
+import {
+  isProDrumMachineAccessible,
+  isSceneAccessible,
+  limitedFreeCharacterKeys
+} from '../store/EntitlementStore';
+import { refreshStoreEntitlementsNow } from '../store/StoreBootstrapSync';
 
 interface LobbySceneOption {
   key: string;
@@ -43,13 +56,42 @@ const LOBBY_SCENES: LobbySceneOption[] = [
   { key: 'neon_street', name: '霓虹街口', caption: '雨夜街区与霓虹灯' }
 ];
 
+const PRO_DRUM_BUTTON_HEIGHT: number = 56;
+const PRO_DRUM_ENTRY_PADDING: number = 4;
+const PRO_CHAIN_SOURCE_WIDTH: number = 400;
+const PRO_CHAIN_SOURCE_HEIGHT: number = 600;
+const PRO_CHAIN_BUTTON_TOP_PX: number = 45;
+const PRO_CHAIN_BUTTON_BOTTOM_PX: number = 235;
+// The source's two button-edge anchors, not viewport width, determine the uniform
+// scale. Independent width caps or vertical offsets would break this alignment.
+const PRO_CHAIN_SCALE: number = PRO_DRUM_BUTTON_HEIGHT /
+  (PRO_CHAIN_BUTTON_BOTTOM_PX - PRO_CHAIN_BUTTON_TOP_PX);
+const PRO_CHAIN_WIDTH: number = PRO_CHAIN_SOURCE_WIDTH * PRO_CHAIN_SCALE;
+const PRO_CHAIN_HEIGHT: number = PRO_CHAIN_SOURCE_HEIGHT * PRO_CHAIN_SCALE;
+const PRO_CHAIN_TOP_OFFSET: number = PRO_DRUM_ENTRY_PADDING - PRO_CHAIN_BUTTON_TOP_PX * PRO_CHAIN_SCALE;
+const PRO_CHAIN_OFFSET_X: number = -20;
+
+const CHARACTER_PICK_AVATAR_SIZE: number = 48;
+const CHARACTER_PICK_AVATAR_TOP: number = 6;
+const CHARACTER_PICK_CORNER_RADIUS: number = 6;
+const CHARACTER_PICK_SHADOW_OFFSET: number = 2;
+const CHARACTER_BADGE_INSET: number = 2;
+const CHARACTER_BADGE_GAP: number = 2;
+const CHARACTER_BADGE_ICON_SIZE: number = 16;
+// Cutout SVGs include a 3 vp transparent gutter for their white outline and ink
+// shadow. Keep the original 16 vp glyph anchored, not the padded image bounds.
+const CHARACTER_BADGE_ICON_PADDING: number = 3;
+const CHARACTER_FREE_BADGE_WIDTH: number = 28;
+const CHARACTER_FREE_BADGE_HEIGHT: number = 17;
+
 @Entry
 @Component
 struct LeaderLobbyPage {
   @StorageLink('sessionEpoch') @Watch('refresh') epoch: number = 0;
   @StorageLink('safeAreaTop') topSafeInset: number = 0;
   @StorageLink('safeAreaBottom') bottomSafeInset: number = 0;
-  @StorageLink('selectedSceneKey') selectedSceneKey: string = 'neon_street';
+  @StorageLink('selectedSceneKey') selectedSceneKey: string = 'sunset_coast';
+  @StorageLink('storeEntitlementEpoch') @Watch('onStoreEntitlementsChanged') storeEntitlementEpoch: number = 0;
   @State members: SessionMember[] = [];
   @State editingMemberId: string = 'leader';
   @State leader: boolean = true;
@@ -71,9 +113,17 @@ struct LeaderLobbyPage {
   @State rhythmDropdownY: number = 0;
   @State rhythmDropdownWidth: number = 200;
   @State leavingLobby: boolean = false;
+  @State randomPreviewRequest: number = 0;
+  @State randomPreviewCancelRequest: number = 0;
+  @State randomPreviewPendingMemberId: string = '';
+  @State randomPreviewPageVisible: boolean = true;
   private rhythms: string[] = ['均匀节拍', '双分节拍', '仅小节重音'];
   private enteringStage: boolean = false;
   private refreshingConnectivity: boolean = false;
+  private randomSelectionToken: number = 0;
+  private randomPreviewPreviousDrawId: number = 0;
+  // Retain dismissal even if the authoritative result arrives after active changes.
+  private readonly interruptedRandomPreviews: Map<string, number> = new Map();
   private readonly bluetoothStateListener = (_state: access.BluetoothState): void => {
     void this.refreshLeaderConnectivity();
   };
@@ -86,6 +136,10 @@ struct LeaderLobbyPage {
     void this.initialize();
   }
   aboutToDisappear(): void {
+    this.randomSelectionToken += 1;
+    this.randomPreviewPageVisible = false;
+    this.randomPreviewPendingMemberId = '';
+    this.interruptedRandomPreviews.clear();
     try {
       access.off('stateChange', this.bluetoothStateListener);
     } catch (_e) {
@@ -96,8 +150,14 @@ struct LeaderLobbyPage {
     return true;
   }
   onPageShow(): void {
+    this.randomPreviewPageVisible = true;
     this.enteringStage = false;
     void this.refreshLeaderConnectivity();
+  }
+  onPageHide(): void {
+    this.randomSelectionToken += 1;
+    this.randomPreviewPageVisible = false;
+    this.randomPreviewPendingMemberId = '';
   }
 
   private async refreshLeaderConnectivity(): Promise<void> {
@@ -117,10 +177,15 @@ struct LeaderLobbyPage {
     }
   }
 
+  private onStoreEntitlementsChanged(): void {
+    this.refresh();
+  }
+
   private async initialize(): Promise<void> {
     this.loading = true;
     this.failed = false;
     try {
+      await refreshStoreEntitlementsNow();
       const params = router.getParams() as Record<string, string>;
       if (params?.['reuse'] !== '1') {
         await AppSession.reset();
@@ -192,13 +257,15 @@ struct LeaderLobbyPage {
     this.selectedSceneKey = c.sceneKey;
     this.soloTeam = c.soloTeam;
     this.qr = c.buildJoinQrPayload();
-    if (c.soloTeam && c.isLeader) {
-      c.reconcileSoloLegacyBots();
-      this.members = c.getMembers();
-    }
     this.localReady = c.isLocalLobbyReady();
     this.leaderCanDepart = c.canLeaderStartWalk();
     this.ensureEditingMember();
+    if (this.randomPreviewPendingMemberId === this.editingMemberId &&
+      this.members.some((member: SessionMember) => member.id === this.randomPreviewPendingMemberId &&
+        isRandomAvatar(member.avatarKey) && (member.randomDrawId ?? 0) > this.randomPreviewPreviousDrawId)) {
+      this.randomPreviewPendingMemberId = '';
+    }
+    this.completeInterruptedRandomPreviews();
     if (!this.soloTeam && !this.leader && c.lobbyDeparted) {
       void this.enterStage();
     }
@@ -252,11 +319,126 @@ struct LeaderLobbyPage {
         return this.members[i].avatarKey;
       }
     }
-    return 'matchman';
+    return 'random';
+  }
+
+  private editingResolvedAvatarKey(): string {
+    for (let i = 0; i < this.members.length; i++) {
+      if (this.members[i].id === this.editingMemberId) {
+        return this.members[i].resolvedAvatarKey ?? '';
+      }
+    }
+    return '';
+  }
+
+  private showingRandomMystery(): boolean {
+    return isRandomAvatar(this.editingAvatarKey()) ||
+      this.randomPreviewPendingMemberId === this.editingMemberId ||
+      this.interruptedRandomPreviews.has(this.editingMemberId);
+  }
+
+  private randomPreviewReady(): boolean {
+    return !this.loading && !this.failed && this.randomPreviewPageVisible &&
+      this.members.some((member: SessionMember) => member.id === this.editingMemberId);
+  }
+
+  private editingRandomDrawId(): number {
+    const member = this.members.find((value: SessionMember) => value.id === this.editingMemberId);
+    return member?.randomDrawId ?? 0;
+  }
+
+  private shouldSkipEditingRandomPlayback(): boolean {
+    const member = this.members.find((value: SessionMember) => value.id === this.editingMemberId);
+    const revealAt = member?.randomAvatarRevealAtLeaderMs;
+    return this.interruptedRandomPreviews.has(this.editingMemberId) ||
+      (revealAt !== undefined && Number.isFinite(revealAt) && revealAt >= 0);
+  }
+
+  private finishRandomPreviewBeforeSwitch(): void {
+    if (!this.randomPreviewReady() || !this.showingRandomMystery()) {
+      return;
+    }
+    const minimumDrawId = this.randomPreviewPendingMemberId === this.editingMemberId
+      ? this.randomPreviewPreviousDrawId + 1 : Math.max(1, this.editingRandomDrawId());
+    this.interruptedRandomPreviews.set(this.editingMemberId,
+      Math.max(minimumDrawId, this.interruptedRandomPreviews.get(this.editingMemberId) ?? 0));
+    this.completeInterruptedRandomPreviews();
+  }
+
+  private completeInterruptedRandomPreviews(): void {
+    const controller = AppSession.get()?.controller;
+    if (controller === undefined || !this.randomPreviewPageVisible || this.loading || this.failed) {
+      return;
+    }
+    const members = controller.getMembers();
+    this.interruptedRandomPreviews.forEach((minimumDrawId: number, memberId: string) => {
+      const member = members.find((value: SessionMember) => value.id === memberId);
+      if (member === undefined) {
+        this.interruptedRandomPreviews.delete(memberId);
+        return;
+      }
+      const drawId = member.randomDrawId ?? 0;
+      if (!isRandomAvatar(member.avatarKey) || !Number.isSafeInteger(drawId) || drawId < minimumDrawId ||
+        !isRandomPoolCharacter(member.resolvedAvatarKey ?? '')) {
+        return;
+      }
+      // Remove before publication, which can synchronously trigger refresh.
+      // Only the confirmed new draw may satisfy an interrupted pending reroll.
+      this.interruptedRandomPreviews.delete(memberId);
+      void this.publishRandomFilmResult(memberId, drawId);
+    });
+  }
+
+  private revealedMemberMysteryAvatar(member: SessionMember): string {
+    return AppSession.get()?.controller.isMemberRandomAvatarRevealed(member.id) === true
+      ? member.resolvedAvatarKey ?? '' : '';
+  }
+
+  private async onRandomFilmSettled(memberId: string, drawId: number): Promise<void> {
+    if (memberId !== this.editingMemberId || !this.randomPreviewReady() ||
+      this.randomPreviewPendingMemberId === memberId || !isRandomAvatar(this.editingAvatarKey()) ||
+      drawId !== this.editingRandomDrawId()) {
+      return;
+    }
+    await this.publishRandomFilmResult(memberId, drawId);
+  }
+
+  private async publishRandomFilmResult(memberId: string, drawId: number): Promise<void> {
+    try {
+      await AppSession.get()?.controller.completeRandomAvatarPreview(memberId, drawId);
+    } catch (_e) {
+      if (this.randomPreviewPageVisible && this.members.some((member: SessionMember) =>
+        member.id === memberId && member.randomDrawId === drawId)) {
+        promptAction.showToast({ message: '随机头像同步失败，请重试' });
+      }
+    }
   }
 
   private pickStateForKey(key: string): CharacterPickState {
     return characterPickState(key, this.members, this.editingMemberId, this.soloTeam);
+  }
+
+  private isLimitedFreeCharacter(key: string): boolean {
+    return limitedFreeCharacterKeys().indexOf(key) >= 0;
+  }
+
+  private isCharacterOccupied(key: string): boolean {
+    // Pick state prioritizes readiness and entitlement. Occupancy must still
+    // describe another member's exclusive selection, never our own selection.
+    return isExclusiveTakenByOther(this.members, key, this.editingMemberId);
+  }
+
+  private characterBadgeWidth(key: string): number {
+    if (!isCharacterOwned(key) || !this.isLimitedFreeCharacter(key)) {
+      return CHARACTER_BADGE_ICON_SIZE;
+    }
+    return CHARACTER_FREE_BADGE_WIDTH + (isDuplicatableAvatar(key) || this.isCharacterOccupied(key)
+      ? CHARACTER_BADGE_GAP + CHARACTER_BADGE_ICON_SIZE : 0);
+  }
+
+  private characterBadgeHeight(key: string): number {
+    return isCharacterOwned(key) && this.isLimitedFreeCharacter(key)
+      ? CHARACTER_FREE_BADGE_HEIGHT : CHARACTER_BADGE_ICON_SIZE;
   }
 
   private pickOpacity(state: CharacterPickState): number {
@@ -273,18 +455,42 @@ struct LeaderLobbyPage {
     if (this.pickStateForKey(key) !== 'selectable') {
       return;
     }
+    const memberId = this.editingMemberId;
+    const token = ++this.randomSelectionToken;
+    this.interruptedRandomPreviews.delete(memberId);
+    if (isRandomAvatar(key)) {
+      this.randomPreviewPreviousDrawId = this.editingRandomDrawId();
+      this.randomPreviewPendingMemberId = memberId;
+      this.randomPreviewRequest += 1;
+    } else {
+      this.randomPreviewPendingMemberId = '';
+      this.randomPreviewCancelRequest += 1;
+    }
     try {
-      await AppSession.get()?.controller.updateMemberAvatar(this.editingMemberId, key);
+      await AppSession.get()?.controller.updateMemberAvatar(memberId, key);
       this.refresh();
     } catch (_e) {
-      promptAction.showToast({ message: '角色同步失败，请重试' });
+      if (token === this.randomSelectionToken && this.randomPreviewPageVisible) {
+        this.randomPreviewPendingMemberId = '';
+        promptAction.showToast({ message: '角色同步失败，请重试' });
+      }
+    } finally {
+      // A follower's send may finish before the leader's snapshot. Retain the
+      // film until random is confirmed, without remounting/replaying it twice.
+      // An older completion must also never dismiss a newer member's film.
+      if (token === this.randomSelectionToken && !isRandomAvatar(key)) {
+        this.randomPreviewPendingMemberId = '';
+      }
     }
   }
 
   private selectEditingMember(memberId: string): void {
-    if (!this.canEditMember(memberId)) {
+    if (!this.canEditMember(memberId) || memberId === this.editingMemberId) {
       return;
     }
+    this.finishRandomPreviewBeforeSwitch();
+    this.randomSelectionToken += 1;
+    this.randomPreviewPendingMemberId = '';
     this.editingMemberId = memberId;
   }
 
@@ -375,6 +581,10 @@ struct LeaderLobbyPage {
 
   private async chooseScene(key: string): Promise<void> {
     if (!this.leader || this.loading || key === this.selectedSceneKey) { return; }
+    if (!isSceneAccessible(key)) {
+      promptAction.showToast({ message: '请先在收藏小铺解锁这个场景' });
+      return;
+    }
     try {
       await AppSession.get()?.controller.updateSceneKey(key);
       this.refresh();
@@ -413,6 +623,10 @@ struct LeaderLobbyPage {
   }
 
   private editDrumMachine(): void {
+    if (!isProDrumMachineAccessible()) {
+      promptAction.showToast({ message: 'PRO 定制鼓机包含在畅游月卡中' });
+      return;
+    }
     router.pushUrl({ url: 'pages/DrumMachinePage' });
   }
 
@@ -481,8 +695,11 @@ struct LeaderLobbyPage {
       return;
     }
     try {
-      await c.addSoloBotWithNextAvatar();
+      const newBotId = await c.addSoloBotWithNextAvatar();
       this.refresh();
+      if (newBotId !== undefined && newBotId.length > 0) {
+        this.selectEditingMember(newBotId);
+      }
     } catch (_e) {
       promptAction.showToast({ message: '添加人机失败' });
     }
@@ -505,20 +722,25 @@ struct LeaderLobbyPage {
   private rosterMemberSlot(member: SessionMember) {
     Column({ space: 2 }) {
       Stack({ alignContent: Alignment.TopEnd }) {
-        ComicCharacter({ avatar: member.avatarKey, portrait: true }).width(43).height(43)
+        ComicCharacter({
+          avatar: member.avatarKey,
+          portrait: true,
+          mysteryAvatar: this.revealedMemberMysteryAvatar(member)
+        }).width(43).height(43)
           .border({
             width: this.editingMemberId === member.id ? 2 : 0,
             color: INK
           })
           .borderRadius(4)
+          .clip(true)
           .opacity(this.canEditMember(member.id) ? 1 : 0.88)
           .onClick(() => { this.selectEditingMember(member.id); })
         if (member.lobbyReady === true) {
           Text('备')
             .fontSize(9)
             .fontWeight(FontWeight.Bold)
-            .fontColor(PAPER)
-            .backgroundColor(TEAL)
+            .fontColor(INK)
+            .backgroundColor(BLUE)
             .padding({ left: 3, right: 3, top: 1, bottom: 1 })
             .borderRadius(3)
             .margin({ top: 1, left: 1 })
@@ -559,6 +781,7 @@ struct LeaderLobbyPage {
       .border({ width: 1.5, color: INK })
       .borderRadius(4)
       .backgroundColor(PAPER)
+      .shadow(CONTROL_SHADOW)
       .opacity(this.canAddSoloBotSlot() ? 1 : 0.42)
       .hitTestBehavior(this.canAddSoloBotSlot() ? HitTestMode.Default : HitTestMode.None)
       .onClick(() => { void this.addSoloBotSlot(); })
@@ -567,74 +790,156 @@ struct LeaderLobbyPage {
   }
 
   @Builder
-  private unownedLockGlyph() {
-    Column({ space: 0 }) {
-      Row()
-        .width(6)
-        .height(3)
-        .border({ width: 1, color: INK })
-        .borderRadius(3)
-        .backgroundColor(PAPER)
-      Row()
-        .width(7)
-        .height(5)
-        .backgroundColor(INK)
-        .borderRadius(1)
-        .margin({ top: -1 })
-    }
-    .alignItems(HorizontalAlign.Center)
+  private unownedLockBadge() {
+    Stack({ alignContent: Alignment.TopStart }) {
+      Image($rawfile('comic/icons/lock-cutout.svg'))
+        .width(CHARACTER_BADGE_ICON_SIZE + CHARACTER_BADGE_ICON_PADDING * 2)
+        .height(CHARACTER_BADGE_ICON_SIZE + CHARACTER_BADGE_ICON_PADDING * 2)
+        .objectFit(ImageFit.Contain)
+        .position({ x: -CHARACTER_BADGE_ICON_PADDING, y: -CHARACTER_BADGE_ICON_PADDING })
+    }.width(CHARACTER_BADGE_ICON_SIZE).height(CHARACTER_BADGE_ICON_SIZE).clip(false)
   }
 
   @Builder
-  private duplicatePersonGlyph() {
-    Column({ space: 1 }) {
-      Circle().width(4).height(4).fill(INK)
-      Row()
-        .width(5)
-        .height(6)
-        .backgroundColor(INK)
-        .borderRadius(2)
+  private limitedFreeBadge() {
+    Stack({ alignContent: Alignment.TopStart }) {
+      Image($rawfile('comic/icons/limited-free-ticket.svg'))
+        .width(CHARACTER_FREE_BADGE_WIDTH + 1).height(CHARACTER_FREE_BADGE_HEIGHT + 1)
+        .objectFit(ImageFit.Fill)
+      Text('限免')
+        .width(CHARACTER_FREE_BADGE_WIDTH).height(CHARACTER_FREE_BADGE_HEIGHT)
+        .fontSize(10).fontWeight(900).fontStyle(FontStyle.Italic).fontColor(INK)
+        .textAlign(TextAlign.Center)
+    }.width(CHARACTER_FREE_BADGE_WIDTH).height(CHARACTER_FREE_BADGE_HEIGHT)
+      .rotate({ angle: -4 }).clip(false)
+  }
+
+  @Builder
+  private duplicateAvatarBadge() {
+    Stack({ alignContent: Alignment.TopStart }) {
+      Image($rawfile('comic/icons/multi-person-cutout.svg'))
+        .width(CHARACTER_BADGE_ICON_SIZE + CHARACTER_BADGE_ICON_PADDING * 2)
+        .height(CHARACTER_BADGE_ICON_SIZE + CHARACTER_BADGE_ICON_PADDING * 2)
+        .objectFit(ImageFit.Contain)
+        .position({ x: -CHARACTER_BADGE_ICON_PADDING, y: -CHARACTER_BADGE_ICON_PADDING })
+    }.width(CHARACTER_BADGE_ICON_SIZE).height(CHARACTER_BADGE_ICON_SIZE).clip(false)
+  }
+
+  @Builder
+  private occupiedAvatarBadge() {
+    Stack({ alignContent: Alignment.TopStart }) {
+      Image($rawfile('comic/icons/occupied-person-cutout.svg'))
+        .width(CHARACTER_BADGE_ICON_SIZE + CHARACTER_BADGE_ICON_PADDING * 2)
+        .height(CHARACTER_BADGE_ICON_SIZE + CHARACTER_BADGE_ICON_PADDING * 2)
+        .objectFit(ImageFit.Contain)
+        .position({ x: -CHARACTER_BADGE_ICON_PADDING, y: -CHARACTER_BADGE_ICON_PADDING })
+    }.width(CHARACTER_BADGE_ICON_SIZE).height(CHARACTER_BADGE_ICON_SIZE).clip(false)
+  }
+
+  @Builder
+  private characterBadges(key: string) {
+    // Keep entitlement labels when readiness disables selection. Unowned roles
+    // retain the lock priority; accessible exclusive roles can show occupancy.
+    // Free access sits left of occupancy, which keeps the right edge anchored.
+    // These labels remain opaque sibling layers and are not tap targets.
+    Row({ space: CHARACTER_BADGE_GAP }) {
+      if (!isCharacterOwned(key)) {
+        this.unownedLockBadge()
+      } else {
+        if (isDuplicatableAvatar(key)) {
+          this.duplicateAvatarBadge()
+        }
+        if (this.isLimitedFreeCharacter(key)) {
+          this.limitedFreeBadge()
+        }
+        if (this.isCharacterOccupied(key)) {
+          this.occupiedAvatarBadge()
+        }
+      }
     }
-    .width(8)
-    .alignItems(HorizontalAlign.Center)
+    .width(this.characterBadgeWidth(key)).height(this.characterBadgeHeight(key))
+    .alignItems(VerticalAlign.Bottom)
+    .position({
+      x: CHARACTER_PICK_AVATAR_SIZE - CHARACTER_BADGE_INSET - this.characterBadgeWidth(key),
+      y: CHARACTER_PICK_AVATAR_TOP + CHARACTER_PICK_AVATAR_SIZE - CHARACTER_BADGE_INSET -
+        this.characterBadgeHeight(key)
+    })
+    .clip(false).hitTestBehavior(HitTestMode.None)
   }
 
   @Builder
   private characterPickCell(key: string) {
-    Stack({ alignContent: Alignment.BottomEnd }) {
-      ComicCharacter({ avatar: key, portrait: true })
-        .width(46)
-        .height(46)
-        .backgroundColor(this.editingAvatarKey() === key ? LILAC : PAPER)
-        .border({ width: 1, color: INK })
-        .borderRadius(6)
-        .opacity(this.pickOpacity(this.pickStateForKey(key)))
-        .onClick(() => { void this.pickCharacter(key); })
-      if (!isCharacterOwned(key)) {
-        Column() {
-          this.unownedLockGlyph()
-        }
-        .padding({ left: 4, right: 4, top: 3, bottom: 3 })
-        .backgroundColor(PAPER)
-        .border({ width: 1, color: INK })
-        .borderRadius(8)
-        .margin({ right: 2, bottom: 2 })
-        .hitTestBehavior(HitTestMode.None)
-      } else if (isDuplicatableAvatar(key)) {
-        Row({ space: -3 }) {
-          this.duplicatePersonGlyph()
-          this.duplicatePersonGlyph()
-        }
-        .padding({ left: 3, right: 3, top: 2, bottom: 2 })
-        .backgroundColor(PAPER)
-        .border({ width: 1, color: INK })
-        .borderRadius(8)
-        .margin({ right: 2, bottom: 2 })
-        .hitTestBehavior(HitTestMode.None)
+    Stack({ alignContent: Alignment.TopStart }) {
+      // An opaque offset layer gives the frame a hard ink shadow even when the
+      // portrait is transparent or dimmed. Only the artwork follows pick opacity.
+      Row().width(CHARACTER_PICK_AVATAR_SIZE).height(CHARACTER_PICK_AVATAR_SIZE)
+        .backgroundColor(INK).borderRadius(CHARACTER_PICK_CORNER_RADIUS)
+        .position({ x: CHARACTER_PICK_SHADOW_OFFSET, y: CHARACTER_PICK_AVATAR_TOP + CHARACTER_PICK_SHADOW_OFFSET })
+      Stack() {
+        ComicCharacter({ avatar: key, portrait: true })
+          .width('100%').height('100%')
+          .opacity(this.pickOpacity(this.pickStateForKey(key)))
       }
+        .width(CHARACTER_PICK_AVATAR_SIZE)
+        .height(CHARACTER_PICK_AVATAR_SIZE)
+        .backgroundColor((this.showingRandomMystery() ? 'random' : this.editingAvatarKey()) === key ? LILAC : PAPER)
+        .border({ width: 1.5, color: INK })
+        // Clip the portrait itself to the frame corners; badges and the ink
+        // shadow remain sibling layers so their overhang is never cropped.
+        .borderRadius(CHARACTER_PICK_CORNER_RADIUS).clip(true)
+        .position({ x: 0, y: CHARACTER_PICK_AVATAR_TOP })
+      this.characterBadges(key)
     }
-    .width(52)
-    .height(46)
+    .width(59)
+    .height(54)
+    .clip(false)
+    .onClick(() => { void this.pickCharacter(key); })
+  }
+
+  @Builder
+  private proChain() {
+    // The image box matches the source aspect ratio, so Contain cannot introduce
+    // letterboxing between the 45/235 px anchors and the button's outer edges.
+    Image($rawfile('comic/decor/pro-chain-anchored.png'))
+      .width(PRO_CHAIN_WIDTH).height(PRO_CHAIN_HEIGHT)
+      .objectFit(ImageFit.Contain).align(Alignment.TopEnd)
+      .translate({ x: PRO_CHAIN_OFFSET_X, y: PRO_CHAIN_TOP_OFFSET })
+      .hitTestBehavior(HitTestMode.None)
+  }
+
+  @Builder
+  private lockedProDrumMachineEntry() {
+    Stack({ alignContent: Alignment.TopEnd }) {
+      Row()
+        .width('100%').height(PRO_DRUM_BUTTON_HEIGHT).backgroundColor(LILAC)
+        .border({ width: 1.5, color: INK }).borderRadius(7)
+        .shadow(CARD_SHADOW).opacity(0.68)
+        .align(Alignment.Top).translate({ y: PRO_DRUM_ENTRY_PADDING })
+      this.proChain()
+      // Keep the title above the decorative chain so narrow-screen labels stay readable.
+      Row() {
+        Text('PRO 定制鼓机').fontSize(21).fontWeight(900).fontStyle(FontStyle.Italic).fontColor(INK)
+        Blank()
+        Text('›').fontSize(30).fontColor(INK)
+      }
+      .width('100%').height(PRO_DRUM_BUTTON_HEIGHT).padding({ left: 16, right: 14 }).opacity(0.68)
+      .align(Alignment.Top).translate({ y: PRO_DRUM_ENTRY_PADDING })
+      .onClick(() => this.editDrumMachine())
+    }
+    // Intentionally paint the hanging tail above later controls without adding
+    // layout space; the decorative image must still let their taps through.
+    .width('100%').height(PRO_DRUM_BUTTON_HEIGHT + PRO_DRUM_ENTRY_PADDING * 2).clip(false).zIndex(1)
+  }
+
+  @Builder
+  private proDrumMachineEntry() {
+    if (isProDrumMachineAccessible()) {
+      ComicButton({ label: 'PRO 定制鼓机', fill: LILAC, action: () => {
+        this.editDrumMachine();
+      } })
+    } else {
+      this.lockedProDrumMachineEntry()
+    }
   }
 
   @Builder
@@ -674,15 +979,15 @@ struct LeaderLobbyPage {
         Row() {
           Blank()
           Text('✓ 已选择').fontSize(10).fontWeight(900).fontColor(PAPER)
-            .backgroundColor(CORAL).padding({ left: 7, right: 7, top: 4, bottom: 4 }).borderRadius(4)
+            .backgroundColor(CORAL).padding({ left: 7, right: 7, top: 4, bottom: 4 }).borderRadius(4).shadow(CONTROL_SHADOW)
         }.width('100%').padding({ top: 6, right: 6 }).hitTestBehavior(HitTestMode.None)
       }
     }
     .width(154).height(148)
     .backgroundColor('#FFFDF7')
     .border({ width: this.selectedSceneKey === item.key ? 3 : 1, color: INK })
-    .borderRadius(7).clip(true)
-    .opacity(this.leader ? 1 : 0.9)
+    .borderRadius(7).shadow(CARD_SHADOW)
+    .opacity(this.leader && isSceneAccessible(item.key) ? 1 : 0.55)
     .onClick(() => { void this.chooseScene(item.key); })
   }
 
@@ -701,7 +1006,7 @@ struct LeaderLobbyPage {
         }
         .width('100%').height(32).padding({ left: 10, right: 8 }).fontColor(INK)
         .backgroundColor(this.rhythm === index ? CORAL : PAPER)
-        .border({ width: 1, color: INK }).borderRadius(4)
+        .border({ width: 1, color: INK }).borderRadius(4).shadow(CONTROL_SHADOW)
         .onClick(() => { void this.chooseBasicRhythm(index); })
       })
     }
@@ -710,7 +1015,7 @@ struct LeaderLobbyPage {
     .backgroundColor(PAPER)
     .border({ width: 1.5, color: INK })
     .borderRadius(6)
-    .clip(true)
+    .shadow(CARD_SHADOW)
   }
 
   @Builder
@@ -739,7 +1044,7 @@ struct LeaderLobbyPage {
           Text('‹').fontSize(32).width(32).onClick(() => { void this.leaveLobby(); })
           Text('队伍大厅').fontSize(32).fontWeight(900).fontStyle(FontStyle.Italic)
           Blank()
-          Text(this.leader ? '队长' : '队员').fontSize(12).backgroundColor(LILAC).padding(7).borderRadius(4)
+          Text(this.leader ? '队长' : '队员').fontSize(12).backgroundColor(LILAC).padding(7).borderRadius(4).shadow(CONTROL_SHADOW)
         }.width('100%')
         Column({ space: 9 }) {
           Row() {
@@ -758,7 +1063,7 @@ struct LeaderLobbyPage {
             Row({ space: 10 }) {
               ForEach(this.members, (m: SessionMember) => {
                 this.rosterMemberSlot(m)
-              }, (m: SessionMember) => `${m.id}-${m.avatarKey}`)
+              }, (m: SessionMember) => `${m.id}-${m.avatarKey}-${m.randomDrawId ?? 0}-${this.revealedMemberMysteryAvatar(m)}`)
               if (this.soloTeam && this.leader) {
                 this.rosterAddSlot()
               }
@@ -788,18 +1093,35 @@ struct LeaderLobbyPage {
                 .onClick(() => { this.invite = false; })
             }.width('100%')
           }
-        }.padding(12).width('100%').border({ width: 1, color: INK }).borderRadius(7).clip(false)
+        }.padding(12).width('100%').backgroundColor(WHITE)
+          .border({ width: 1, color: INK }).borderRadius(7).shadow(CARD_SHADOW).clip(false)
         Text('角色选择').width('100%').fontWeight(FontWeight.Bold).fontSize(17)
         Text(this.soloTeam && this.leader ? '点队伍槽位切换编辑对象' : '仅可更换自己的角色')
           .fontSize(11).fontColor('#66615A').width('100%')
-        Stack() {
-          Image($rawfile('comic/decor/character_panel.png')).width('100%').height('100%').objectFit(ImageFit.Fill)
-          ComicCharacter({ avatar: this.editingAvatarKey() }).width('82%').height(248)
-          Text('JUST KEEP\nTHE BEAT.').fontWeight(900).fontStyle(FontStyle.Italic).fontSize(14)
-            .position({ x: '72%', y: 12 })
-        }.height(250).width('100%').clip(true)
+        if (this.showingRandomMystery()) {
+          RandomCharacterFilm({
+            request: this.randomPreviewRequest,
+            cancelRequest: this.randomPreviewCancelRequest,
+            memberId: this.editingMemberId,
+            resolvedAvatarKey: this.editingResolvedAvatarKey(),
+            drawId: this.editingRandomDrawId(),
+            skipPlayback: this.shouldSkipEditingRandomPlayback(),
+            revealReady: AppSession.get()?.controller.isMemberRandomAvatarRevealed(this.editingMemberId) === true,
+            onSettled: (memberId: string, drawId: number) => { void this.onRandomFilmSettled(memberId, drawId); },
+            selectionPending: this.randomPreviewPendingMemberId === this.editingMemberId,
+            ready: this.randomPreviewReady()
+          }).width('100%').height(RANDOM_FILM_HEIGHT)
+        } else {
+          Stack() {
+            Image($rawfile('comic/decor/character_panel.png')).width('100%').height('100%').objectFit(ImageFit.Fill)
+            ComicCharacter({ avatar: this.editingAvatarKey() }).width('82%').height(248)
+            Text('JUST KEEP\nTHE BEAT.').fontWeight(900).fontStyle(FontStyle.Italic).fontSize(14)
+              .position({ x: '72%', y: 12 })
+          }.height(RANDOM_FILM_HEIGHT).width('100%').clip(true)
+        }
         Row({ space: 8 }) {
-          Text(avatarDisplayName(this.editingAvatarKey())).fontSize(15).fontWeight(FontWeight.Bold)
+          Text(avatarDisplayName(this.showingRandomMystery() ? 'random' : this.editingAvatarKey()))
+            .fontSize(15).fontWeight(FontWeight.Bold)
           if (this.pickStateForKey(this.editingAvatarKey()) === 'selfReadyLocked') {
             Text('已准备 · 不可换角').fontSize(11).fontColor('#66615A')
           }
@@ -808,7 +1130,7 @@ struct LeaderLobbyPage {
           Row({ space: 10 }) {
             ForEach(sortRosterKeysForPicker(rosterKeysForLobby(this.soloTeam)), (key: string) => {
               this.characterPickCell(key)
-            }, (key: string) => key)
+            }, (key: string) => `${key}@${this.storeEntitlementEpoch}`)
           }
           .padding({ left: 2, right: 2, top: 2, bottom: 2 })
         }
@@ -833,7 +1155,8 @@ struct LeaderLobbyPage {
             }.scrollable(ScrollDirection.Horizontal).scrollBar(BarState.Off).width('100%').height(151)
             Text('出发后全队进入同一场景')
               .fontSize(11).fontColor('#66615A').width('100%')
-          }.width('100%').padding(12).border({ width: 1, color: INK }).borderRadius(7)
+          }.width('100%').padding(12).backgroundColor(WHITE)
+            .border({ width: 1, color: INK }).borderRadius(7).shadow(CARD_SHADOW)
         }
         if (this.leader && this.rhythm !== 3) {
           Column({ space: 13 }) {
@@ -854,7 +1177,7 @@ struct LeaderLobbyPage {
               .fontColor(INK)
               .backgroundColor(PAPER)
               .border({ width: 1, color: INK })
-              .borderRadius(5)
+              .borderRadius(5).shadow(CONTROL_SHADOW)
               .enabled(this.leader && !this.loading)
               .onClick(() => this.openRhythmDropdown())
             }.width('100%')
@@ -862,20 +1185,21 @@ struct LeaderLobbyPage {
               Text('拍号').fontSize(14).width(60)
               ForEach([4, 3, 6], (n: number) => {
                 Button(`${n}/${n === 6 ? 8 : 4}`, { type: ButtonType.Normal }).layoutWeight(1).height(35)
-                  .fontColor(INK).backgroundColor(this.beats === n ? CORAL : PAPER).borderRadius(4).border({ width: 1, color: INK })
+                  .fontColor(INK).backgroundColor(this.beats === n ? CORAL : PAPER).borderRadius(4).shadow(CONTROL_SHADOW).border({ width: 1, color: INK })
                   .enabled(this.leader && !this.loading).onClick(() => { void AppSession.get()?.controller.updateMeter(n, n === 6 ? 8 : 4); })
               })
             }.width('100%')
             Row({ space: 12 }) {
               Text('BPM').width(56).fontWeight(FontWeight.Bold)
-              Button('−').backgroundColor(PAPER).fontColor(INK).border({ width: 1, color: INK }).borderRadius(4)
+              Button('−').backgroundColor(PAPER).fontColor(INK).border({ width: 1, color: INK }).borderRadius(4).shadow(CONTROL_SHADOW)
                 .enabled(this.leader && this.bpm > 40).onClick(() => { void AppSession.get()?.controller.updateBpm(this.bpm - 1); })
               Text(`${this.bpm}`).fontSize(40).fontWeight(900).fontStyle(FontStyle.Italic).layoutWeight(1).textAlign(TextAlign.Center)
-              Button('+').backgroundColor(PAPER).fontColor(INK).border({ width: 1, color: INK }).borderRadius(4)
+              Button('+').backgroundColor(PAPER).fontColor(INK).border({ width: 1, color: INK }).borderRadius(4).shadow(CONTROL_SHADOW)
                 .enabled(this.leader && this.bpm < 240).onClick(() => { void AppSession.get()?.controller.updateBpm(this.bpm + 1); })
             }.width('100%')
             Text(`每分钟 ${this.bpm} 个${this.unit === 8 ? '八分' : '四分'}音符拍点`).fontSize(11).fontColor('#66615A').width('100%')
-          }.width('100%').padding(12).border({ width: 1, color: INK }).borderRadius(7)
+          }.width('100%').padding(12).backgroundColor(WHITE)
+            .border({ width: 1, color: INK }).borderRadius(7).shadow(CARD_SHADOW)
         }
         if (this.rhythm === 3 && this.drumProgram.length > 0) {
           Column({ space: 12 }) {
@@ -883,7 +1207,8 @@ struct LeaderLobbyPage {
               Text('PRO 定制鼓机').fontSize(20).fontWeight(900).fontStyle(FontStyle.Italic)
               Blank()
               Text('已应用')
-                .fontSize(10).fontWeight(900).fontColor(PAPER).backgroundColor(TEAL)
+                .fontSize(10).fontWeight(900).fontColor(INK).backgroundColor(BLUE)
+                .shadow(CONTROL_SHADOW)
                 .padding({ left: 8, right: 8, top: 4, bottom: 4 })
                 .border({ width: 1, color: INK }).borderRadius(3).rotate({ angle: 2 })
             }.width('100%')
@@ -901,20 +1226,20 @@ struct LeaderLobbyPage {
             Row({ space: 8 }) {
               Text(`${this.activeDrumSectionCount()} 个段落`)
                 .fontSize(12).fontWeight(900).backgroundColor(PAPER)
-                .padding({ left: 9, right: 9, top: 5, bottom: 5 }).border({ width: 1, color: INK }).borderRadius(4)
+                .padding({ left: 9, right: 9, top: 5, bottom: 5 }).border({ width: 1, color: INK }).borderRadius(4).shadow(CONTROL_SHADOW)
               Text(`${this.activeDrumBarCount()} 小节循环`)
                 .fontSize(12).fontWeight(900).backgroundColor(PAPER)
-                .padding({ left: 9, right: 9, top: 5, bottom: 5 }).border({ width: 1, color: INK }).borderRadius(4)
+                .padding({ left: 9, right: 9, top: 5, bottom: 5 }).border({ width: 1, color: INK }).borderRadius(4).shadow(CONTROL_SHADOW)
             }.width('100%')
             if (this.leader) {
               Row({ space: 9 }) {
                 Button('编辑鼓机', { type: ButtonType.Normal })
                   .layoutWeight(1).height(46).fontSize(15).fontWeight(900).fontColor(INK)
-                  .backgroundColor(LILAC).border({ width: 1.5, color: INK }).borderRadius(6)
+                  .backgroundColor(LILAC).border({ width: 1.5, color: INK }).borderRadius(6).shadow(CONTROL_SHADOW)
                   .onClick(() => this.editDrumMachine())
                 Button('切回节拍打点', { type: ButtonType.Normal })
                   .layoutWeight(1.35).height(46).fontSize(15).fontWeight(900).fontColor(INK)
-                  .backgroundColor(PAPER).border({ width: 1.5, color: INK }).borderRadius(6)
+                  .backgroundColor(PAPER).border({ width: 1.5, color: INK }).borderRadius(6).shadow(CONTROL_SHADOW)
                   .onClick(() => { void this.switchToBasicBeat(); })
               }.width('100%')
             } else {
@@ -925,9 +1250,7 @@ struct LeaderLobbyPage {
           .border({ width: 2, color: INK }).borderRadius(8)
           .shadow({ radius: 0, offsetX: 3, offsetY: 4, color: INK })
         } else if (this.leader) {
-          ComicButton({ label: 'PRO 定制鼓机', fill: LILAC, action: () => {
-            this.editDrumMachine();
-          } })
+          this.proDrumMachineEntry()
         }
         Text(this.status)
           .fontSize(12)

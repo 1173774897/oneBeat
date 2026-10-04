@@ -206,7 +206,7 @@ export struct WalkScene {
   }
 
   private walkerFrameFor(member: SessionMember, index: number): number {
-    const avatar = memberAvatar(member.avatarKey, index);
+    const avatar = memberAvatar(member.avatarKey, index, member.resolvedAvatarKey ?? '');
     return walkerAnimFrameIndex(avatar, this.animBeatIndex, this.animStepInBeat, this.animBeatInBar);
   }
 
@@ -1000,7 +1000,8 @@ export struct WalkScene {
             .borderRadius(6)
           WalkerSprite({
             frameIndex: this.walkerFrameFor(member, index),
-            avatar: memberAvatar(member.avatarKey, index)
+            avatar: memberAvatar(member.avatarKey, index, member.resolvedAvatarKey ?? ''),
+            colorSlot: member.colorSlot ?? 0
           })
         }
         .alignItems(HorizontalAlign.Center)
