@@ -97,7 +97,7 @@ struct TeamPage {
         }.width('100%')
 
         Stack({ alignContent: Alignment.Bottom }) {
-          Image($rawfile('comic/decor/entry_burst.png'))
+          Image($rawfile('comic/decor/stage_speedlines.png'))
             .width('100%')
             .height('100%')
             .objectFit(ImageFit.Fill)

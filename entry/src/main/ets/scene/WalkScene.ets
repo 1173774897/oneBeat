@@ -625,7 +625,8 @@ export struct WalkScene {
     if (total <= 1) {
       return 0.5;
     }
-    const slot = memberIndex / (total - 1);
+    // Only reverse spatial slots; roster order still owns labels, avatars and member identity.
+    const slot = 1 - memberIndex / (total - 1);
     return WALKER_STAND_SLOT_X_MIN + (WALKER_STAND_SLOT_X_MAX - WALKER_STAND_SLOT_X_MIN) * slot;
   }
 

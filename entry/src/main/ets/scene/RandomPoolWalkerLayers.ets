@@ -1,3 +1,5 @@
+import { isRandomPoolCharacter } from '../assets/CharacterCatalog';
+
 const RANDOM_POOL_LAYOUT_SIZE: number = 140;
 const RANDOM_POOL_SCALE: number = 0.9;
 const RANDOM_POOL_SPRITE_SIZE: number = RANDOM_POOL_LAYOUT_SIZE * RANDOM_POOL_SCALE;
@@ -34,16 +36,8 @@ export struct RandomPoolWalkerLayers {
   }
 
   build() {
-    if (this.avatar === 'boonie') {
-      if (this.colorSlot === 1) {
-        this.paletteFrames('walk/boonie/palette_2');
-      } else {
-        this.paletteFrames('walk/boonie/palette_1');
-      }
-    } else if (this.colorSlot === 1) {
-      this.paletteFrames('walk/braids/palette_2');
-    } else {
-      this.paletteFrames('walk/braids/palette_1');
-    }
+    this.paletteFrames(
+      `walk/${isRandomPoolCharacter(this.avatar) ? this.avatar : 'braids'}/palette_${this.colorSlot === 1 ? 2 : 1}`
+    );
   }
 }

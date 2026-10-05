@@ -30,9 +30,29 @@ export class AppSession {
   private constructor(controller: SessionController) {
     AppStorage.setOrCreate('lastTransportMessage', '');
     this.controller = controller;
+    SessionBackgroundKeeper.setControlHandler({
+      onPlay: () => {
+        if (!this.controller.isLeader) {
+          return;
+        }
+        if (this.controller.state === 'idle') {
+          void this.leaderStart();
+        } else if (this.controller.state === 'paused') {
+          void this.leaderResume();
+        }
+      },
+      onPause: () => {
+        if (!this.controller.isLeader) {
+          return;
+        }
+        void this.leaderPause();
+      }
+    });
     this.controller.setUiListener(() => {
       this.syncEngineFromSession();
       this.handleTransportFromStorage();
+      const playing = this.controller.state === 'playing' || this.controller.state === 'countdown';
+      void SessionBackgroundKeeper.updatePlaybackState(playing);
       if (!this.controller.lobbyDeparted && this.controller.state === 'idle') {
         this.clearCountIn();
         this.metronome.pause();
@@ -154,7 +174,7 @@ export class AppSession {
       console.warn(`BLE room advertising unavailable: ${(err as Error).message}`);
     }
     this.syncEngineFromSession();
-    await SessionBackgroundKeeper.start();
+    await SessionBackgroundKeeper.start(true); // 队长：显示媒体卡片
     return group.goIpAddress;
   }
 
@@ -194,7 +214,7 @@ export class AppSession {
       this.controller.leaderHost = '';
     }
     this.syncEngineFromSession();
-    await SessionBackgroundKeeper.start();
+    await SessionBackgroundKeeper.start(true); // 单机：显示媒体卡片
   }
 
   async upgradeSoloToP2p(displayName: string): Promise<string> {
@@ -213,7 +233,7 @@ export class AppSession {
       await this.controller.connectMember(goIp, invitation.port, invitation);
       this.syncEngineFromSession();
       this.handleTransportFromStorage();
-      await SessionBackgroundKeeper.start();
+      await SessionBackgroundKeeper.start(false); // 队员：隐藏媒体卡片
     } catch (err) {
       const joinError = err as Error;
       await this.p2p.abortMemberJoin();

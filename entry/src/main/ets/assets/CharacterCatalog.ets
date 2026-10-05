@@ -4,8 +4,8 @@ import { isCharacterAccessible } from '../store/EntitlementStore';
 export const RANDOM_AVATAR_KEY: string = 'random';
 export const LAMP_AVATAR_KEY: string = 'lamp';
 
-/** Adding a random character only requires one entry here plus its walk/palette assets. */
-export const RANDOM_CHARACTER_KEYS: string[] = ['braids', 'boonie'];
+/** Random-only identities each ship two eight-frame palettes and one concealed lobby silhouette. */
+export const RANDOM_CHARACTER_KEYS: string[] = ['braids', 'boonie', 'curly', 'buzz'];
 
 export const TEAM_ROSTER_KEYS: string[] =
   [RANDOM_AVATAR_KEY, 'mismatch', 'cloud', 'teapot', 'wave', 'scooter', 'lilroll', LAMP_AVATAR_KEY];

@@ -1,6 +1,6 @@
 import { audio } from '@kit.AudioKit';
 import { BusinessError } from '@kit.BasicServicesKit';
-import { ClickSound } from './ClickSound';
+import { ClickSound, ACCENT_DURATION_MS, WEAK_DURATION_MS } from './ClickSound';
 import { MonotonicClock } from '../common/MonotonicClock';
 import {
   BuiltInRhythmFactory,
@@ -19,6 +19,20 @@ const SAMPLE_RATE: number = 44100;
 const BYTES_PER_SAMPLE: number = 2;
 const AUDIO_PREROLL_MS: number = 220;
 const AUDIO_CALLBACK_STALL_MS: number = 1500;
+// Sub-audible dither floor laid under the click samples so the stream is never
+// pure digital zero. Pure zero runs are what the smart PA silence detector
+// (CustStreamCheck -> SmartpaPowerOff) keys on to power off the amplifier.
+// ~ -60dBFS; raise (e.g. 0.003 / 0.01) if the log still shows zero_volume=true.
+const DITHER_FLOOR_GAIN: number = 0.001;
+
+function applyDitherFloor(data: ArrayBuffer): void {
+  const samples = new Int16Array(data);
+  for (let i = 0; i < samples.length; i++) {
+    // Triangular dither (TPDF): average of two uniforms, +/- DITHER_FLOOR_GAIN.
+    const tpdf = (Math.random() + Math.random() - 1.0) * DITHER_FLOOR_GAIN;
+    samples[i] = Math.round(tpdf * 32767);
+  }
+}
 
 export type BeatCallback = (beatIndex: number, beatInBar: number, scheduledAtMonoMs: number) => void;
 
@@ -119,8 +133,8 @@ export class MetronomeEngine {
     this.customProgramLooping = true;
     this.sampleBank = new Map();
     if (soundChanged) {
-      this.accentBuffer = ClickSound.buildTone(soundId === 1 ? 1200 : soundId === 2 ? 440 : 880, 18, 0.85);
-      this.weakBuffer = ClickSound.buildTone(soundId === 1 ? 900 : soundId === 2 ? 330 : 660, 14, 0.55);
+      this.accentBuffer = ClickSound.buildTone(soundId === 1 ? 1200 : soundId === 2 ? 440 : 880, ACCENT_DURATION_MS, 0.85);
+      this.weakBuffer = ClickSound.buildTone(soundId === 1 ? 900 : soundId === 2 ? 330 : 660, WEAK_DURATION_MS, 0.55);
     }
     if (rhythmChanged) {
       this.pattern = BuiltInRhythmFactory.create(this.rhythm, this.beatsPerBar);
@@ -482,6 +496,7 @@ export class MetronomeEngine {
     const frameCount = Math.max(1, Math.round(samplesPerBeat * pattern.beatsPerBar));
     const data = new ArrayBuffer(frameCount * BYTES_PER_SAMPLE);
     const output = new DataView(data);
+    applyDitherFloor(data);
 
     for (let eventIndex = 0; eventIndex < pattern.events.length; eventIndex++) {
       const event = pattern.events[eventIndex];

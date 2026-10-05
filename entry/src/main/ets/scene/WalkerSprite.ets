@@ -1,4 +1,5 @@
 import { WalkerAvatarKey } from '../assets/AssetCatalog';
+import { isRandomPoolCharacter } from '../assets/CharacterCatalog';
 import { LilrollWalkerLayers } from './LilrollWalkerLayers';
 import { TeapotWalkerLayers } from './TeapotWalkerLayers';
 import { WaveWalkerLayers } from './WaveWalkerLayers';
@@ -97,7 +98,7 @@ export struct WalkerSprite {
       ScooterWalkerLayers({ frameIndex: this.frameIndex });
     } else if (this.avatar === 'lamp') {
       LampWalkerLayers({ frameIndex: this.frameIndex });
-    } else if (this.avatar === 'braids' || this.avatar === 'boonie') {
+    } else if (isRandomPoolCharacter(this.avatar)) {
       RandomPoolWalkerLayers({
         frameIndex: this.frameIndex,
         avatar: this.avatar,

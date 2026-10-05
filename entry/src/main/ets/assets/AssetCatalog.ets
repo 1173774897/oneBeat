@@ -189,7 +189,8 @@ export function randomSideEntityIndex(isForeground: boolean, recentIndices: numb
 }
 
 export type WalkerAvatarKey =
-  'cloud' | 'mismatch' | 'lilroll' | 'teapot' | 'wave' | 'scooter' | 'lamp' | 'braids' | 'boonie';
+  'cloud' | 'mismatch' | 'lilroll' | 'teapot' | 'wave' | 'scooter' | 'lamp' |
+  'braids' | 'boonie' | 'curly' | 'buzz';
 
 export function walkFramePath(avatar: WalkerAvatarKey, frameIndex: number, colorSlot: number = 0): string {
   const count = avatar === 'lilroll' ? LILROLL_WALK_FRAME_COUNT :
@@ -239,8 +240,11 @@ export function memberAvatar(avatarKey: string, slot: number, resolvedAvatarKey:
   if (isRandomAvatar(key) && isRandomPoolCharacter(resolvedAvatarKey)) {
     return resolvedAvatarKey as WalkerAvatarKey;
   }
+  if (isRandomPoolCharacter(key)) {
+    return key as WalkerAvatarKey;
+  }
   if (key === 'cloud' || key === 'mismatch' || key === 'lilroll' || key === 'teapot' ||
-    key === 'wave' || key === 'scooter' || key === 'lamp' || key === 'braids' || key === 'boonie') {
+    key === 'wave' || key === 'scooter' || key === 'lamp') {
     return key;
   }
   return avatarForSlot(slot);

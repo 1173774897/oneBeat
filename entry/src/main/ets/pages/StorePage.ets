@@ -54,6 +54,8 @@ interface StoreScene {
 const STORE_CHARACTERS: StoreCharacter[] = [
   { key: 'braids', name: '神秘角色', caption: '随机池成员 · 行进时揭晓', asset: 'braids', color: '#B9B2C7', productId: '', mystery: true },
   { key: 'boonie', name: '神秘角色', caption: '随机池成员 · 行进时揭晓', asset: 'boonie', color: '#B7C7BC', productId: '', mystery: true },
+  { key: 'curly', name: '神秘角色', caption: '随机池成员 · 行进时揭晓', asset: 'curly', color: '#B6C7C8', productId: '', mystery: true },
+  { key: 'buzz', name: '神秘角色', caption: '随机池成员 · 行进时揭晓', asset: 'buzz', color: '#C7BEBA', productId: '', mystery: true },
   { key: 'cloud', name: '云行者', caption: '轻盈天空拍', asset: 'cloud', color: '#DCE9FA', productId: 'onebeat.character.cloud' },
   { key: 'teapot', name: '茶壶太太', caption: '慢火稳拍', asset: 'teapot', color: '#FFD06A', productId: 'onebeat.character.teapot' },
   { key: 'wave', name: 'Wave', caption: '浪线步态', asset: 'wave', color: '#7EC8FF', productId: 'onebeat.character.wave' },
