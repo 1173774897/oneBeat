@@ -1,18 +1,19 @@
 # PRO 银色锁链素材
 
-当前版使用用户手工处理的 `/Users/lizhe/Downloads/onebeatprocessing/chains.png`，原样复制为客户端素材，不重新生成或修改像素。文件实际为 400×600 透明 PNG（不是描述中的 400×800），保留银色锁链、下垂链尾与四角星吊坠。
+解锁态使用用户手工处理的 `/Users/lizhe/Downloads/onebeatprocessing/chains.png`；未解锁态使用 `/Users/lizhe/Downloads/onebeatprocessing/chains_lock.png`。两张图都原样复制，不重新生成或修改像素，均为 400×600 透明 PNG。
 
-- 当前资源：[pro-chain-anchored.png](/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/comic/decor/pro-chain-anchored.png)
+- 解锁态资源：[pro-chain-anchored.png](/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/comic/decor/pro-chain-anchored.png)
+- 未解锁态资源：[pro-chain-locked.png](/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/comic/decor/pro-chain-locked.png)
 - 上一版生成素材保留：[pro-chain-silver-star.png](/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/comic/decor/pro-chain-silver-star.png)
 - 编辑参考原图保留：[pro-chain-silver.png](/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/comic/decor/pro-chain-silver.png)
-- 接入：[LeaderLobbyPage.ets](/Users/lizhe/work/oneBeat/entry/src/main/ets/pages/LeaderLobbyPage.ets)，proChain / lockedProDrumMachineEntry，仅在无 PRO 权益时显示。
+- 接入：[LeaderLobbyPage.ets](/Users/lizhe/work/oneBeat/entry/src/main/ets/pages/LeaderLobbyPage.ets)，两种权限状态共用 `proChain` / `proDrumMachineEntryWithChain` 的锚点几何；无 PRO 权益时显示锁头铁链，解锁后显示原星形链。
 - 上下对齐锚点分别为源图片 y=45 px / y=235 px，间距 190 px。两个值指向按钮外边缘，不包含阴影。
 - PRO_DRUM_BUTTON_HEIGHT=56 vp，同时控制按钮底板、标题点击区和锁链缩放。增大该值会同步放大按钮与锁链；减小会同步缩小。不要独立修改图片宽高或使用按屏宽百分比缩放，否则会破坏上下对齐。
 - 等比缩放 scale=56/(235-45)=0.2947368，图片显示为约 117.8947×176.8421 vp，不拉伸、不裁切。屏幕宽高只改变按钮的页面位置与宽度，不参与锁链的纵向锚点计算。
 - PRO_DRUM_ENTRY_PADDING=4 vp：按钮顶部在容器 y=4，下边缘在 y=60。图片 y 偏移自动计算为 4-45×scale，约 -9.2632 vp；因此源图 45/235 两条线分别映射到 4/60 vp。增大 padding 会将按钮与锁链一起下移，并增加容器上下留白；减小则相反。
-- PRO_CHAIN_OFFSET_X=20 vp：右侧 Alignment.TopEnd 对齐后右移 20，增大向右、减小向左。大厅右侧留白 18 vp，目前透明右边距使可见内容仍在屏内，继续增大 X 可能导致屏幕边缘裁切。没有独立的可调 Y 偏移，纵向位置由锚点自动推导。
+- PRO_CHAIN_OFFSET_X=-20 vp：右侧 Alignment.TopEnd 对齐后左移 20；增大（趋近 0）向右，减小（更负）向左。大厅右侧留白 18 vp，继续向右可能导致屏幕边缘裁切。没有独立的可调 Y 偏移，纵向位置由锚点自动推导。
 - 按用户要求不为链尾增加占位：容器仍高 56+4×2=64 vp，clip(false)，zIndex(1)。链尾会绘制在下方状态文字和“出发”按钮上方；图片不拦截触摸，只有原按钮的 56 vp 点击区会触发 PRO 提示。
-- 标题绘制在锁链上方；锁链不接收触摸，不改变已有权限校验与点击提示。原有几何锁链与红色锁头已被该素材替代。
+- 标题绘制在锁链上方；锁链不接收触摸。权限状态只切换图片和按钮明度，不切换几何、点击范围或已有权限校验。
 
 ## 上一版生成素材提示词（历史记录）
 

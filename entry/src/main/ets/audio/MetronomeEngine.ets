@@ -14,24 +14,31 @@ import {
   parseDrumProgram
 } from './DrumMachineCatalog';
 import { DrumSampleBank } from './DrumSampleBank';
+import { BeatPointState, defaultBeatPointStates, normalizeBeatPointStates } from '../common/MeterModel';
 
 const SAMPLE_RATE: number = 44100;
 const BYTES_PER_SAMPLE: number = 2;
-const AUDIO_PREROLL_MS: number = 220;
+const AUDIO_PREROLL_MS: number = 450;
+const AUDIO_CLOCK_LOCK_RETRY_MS: number = 8;
+const AUDIO_CLOCK_LOCK_TIMEOUT_MS: number = 300;
+const AUDIO_CLOCK_LOCK_MIN_REMAINING_MS: number = 80;
 const AUDIO_CALLBACK_STALL_MS: number = 1500;
 // Sub-audible dither floor laid under the click samples so the stream is never
 // pure digital zero. Pure zero runs are what the smart PA silence detector
 // (CustStreamCheck -> SmartpaPowerOff) keys on to power off the amplifier.
-// ~ -60dBFS; raise (e.g. 0.003 / 0.01) if the log still shows zero_volume=true.
-const DITHER_FLOOR_GAIN: number = 0.001;
+// ~ -72dBFS peak; raise only if device logs still show zero_volume=true.
+const DITHER_FLOOR_GAIN: number = 0.00025;
 
-function applyDitherFloor(data: ArrayBuffer): void {
-  const samples = new Int16Array(data);
-  for (let i = 0; i < samples.length; i++) {
-    // Triangular dither (TPDF): average of two uniforms, +/- DITHER_FLOOR_GAIN.
+function applyDitherFloorToRange(samples: Int16Array, start: number, end: number): void {
+  for (let i = start; i < end; i++) {
     const tpdf = (Math.random() + Math.random() - 1.0) * DITHER_FLOOR_GAIN;
     samples[i] = Math.round(tpdf * 32767);
   }
+}
+
+function applyDitherFloor(data: ArrayBuffer): void {
+  const samples = new Int16Array(data);
+  applyDitherFloorToRange(samples, 0, samples.length);
 }
 
 export type BeatCallback = (beatIndex: number, beatInBar: number, scheduledAtMonoMs: number) => void;
@@ -41,6 +48,7 @@ export interface TransportVisualSnapshot {
   running: boolean;
   playheadMs: number;
   mainPlayheadMs: number;
+  mainBeatIndex: number;
   beatIndex: number;
   beatInBar: number;
   beatPhase: number;
@@ -71,6 +79,7 @@ export class MetronomeEngine {
   private running: boolean = false;
   private bpm: number = 120;
   private beatsPerBar: number = 4;
+  private beatPointStates: BeatPointState[] = defaultBeatPointStates(4);
   private beatIndex: number = 0;
   private offsetMs: number = 0;
   private nextBeatAtMs: number = 0;
@@ -79,7 +88,7 @@ export class MetronomeEngine {
   private runToken: number = 0;
   private transportBpm: number = 120;
 
-  private pattern: SequencerPattern = BuiltInRhythmFactory.create(0, 4);
+  private pattern: SequencerPattern = BuiltInRhythmFactory.create(0, 4, this.beatPointStates);
   private customProgramRaw: string = '';
   private customProgram: DrumProgram | undefined = undefined;
   private customProgramLooping: boolean = true;
@@ -99,6 +108,8 @@ export class MetronomeEngine {
   private applyMainStartOffset: boolean = false;
   private audioStreaming: boolean = false;
   private audioLeadSamples: number = 0;
+  private audioStartAnchorPending: boolean = false;
+  private audioSubmittedFrames: number = 0;
   private audioFrameCursor: number = 0;
   private lastUnderflowCount: number = 0;
   private transportRevision: number = 0;
@@ -137,7 +148,7 @@ export class MetronomeEngine {
       this.weakBuffer = ClickSound.buildTone(soundId === 1 ? 900 : soundId === 2 ? 330 : 660, WEAK_DURATION_MS, 0.55);
     }
     if (rhythmChanged) {
-      this.pattern = BuiltInRhythmFactory.create(this.rhythm, this.beatsPerBar);
+      this.pattern = BuiltInRhythmFactory.create(this.rhythm, this.beatsPerBar, this.beatPointStates);
     }
     if (leavingProgram || rhythmChanged || soundChanged || this.pendingSequence.length === 0) {
       this.rebuildPendingSequence([this.pattern], true);
@@ -177,7 +188,8 @@ export class MetronomeEngine {
     this.bpm = bpm;
     this.beatsPerBar = beatsPerBar;
     if (meterChanged) {
-      this.pattern = BuiltInRhythmFactory.create(this.rhythm, this.beatsPerBar);
+      this.beatPointStates = normalizeBeatPointStates(this.beatPointStates, this.beatsPerBar);
+      this.pattern = BuiltInRhythmFactory.create(this.rhythm, this.beatsPerBar, this.beatPointStates);
     }
     if (bpmChanged || meterChanged || this.pendingSequence.length === 0) {
       if (this.customProgram !== undefined) {
@@ -186,6 +198,20 @@ export class MetronomeEngine {
       } else {
         this.rebuildPendingSequence([this.pattern], true);
       }
+    }
+  }
+
+  setBeatPointStates(states: BeatPointState[]): void {
+    const normalized = normalizeBeatPointStates(states, this.beatsPerBar);
+    if (normalized.join(',') === this.beatPointStates.join(',')) {
+      return;
+    }
+    this.beatPointStates = normalized;
+    this.pattern = BuiltInRhythmFactory.create(this.rhythm, this.beatsPerBar, this.beatPointStates);
+    if (this.customProgram !== undefined) {
+      this.rebuildPendingSequence(buildProgramSequence(this.customProgram), this.customProgramLooping);
+    } else {
+      this.rebuildPendingSequence([this.pattern], true);
     }
   }
 
@@ -208,6 +234,7 @@ export class MetronomeEngine {
         running: false,
         playheadMs: 0,
         mainPlayheadMs: 0,
+        mainBeatIndex: 0,
         beatIndex: this.beatIndex,
         beatInBar: 0,
         beatPhase: 0,
@@ -233,6 +260,8 @@ export class MetronomeEngine {
       running: true,
       playheadMs: playheadMs,
       mainPlayheadMs: playheadMs - this.transportCountInDurationMs,
+      mainBeatIndex: Math.max(0,
+        beatIndex - this.transportStartBeatIndex - this.transportCountInBeats),
       beatIndex: beatIndex,
       beatInBar: started ? (countIn ? (countInBeat % this.beatsPerBar) + 1 :
         (beatIndex % this.beatsPerBar) + 1) : 0,
@@ -353,6 +382,7 @@ export class MetronomeEngine {
   private cancelTransport(): void {
     this.running = false;
     this.audioStreaming = false;
+    this.audioStartAnchorPending = false;
     this.runToken++;
     this.cancelTimers();
   }
@@ -394,11 +424,15 @@ export class MetronomeEngine {
 
     this.resetAudioTimestampState();
     this.prepareAudioCursor(beatIndex, countInBeats);
-    this.audioLeadSamples = Math.max(0,
-      Math.round((localStart - MonotonicClock.nowMs()) * SAMPLE_RATE / 1000));
+    const rendererStartRequestedAtMs = MonotonicClock.nowMs();
+    const fallbackFirstBeatFrame = Math.max(0,
+      Math.round((localStart - rendererStartRequestedAtMs) * SAMPLE_RATE / 1000));
+    this.audioSubmittedFrames = 0;
+    this.audioLeadSamples = 0;
+    this.audioStartAnchorPending = true;
     // Recovery rejoins the current beat while the original visual/session
     // timeline keeps advancing; flushed hardware frames start from zero again.
-    this.audioTimelineLeadFrames = this.audioLeadSamples -
+    this.audioTimelineLeadFrames = fallbackFirstBeatFrame -
       Math.round((localStart - this.transportStartLocalMs) * SAMPLE_RATE / 1000);
     if (rendererPositionReset) {
       this.audioTimestampBaseFrame = 0;
@@ -414,6 +448,11 @@ export class MetronomeEngine {
       this.rendererStarted = true;
       this.observedWriteCallbackCount = this.writeCallbackCount;
       this.lastWriteProgressMs = MonotonicClock.nowMs();
+      await this.lockAudioStartToPresentationClock(renderer, localStart,
+        rendererStartRequestedAtMs, fallbackFirstBeatFrame, token);
+      if (token !== this.runToken || !this.running) {
+        return;
+      }
       this.primeAudioTimestamp(renderer);
       try {
         this.lastUnderflowCount = renderer.getUnderflowCountSync();
@@ -422,6 +461,7 @@ export class MetronomeEngine {
       }
     } catch (err) {
       this.audioStreaming = false;
+      this.audioStartAnchorPending = false;
       const e = err as BusinessError;
       console.warn(`MetronomeEngine start: ${e.message}`);
     }
@@ -491,7 +531,7 @@ export class MetronomeEngine {
     this.pendingRevision++;
   }
 
-  private renderBar(pattern: SequencerPattern): RenderedBar {
+  private renderBar(pattern: SequencerPattern, applyBeatPointPattern: boolean = true): RenderedBar {
     const samplesPerBeat = SAMPLE_RATE * 60 / Math.max(1, this.bpm);
     const frameCount = Math.max(1, Math.round(samplesPerBeat * pattern.beatsPerBar));
     const data = new ArrayBuffer(frameCount * BYTES_PER_SAMPLE);
@@ -500,6 +540,11 @@ export class MetronomeEngine {
 
     for (let eventIndex = 0; eventIndex < pattern.events.length; eventIndex++) {
       const event = pattern.events[eventIndex];
+      const eventBeat = Math.floor(event.tick / pattern.ticksPerBeat) % Math.max(1, pattern.beatsPerBar);
+      const pointState = this.beatPointStates[eventBeat] ?? 'normal';
+      if (applyBeatPointPattern && pointState === 'silent') {
+        continue;
+      }
       const bankSample = this.sampleBank.get(event.sampleKey);
       const sourceData = bankSample !== undefined ? bankSample :
         event.sampleKey === 'accent' ? this.accentBuffer : this.weakBuffer;
@@ -509,8 +554,9 @@ export class MetronomeEngine {
       const availableFrames = Math.min(sourceFrames, frameCount - startFrame);
       for (let frame = 0; frame < availableFrames; frame++) {
         const targetOffset = (startFrame + frame) * BYTES_PER_SAMPLE;
+        const pointGain = applyBeatPointPattern && this.customProgram !== undefined && pointState === 'accent' ? 1.15 : 1;
         const mixed = output.getInt16(targetOffset, true) +
-          source.getInt16(frame * BYTES_PER_SAMPLE, true) * event.velocity;
+          source.getInt16(frame * BYTES_PER_SAMPLE, true) * event.velocity * pointGain;
         output.setInt16(targetOffset, Math.max(-32768, Math.min(32767, Math.round(mixed))), true);
       }
     }
@@ -532,7 +578,7 @@ export class MetronomeEngine {
         velocity: 1
       });
     }
-    return this.renderBar(new SequencerPattern(DEFAULT_TICKS_PER_BEAT, beats, events));
+    return this.renderBar(new SequencerPattern(DEFAULT_TICKS_PER_BEAT, beats, events), false);
   }
 
   private prepareAudioCursor(beatIndex: number, countInBeats: number = 0): void {
@@ -569,11 +615,17 @@ export class MetronomeEngine {
         output.fill(0, outputCursor);
         return;
       }
+      if (this.audioStartAnchorPending) {
+        applyDitherFloorToRange(output, outputCursor, output.length);
+        this.audioSubmittedFrames += output.length - outputCursor;
+        return;
+      }
       if (this.audioLeadSamples > 0) {
         const silenceFrames = Math.min(this.audioLeadSamples, output.length - outputCursor);
-        output.fill(0, outputCursor, outputCursor + silenceFrames);
+        applyDitherFloorToRange(output, outputCursor, outputCursor + silenceFrames);
         outputCursor += silenceFrames;
         this.audioLeadSamples -= silenceFrames;
+        this.audioSubmittedFrames += silenceFrames;
         continue;
       }
 
@@ -591,10 +643,55 @@ export class MetronomeEngine {
       output.set(bar.samples.subarray(this.audioFrameCursor, this.audioFrameCursor + copyFrames), outputCursor);
       outputCursor += copyFrames;
       this.audioFrameCursor += copyFrames;
+      this.audioSubmittedFrames += copyFrames;
       if (this.audioFrameCursor >= bar.frameCount) {
         this.advanceAudioBar();
       }
     }
+  }
+
+  private async lockAudioStartToPresentationClock(
+    renderer: audio.AudioRenderer,
+    localStart: number,
+    rendererStartRequestedAtMs: number,
+    fallbackFirstBeatFrame: number,
+    token: number
+  ): Promise<void> {
+    const lockDeadline = Math.min(
+      rendererStartRequestedAtMs + AUDIO_CLOCK_LOCK_TIMEOUT_MS,
+      localStart - AUDIO_CLOCK_LOCK_MIN_REMAINING_MS);
+    while (token === this.runToken && this.running && MonotonicClock.nowMs() <= lockDeadline) {
+      try {
+        const info = renderer.getAudioTimestampInfoSync();
+        const timestampMs = info.timestamp / 1000000;
+        const now = MonotonicClock.nowMs();
+        if (info.timestamp > 0 && timestampMs >= rendererStartRequestedAtMs - 10 &&
+          timestampMs <= now + 10) {
+          const targetFrame = Math.round(info.framePos + (localStart - timestampMs) * SAMPLE_RATE / 1000);
+          if (targetFrame > this.audioSubmittedFrames) {
+            this.audioLeadSamples = targetFrame - this.audioSubmittedFrames;
+            this.audioTimelineLeadFrames = targetFrame -
+              Math.round((localStart - this.transportStartLocalMs) * SAMPLE_RATE / 1000);
+            this.audioStartAnchorPending = false;
+            return;
+          }
+        }
+      } catch (_e) {
+        // API 12-18 devices do not expose presentation timestamps.
+      }
+      await MetronomeEngine.delay(AUDIO_CLOCK_LOCK_RETRY_MS);
+    }
+    // The fallback preserves the original monotonic scheduling model while
+    // accounting for silence already submitted during timestamp probing.
+    const fallbackTargetFrame = Math.max(fallbackFirstBeatFrame, this.audioSubmittedFrames);
+    this.audioLeadSamples = fallbackTargetFrame - this.audioSubmittedFrames;
+    this.audioTimelineLeadFrames = fallbackTargetFrame -
+      Math.round((localStart - this.transportStartLocalMs) * SAMPLE_RATE / 1000);
+    this.audioStartAnchorPending = false;
+  }
+
+  private static delay(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   private advanceAudioBar(): void {

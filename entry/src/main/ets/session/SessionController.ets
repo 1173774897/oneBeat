@@ -2,9 +2,13 @@ import {
   COUNT_IN_BARS,
   MEMBER_HEARTBEAT_SWEEP_MS,
   MEMBER_HEARTBEAT_TIMEOUT_MS,
+  PING_SAMPLES,
   RESYNC_INTERVAL_MS,
+  SESSION_MAX_MEMBER_COUNT,
   SESSION_TCP_PORT,
-  TRANSPORT_PREROLL_MS
+  TRANSPORT_PREPARE_TIMEOUT_MS,
+  TRANSPORT_PREROLL_MS,
+  TRANSPORT_RESTART_PREROLL_MS
 } from '../common/Constants';
 import { MonotonicClock } from '../common/MonotonicClock';
 import { createMessage } from '../protocol/messages';
@@ -20,6 +24,7 @@ import {
   SessionSnapshotPayload,
   TransportPausePayload,
   TransportPayload,
+  TransportPreparePayload,
   TransportResumePayload,
   TransportState,
   WireMessage
@@ -27,13 +32,22 @@ import {
 import { SessionServer } from '../network/socket/SessionServer';
 import { SessionClient } from '../network/socket/SessionClient';
 import { SessionPeerConnection } from '../network/transport/SessionPeerConnection';
-import { ClockSyncEstimator } from '../sync/ClockSync';
+import { ClockSyncEstimator, SyncSample } from '../sync/ClockSync';
 import {
   P2pRoomInvitation,
   randomAuthNonce,
   validateP2pRoomInvitation
 } from '../network/p2p/P2pInvitation';
 import { isAllowedAvatarKey } from '../assets/AssetCatalog';
+import {
+  BeatPointState,
+  beatPointStatesForRhythm,
+  defaultBeatPointStates,
+  isValidMeter,
+  nextBeatPointState,
+  normalizeBeatPointStates
+} from '../common/MeterModel';
+import { parseDrumProgram, serializeDrumProgram } from '../audio/DrumMachineCatalog';
 import {
   defaultSessionAvatar,
   getExclusiveAvatarsLockedByReadyMembers,
@@ -42,6 +56,7 @@ import {
   isExclusiveTakenByOther,
   isRandomAvatar,
   isRandomPoolCharacter,
+  isRosterAvatarKey,
   normalizeAvatarKey,
   pickFallbackAvatar,
   pickRandomCharacterKey,
@@ -51,9 +66,22 @@ import {
 
 export type SessionUiListener = () => void;
 
+export interface ProDrumEditorSettings {
+  beatsPerBar: number;
+  beatUnit: number;
+  bpm: number;
+}
+
+interface TransportPrepareWaiter {
+  id: string;
+  pendingConnectionIds: Set<string>;
+  timerId: number;
+  resolve: () => void;
+}
+
 const SOLO_BOT_ID_PREFIX: string = 'solo-bot-';
 const SOLO_BOT_DISPLAY_NAME: string = '人机';
-export const SOLO_MAX_BOT_COUNT: number = 7;
+export const SOLO_MAX_BOT_COUNT: number = SESSION_MAX_MEMBER_COUNT - 1;
 // Publish a future deadline so peers use clock sync, not packet arrival order,
 // to switch their roster avatars. Late packets reveal immediately on receipt.
 const RANDOM_AVATAR_REVEAL_LEAD_MS: number = 250;
@@ -79,10 +107,15 @@ export class SessionController {
   private randomAvatarRevealTimer: number = -1;
   private randomAvatarRevealsActive: boolean = true;
   private readonly revealedRandomAvatars: Map<string, number> = new Map();
+  private proDrumEditorSettings: ProDrumEditorSettings | undefined = undefined;
+  private nextTransportPrepareId: number = 0;
+  private transportPrepareWaiter: TransportPrepareWaiter | undefined = undefined;
+  private clockSyncWork: Promise<SyncSample> | undefined = undefined;
 
   bpm: number = 120;
   beatsPerBar: number = 4;
   beatUnit: number = 4;
+  beatPointStates: BeatPointState[] = defaultBeatPointStates(4);
   rhythm: number = 0;
   drumProgram: string = '';
   avatarKey: string = defaultSessionAvatar();
@@ -120,6 +153,30 @@ export class SessionController {
       this.assignAvatarIdentity(leaderMember, this.avatarKey);
       this.connectionMembers.set('leader', leaderMember);
     }
+  }
+
+  getProDrumEditorSettings(): ProDrumEditorSettings | undefined {
+    if (this.proDrumEditorSettings === undefined) {
+      return undefined;
+    }
+    return {
+      beatsPerBar: this.proDrumEditorSettings.beatsPerBar,
+      beatUnit: this.proDrumEditorSettings.beatUnit,
+      bpm: this.proDrumEditorSettings.bpm
+    };
+  }
+
+  rememberProDrumEditorSettings(beatsPerBar: number, beatUnit: number, bpm: number): void {
+    if (!this.isLeader || !isValidMeter(beatsPerBar, beatUnit)) {
+      return;
+    }
+    // This draft is intentionally session-local: first entry follows the lobby,
+    // but later entries in the same team lifecycle preserve explicit PRO edits.
+    this.proDrumEditorSettings = {
+      beatsPerBar: beatsPerBar,
+      beatUnit: beatUnit,
+      bpm: Math.max(40, Math.min(240, bpm))
+    };
   }
 
   getLocalMemberId(): string {
@@ -278,8 +335,13 @@ export class SessionController {
     }
   }
 
-  private canAssignAvatarToMember(memberId: string, key: string): boolean {
-    if (!isAvatarAllowedForSession(key, this.soloTeam)) {
+  private canAssignAvatarToMember(memberId: string, key: string, checkLocalOwnership: boolean): boolean {
+    if (!isRosterAvatarKey(key, this.soloTeam)) {
+      return false;
+    }
+    // Purchases belong to the device choosing the character. A leader must not
+    // evaluate a remote member with the leader's own local entitlement cache.
+    if (checkLocalOwnership && !isAvatarAllowedForSession(key, this.soloTeam)) {
       return false;
     }
     const members = this.getMembers();
@@ -318,7 +380,7 @@ export class SessionController {
 
   async updateMemberAvatar(memberId: string, key: string): Promise<void> {
     const normalized = normalizeAvatarKey(key);
-    if (!this.canAssignAvatarToMember(memberId, normalized)) {
+    if (!this.canAssignAvatarToMember(memberId, normalized, true)) {
       return;
     }
     if (this.soloTeam && this.isLeader) {
@@ -420,7 +482,8 @@ export class SessionController {
   }
 
   canAddSoloBot(): boolean {
-    return this.getSoloBotCount() < SOLO_MAX_BOT_COUNT && this.getAvailableAvatarsForNewSoloBot().length > 0;
+    return this.getMembers().length < SESSION_MAX_MEMBER_COUNT &&
+      this.getSoloBotCount() < SOLO_MAX_BOT_COUNT && this.getAvailableAvatarsForNewSoloBot().length > 0;
   }
 
   getAvailableAvatarsForNewSoloBot(): string[] {
@@ -488,7 +551,7 @@ export class SessionController {
   }
 
   async addSoloBotWithNextAvatar(): Promise<string | undefined> {
-    if (!this.isLeader || !this.soloTeam) {
+    if (!this.isLeader || !this.soloTeam || this.getMembers().length >= SESSION_MAX_MEMBER_COUNT) {
       return undefined;
     }
     const available = this.getAvailableAvatarsForNewSoloBot();
@@ -569,6 +632,7 @@ export class SessionController {
         this.connectionMembers.delete(connectionId);
         this.authenticatedConnections.delete(connectionId);
         this.connectionLastSeenMs.delete(connectionId);
+        this.releaseTransportPreparationConnection(connectionId);
         void this.broadcastSnapshot();
       }
     );
@@ -597,9 +661,7 @@ export class SessionController {
       protocolVersion: invitation.protocolVersion,
       nonce: randomAuthNonce()
     } as ClientHelloPayload));
-    const sync = await ClockSyncEstimator.measureWithSender(async (id, clientMono) => {
-      return await this.sendPing(id, clientMono);
-    });
+    const sync = await this.measureClockSync(PING_SAMPLES);
     this.clockSync.applySample(sync);
     this.scheduleRandomAvatarReveals();
     this.startResyncLoop();
@@ -610,6 +672,7 @@ export class SessionController {
     this.randomAvatarRevealsActive = false;
     this.stopRandomAvatarRevealTimer();
     this.revealedRandomAvatars.clear();
+    this.finishTransportPreparation();
     this.stopResyncLoop();
     if (this.isLeader) {
       this.stopHeartbeatSweep();
@@ -626,8 +689,13 @@ export class SessionController {
 
   async updateBpm(next: number): Promise<void> {
     if (!this.isLeader) { return; }
+    const restartRunningTransport = this.state === 'playing' || this.state === 'countdown';
     this.bpm = Math.max(40, Math.min(240, next));
-    await this.broadcastSnapshot();
+    if (!restartRunningTransport) {
+      await this.broadcastSnapshot();
+      return;
+    }
+    await this.restartRunningTransportAfterConfiguration();
   }
 
   async updateSoundId(next: number): Promise<void> {
@@ -640,7 +708,7 @@ export class SessionController {
     const normalized = normalizeAvatarKey(key);
     if (!isAllowedAvatarKey(normalized, this.soloTeam)) { return; }
     const memberId = this.getLocalMemberId();
-    if (!this.soloTeam && memberId.length > 0 && !this.canAssignAvatarToMember(memberId, normalized)) {
+    if (!this.soloTeam && memberId.length > 0 && !this.canAssignAvatarToMember(memberId, normalized, true)) {
       return;
     }
     if (this.isLocalLobbyReady()) {
@@ -661,23 +729,85 @@ export class SessionController {
   }
 
   async updateMeter(beats: number, unit: number): Promise<void> {
-    if (!this.isLeader || !((beats === 4 && unit === 4) || (beats === 3 && unit === 4) || (beats === 6 && unit === 8))) { return; }
+    if (!this.isLeader || !isValidMeter(beats, unit)) { return; }
+    const restartRunningTransport = this.state === 'playing' || this.state === 'countdown';
+    const previousBeatCount = this.beatPointStates.length;
     this.beatsPerBar = beats;
     this.beatUnit = unit;
+    this.beatPointStates = normalizeBeatPointStates(this.beatPointStates, beats);
+    if (this.rhythm === 2) {
+      for (let i = previousBeatCount; i < this.beatPointStates.length; i++) {
+        this.beatPointStates[i] = 'silent';
+      }
+    }
+    if (this.rhythm === 3 && this.drumProgram.length > 0) {
+      const program = parseDrumProgram(this.drumProgram);
+      program.beatsPerBar = beats;
+      program.beatUnit = unit;
+      this.drumProgram = serializeDrumProgram(program);
+    }
+    if (!restartRunningTransport) {
+      await this.broadcastSnapshot();
+      return;
+    }
+
+    await this.restartRunningTransportAfterConfiguration();
+  }
+
+  async cycleBeatPointState(index: number): Promise<void> {
+    if (!this.isLeader || index < 0 || index >= this.beatsPerBar) {
+      return;
+    }
+    const restartRunningTransport = this.state === 'playing' || this.state === 'countdown';
+    const next = normalizeBeatPointStates(this.beatPointStates, this.beatsPerBar);
+    next[index] = nextBeatPointState(next[index]);
+    this.beatPointStates = next;
+    if (!restartRunningTransport) {
+      await this.broadcastSnapshot();
+      return;
+    }
+    await this.restartRunningTransportAfterConfiguration();
+  }
+
+  private async restartRunningTransportAfterConfiguration(): Promise<void> {
+    // Configure every peer first, then restart on a shared future downbeat. Applying
+    // on packet receipt would let network latency put devices in different bars.
+    this.state = 'countdown';
     await this.broadcastSnapshot();
+    const nextBarBeatIndex = (Math.floor(this.beatIndex / this.beatsPerBar) + 1) * this.beatsPerBar;
+    this.beatIndex = nextBarBeatIndex;
+    const restartAt = MonotonicClock.nowMs() + TRANSPORT_RESTART_PREROLL_MS;
+    const payload: TransportPayload = {
+      startAtLeaderMonoMs: restartAt,
+      countdownMs: 0,
+      beatIndex: nextBarBeatIndex,
+      countInBeats: 0
+    };
+    const wire = createMessage('TRANSPORT', payload);
+    AppStorage.setOrCreate('lastTransportMessage', JSON.stringify(wire));
+    this.notifyUi();
+    await this.sendToAll(wire);
   }
 
   async updateRhythm(rhythm: number): Promise<void> {
     if (!this.isLeader || rhythm < 0 || rhythm > 3) { return; }
     this.rhythm = rhythm;
+    if (rhythm >= 0 && rhythm <= 2) {
+      this.beatPointStates = beatPointStatesForRhythm(rhythm, this.beatsPerBar);
+    }
     await this.broadcastSnapshot();
   }
 
   async updateDrumProgram(program: string): Promise<void> {
     if (!this.isLeader || program.length === 0) { return; }
+    const restartRunningTransport = this.state === 'playing' || this.state === 'countdown';
     this.drumProgram = program;
     this.rhythm = 3;
-    await this.broadcastSnapshot();
+    if (!restartRunningTransport) {
+      await this.broadcastSnapshot();
+      return;
+    }
+    await this.restartRunningTransportAfterConfiguration();
   }
 
   async updateSceneKey(key: string): Promise<void> {
@@ -691,6 +821,7 @@ export class SessionController {
     if (!this.isLeader) {
       return 0;
     }
+    await this.prepareConnectedMembersForTransport();
     this.state = 'countdown';
     const countInBeats = this.beatsPerBar * COUNT_IN_BARS;
     const countdownMs = Math.round(countInBeats * 60000 / this.bpm);
@@ -724,6 +855,7 @@ export class SessionController {
     if (!this.isLeader) {
       return 0;
     }
+    await this.prepareConnectedMembersForTransport();
     this.state = 'countdown';
     const countInBeats = this.beatsPerBar * COUNT_IN_BARS;
     const resumeAt = MonotonicClock.nowMs() + TRANSPORT_PREROLL_MS;
@@ -776,6 +908,7 @@ export class SessionController {
       bpm: this.bpm,
       beatsPerBar: this.beatsPerBar,
       beatUnit: this.beatUnit,
+      beatPointStates: this.beatPointStates.slice(),
       rhythm: this.rhythm,
       drumProgram: this.drumProgram,
       sceneKey: this.sceneKey,
@@ -802,6 +935,7 @@ export class SessionController {
       const removed = this.connectionMembers.delete(connection.id);
       this.authenticatedConnections.delete(connection.id);
       this.connectionLastSeenMs.delete(connection.id);
+      this.releaseTransportPreparationConnection(connection.id);
       if (removed) {
         this.notifyUi();
       }
@@ -818,7 +952,7 @@ export class SessionController {
         return;
       }
       const normalized = normalizeAvatarKey(update.avatarKey);
-      if (this.canAssignAvatarToMember(connection.id, normalized)) {
+      if (this.canAssignAvatarToMember(connection.id, normalized, false)) {
         this.assignAvatarIdentity(member, normalized);
         void this.broadcastSnapshot();
       }
@@ -839,7 +973,7 @@ export class SessionController {
       if (member === undefined) {
         return;
       }
-      if (readyPayload.ready && !this.canAssignAvatarToMember(connection.id, member.avatarKey)) {
+      if (readyPayload.ready && !this.canAssignAvatarToMember(connection.id, member.avatarKey, false)) {
         return;
       }
       member.lobbyReady = readyPayload.ready;
@@ -849,10 +983,29 @@ export class SessionController {
       void this.broadcastSnapshot();
       return;
     }
+    if (message.type === 'TRANSPORT_READY') {
+      const ready = message.payload as TransportPreparePayload;
+      const waiter = this.transportPrepareWaiter;
+      if (waiter !== undefined && ready.id === waiter.id) {
+        waiter.pendingConnectionIds.delete(connection.id);
+        if (waiter.pendingConnectionIds.size === 0) {
+          this.finishTransportPreparation(waiter.id);
+        }
+      }
+      return;
+    }
     if (message.type === 'CLIENT_HELLO') {
       const hello = message.payload as ClientHelloPayload;
       if (!this.soloTeam && !this.isValidRoomHello(hello)) {
         console.warn(`Rejected unauthenticated session client: ${connection.id}`);
+        void connection.close();
+        return;
+      }
+      // Capacity is enforced by the leader before authentication so parallel
+      // join attempts cannot create a tenth member or enter later snapshots.
+      if (!this.connectionMembers.has(connection.id) &&
+        this.connectionMembers.size >= SESSION_MAX_MEMBER_COUNT) {
+        console.warn(`Rejected session client because room is full: ${connection.id}`);
         void connection.close();
         return;
       }
@@ -861,7 +1014,7 @@ export class SessionController {
       }
       this.authenticatedConnections.add(connection.id);
       const requestedAvatar = normalizeAvatarKey(hello.avatarKey);
-      const allowedAvatar = isAllowedAvatarKey(requestedAvatar, this.soloTeam)
+      const allowedAvatar = isRosterAvatarKey(requestedAvatar, this.soloTeam)
         ? requestedAvatar : defaultSessionAvatar();
       const member: SessionMember = {
         id: connection.id,
@@ -920,6 +1073,10 @@ export class SessionController {
       this.applySnapshot(snapshot);
       return;
     }
+    if (message.type === 'TRANSPORT_PREPARE') {
+      void this.handleTransportPreparation(message.payload as TransportPreparePayload);
+      return;
+    }
     if (message.type === 'TRANSPORT') {
       this.state = 'countdown';
       AppStorage.setOrCreate('lastTransportMessage', JSON.stringify(message));
@@ -957,6 +1114,9 @@ export class SessionController {
     this.beatsPerBar = snapshot.beatsPerBar;
     this.beatUnit = snapshot.beatUnit ?? 4;
     this.rhythm = snapshot.rhythm ?? 0;
+    this.beatPointStates = normalizeBeatPointStates(
+      snapshot.beatPointStates ?? beatPointStatesForRhythm(this.rhythm, this.beatsPerBar),
+      this.beatsPerBar);
     this.drumProgram = snapshot.drumProgram ?? '';
     this.sceneKey = this.normalizeSceneKey(snapshot.sceneKey ?? 'sunset_coast');
     AppStorage.setOrCreate('selectedSceneKey', this.sceneKey);
@@ -981,6 +1141,109 @@ export class SessionController {
 
   private normalizeSceneKey(key: string): string {
     return key === 'neon_street' ? 'neon_street' : 'sunset_coast';
+  }
+
+  private async prepareConnectedMembersForTransport(): Promise<void> {
+    if (this.soloTeam || this.authenticatedConnections.size === 0) {
+      return;
+    }
+    this.finishTransportPreparation();
+    const pendingConnectionIds = new Set<string>();
+    this.authenticatedConnections.forEach((connectionId: string) => {
+      pendingConnectionIds.add(connectionId);
+    });
+    const id = `transport-prepare-${++this.nextTransportPrepareId}-${Math.round(MonotonicClock.nowMs())}`;
+    let resolveReady: () => void = () => {};
+    const ready = new Promise<void>((resolve) => {
+      resolveReady = resolve;
+    });
+    const waiter: TransportPrepareWaiter = {
+      id: id,
+      pendingConnectionIds: pendingConnectionIds,
+      timerId: -1,
+      resolve: resolveReady
+    };
+    this.transportPrepareWaiter = waiter;
+    waiter.timerId = setTimeout(() => {
+      this.finishTransportPreparation(id);
+    }, TRANSPORT_PREPARE_TIMEOUT_MS);
+
+    const wire = createMessage('TRANSPORT_PREPARE', { id: id } as TransportPreparePayload);
+    const connections = this.server.getConnections();
+    for (let i = 0; i < connections.length; i++) {
+      if (!pendingConnectionIds.has(connections[i].id)) {
+        continue;
+      }
+      try {
+        await connections[i].send(wire);
+      } catch (_e) {
+        this.releaseTransportPreparationConnection(connections[i].id);
+      }
+    }
+    if (pendingConnectionIds.size === 0) {
+      this.finishTransportPreparation(id);
+    }
+    await ready;
+  }
+
+  private finishTransportPreparation(expectedId?: string): void {
+    const waiter = this.transportPrepareWaiter;
+    if (waiter === undefined || (expectedId !== undefined && waiter.id !== expectedId)) {
+      return;
+    }
+    this.transportPrepareWaiter = undefined;
+    if (waiter.timerId >= 0) {
+      clearTimeout(waiter.timerId);
+    }
+    waiter.resolve();
+  }
+
+  private releaseTransportPreparationConnection(connectionId: string): void {
+    const waiter = this.transportPrepareWaiter;
+    if (waiter === undefined) {
+      return;
+    }
+    waiter.pendingConnectionIds.delete(connectionId);
+    if (waiter.pendingConnectionIds.size === 0) {
+      this.finishTransportPreparation(waiter.id);
+    }
+  }
+
+  private async handleTransportPreparation(payload: TransportPreparePayload): Promise<void> {
+    try {
+      const sample = await this.measureClockSync(PING_SAMPLES);
+      this.clockSync.applySample(sample);
+      this.scheduleRandomAvatarReveals();
+      this.notifyUi();
+    } catch (_e) {
+      // The leader has a bounded wait and will use the last valid offset if a
+      // fresh exchange is interrupted by a transient network failure.
+    }
+    if (this.isMemberTransportConnected()) {
+      try {
+        await this.sendToLeader(createMessage('TRANSPORT_READY', { id: payload.id } as TransportPreparePayload));
+      } catch (_e) {
+        // A closed connection no longer participates in the leader's waiter.
+      }
+    }
+  }
+
+  private async measureClockSync(sampleCount: number): Promise<SyncSample> {
+    const active = this.clockSyncWork;
+    if (active !== undefined) {
+      return await active;
+    }
+    const work = ClockSyncEstimator.measureWithSender(async (id, clientMono) => {
+      return await this.sendPing(id, clientMono);
+    }, sampleCount);
+    this.clockSyncWork = work;
+    try {
+      return await work;
+    } finally {
+      if (this.clockSyncWork === work) {
+        this.clockSyncWork = undefined;
+      }
+    }
   }
 
   private async sendPing(id: string, clientMono: number): Promise<PingResponse> {
@@ -1046,6 +1309,7 @@ export class SessionController {
       this.connectionMembers.delete(connectionId);
       this.authenticatedConnections.delete(connectionId);
       this.connectionLastSeenMs.delete(connectionId);
+      this.releaseTransportPreparationConnection(connectionId);
       for (let j = 0; j < connections.length; j++) {
         if (connections[j].id === connectionId) {
           this.server.removeConnection(connectionId);
@@ -1062,9 +1326,7 @@ export class SessionController {
       return;
     }
     try {
-      const sample = await ClockSyncEstimator.measureWithSender(async (id, clientMono) => {
-        return await this.sendPing(id, clientMono);
-      }, 3);
+      const sample = await this.measureClockSync(5);
       const delta = Math.abs(sample.offsetMs - this.clockSync.getOffsetMs());
       if (delta > 3) {
         this.clockSync.smoothAdjust(sample.offsetMs);

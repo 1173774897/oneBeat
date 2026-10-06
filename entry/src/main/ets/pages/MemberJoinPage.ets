@@ -16,9 +16,10 @@ import {
   teamNetworkPermissionDeniedHint,
   verifyTeamNetworkAccess
 } from '../network/join/TeamNetworkPermissions';
-import { ComicCharacter, PAPER, INK, CORAL, LILAC, TEAL } from '../components/ComicKit';
+import { ComicCharacter, PAPER, INK, CORAL, LILAC, TEAL, CARD_SHADOW, CONTROL_SHADOW } from '../components/ComicKit';
 
 const PLAYER_DISPLAY_NAME_KEY: string = 'playerDisplayName';
+const JOIN_HERO_HEIGHT: number = 162;
 
 @Entry
 @Component
@@ -86,39 +87,45 @@ struct MemberJoinPage {
             .padding({ left: 9, right: 9, top: 6, bottom: 6 })
             .border({ width: 1, color: INK })
             .borderRadius(4)
+            .shadow(CONTROL_SHADOW)
         }.width('100%')
 
-        Stack({ alignContent: Alignment.BottomEnd }) {
-          Image($rawfile('comic/decor/entry_burst.png'))
+        Column() {
+          Stack({ alignContent: Alignment.BottomEnd }) {
+            Image($rawfile('comic/decor/join_invitation_paper.png'))
+              .width('100%')
+              .height('100%')
+              .objectFit(ImageFit.Cover)
+              .hitTestBehavior(HitTestMode.None)
+            ComicCharacter({ pose: 'lilroll' })
+              .width(JOIN_HERO_HEIGHT)
+              .height(JOIN_HERO_HEIGHT)
+              .margin({ right: 3, bottom: -8 })
+              .rotate({ angle: 5 })
+            Column({ space: 5 }) {
+              Text('拿到队长的邀请了吗？')
+                .fontSize(19)
+                .fontWeight(900)
+                .fontStyle(FontStyle.Italic)
+                .width('100%')
+              Text('扫二维码最快，\n也可以输入 6 位加入码。')
+                .fontSize(12)
+                .fontWeight(FontWeight.Bold)
+                .lineHeight(18)
+                .width('100%')
+            }
             .width('100%')
-            .height('100%')
-            .objectFit(ImageFit.Fill)
-          ComicCharacter({ avatar: 'cloud' })
-            .width(142)
-            .height(142)
-            .margin({ right: 3, bottom: -8 })
-            .rotate({ angle: 5 })
-          Column({ space: 5 }) {
-            Text('拿到队长的邀请了吗？')
-              .fontSize(19)
-              .fontWeight(900)
-              .fontStyle(FontStyle.Italic)
-              .width('100%')
-            Text('扫二维码最快，\n也可以输入 6 位加入码。')
-              .fontSize(12)
-              .fontWeight(FontWeight.Bold)
-              .lineHeight(18)
-              .width('100%')
+            .padding({ left: 14, right: 140, top: 6, bottom: 48 })
           }
           .width('100%')
-          .padding({ left: 14, right: 140, top: 18, bottom: 18 })
+          .height(JOIN_HERO_HEIGHT)
+          .clip(true)
         }
         .width('100%')
-        .height(142)
         .backgroundColor(TEAL)
         .border({ width: 2, color: INK })
         .borderRadius(8)
-        .clip(true)
+        .shadow(CARD_SHADOW)
 
         Column({ space: 10 }) {
           Row() {
@@ -133,6 +140,7 @@ struct MemberJoinPage {
               .padding({ left: 7, right: 7, top: 4, bottom: 4 })
               .border({ width: 1, color: INK })
               .borderRadius(3)
+              .shadow(CONTROL_SHADOW)
               .rotate({ angle: 3 })
           }.width('100%')
           Text('请先打开 Wi-Fi。扫码无需蓝牙发现权限，对准队长邀请二维码即可。')
@@ -146,6 +154,7 @@ struct MemberJoinPage {
             .fontWeight(900)
             .border({ width: 1.5, color: INK })
             .borderRadius(6)
+            .shadow(CONTROL_SHADOW)
             .height(52)
             .width('100%')
             .enabled(this.bluetoothAck && !this.joining)
@@ -158,6 +167,7 @@ struct MemberJoinPage {
         .backgroundColor('#FFFDF7')
         .border({ width: 1.5, color: INK })
         .borderRadius(7)
+        .shadow(CARD_SHADOW)
 
         Row({ space: 10 }) {
           Divider().color(INK).strokeWidth(1).layoutWeight(1)
@@ -192,6 +202,7 @@ struct MemberJoinPage {
             .fontWeight(900)
             .border({ width: 1.5, color: INK })
             .borderRadius(6)
+            .shadow(CONTROL_SHADOW)
             .height(52)
             .width('100%')
             .enabled(this.bluetoothAck && !this.joining && this.joinCode.length === 6)
@@ -204,6 +215,7 @@ struct MemberJoinPage {
         .backgroundColor('#FFFDF7')
         .border({ width: 1.5, color: INK })
         .borderRadius(7)
+        .shadow(CARD_SHADOW)
 
         Column({ space: 7 }) {
           Text('蓝牙耳机同步提醒').fontSize(12).fontWeight(900).fontColor('#884400').width('100%')
@@ -228,6 +240,7 @@ struct MemberJoinPage {
         .backgroundColor('#FFF0D8')
         .border({ width: 1, color: '#B66B18' })
         .borderRadius(6)
+        .shadow(CONTROL_SHADOW)
 
         if (this.status.length > 0) {
           Text(this.status)

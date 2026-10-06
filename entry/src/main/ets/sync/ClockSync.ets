@@ -50,13 +50,15 @@ export class ClockSyncEstimator {
       return { offsetMs: 0, rttMs: 999 };
     }
     const sorted = [...samples].sort((a, b) => a.rttMs - b.rttMs);
-    const trimmed = sorted.length > 4 ? sorted.slice(0, sorted.length - 2) : sorted;
-    const offsets = trimmed.map((s) => s.offsetMs).sort((a, b) => a - b);
-    const rtts = trimmed.map((s) => s.rttMs).sort((a, b) => a - b);
+    // Queueing delay is the main source of Wi-Fi P2P clock error. Use the
+    // median offset of the three fastest exchanges so one unusually asymmetric
+    // packet cannot move the shared audio deadline.
+    const candidates = sorted.slice(0, Math.min(3, sorted.length));
+    const offsets = candidates.map((s) => s.offsetMs).sort((a, b) => a - b);
     const mid = Math.floor(offsets.length / 2);
     return {
       offsetMs: offsets.length % 2 === 0 ? (offsets[mid - 1] + offsets[mid]) / 2 : offsets[mid],
-      rttMs: rtts.length % 2 === 0 ? (rtts[mid - 1] + rtts[mid]) / 2 : rtts[mid]
+      rttMs: candidates[0].rttMs
     };
   }
 
@@ -75,7 +77,9 @@ export class ClockSyncEstimator {
       const offset = ((t1 - t0) + (t2 - t3)) / 2;
       const rtt = (t3 - t0) - (t2 - t1);
       samples.push({ offsetMs: offset, rttMs: rtt });
-      await ClockSyncEstimator.delay(40);
+      if (i + 1 < sampleCount) {
+        await ClockSyncEstimator.delay(20);
+      }
     }
     return ClockSyncEstimator.medianFromSamples(samples);
   }

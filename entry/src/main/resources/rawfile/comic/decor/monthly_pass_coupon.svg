@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="360" height="192" viewBox="0 0 360 192" preserveAspectRatio="none" fill="none">
+  <path d="M13 1H341Q353 1 353 13V78A13 13 0 0 0 353 104V171Q353 183 341 183H13Q1 183 1 171V104A13 13 0 0 0 1 78V13Q1 1 13 1Z" fill="#171B1F" stroke="#171B1F" stroke-width="2" transform="translate(3 4)"/>
+  <path d="M13 1H341Q353 1 353 13V78A13 13 0 0 0 353 104V171Q353 183 341 183H13Q1 183 1 171V104A13 13 0 0 0 1 78V13Q1 1 13 1Z" fill="#FFF9EE"/>
+  <path d="M254 1H341Q353 1 353 13V78A13 13 0 0 0 353 104V171Q353 183 341 183H254Z" fill="#FF7056"/>
+  <path d="M225 13H247V171H191Z" fill="#C5B7EB" fill-opacity="0.4"/>
+  <path d="M240 13H23Q14 13 14 22V65M14 117V162Q14 171 23 171H240" stroke="#171B1F" stroke-opacity="0.25" stroke-dasharray="4 4"/>
+  <path d="M266 13H331Q340 13 340 22V65M340 117V162Q340 171 331 171H266V13" stroke="#171B1F" stroke-opacity="0.35" stroke-dasharray="4 4"/>
+  <path d="M254 10V174" stroke="#171B1F" stroke-width="1.5" stroke-dasharray="6 5"/>
+  <path d="M13 1H341Q353 1 353 13V78A13 13 0 0 0 353 104V171Q353 183 341 183H13Q1 183 1 171V104A13 13 0 0 0 1 78V13Q1 1 13 1Z" stroke="#171B1F" stroke-width="2"/>
+</svg>

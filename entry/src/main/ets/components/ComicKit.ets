@@ -7,9 +7,21 @@ export const LILAC: string = '#C5B7EB';
 export const TEAL: string = '#29B5AE';
 export const WHITE: string = '#FFFDF8';
 export const BLUE: string = '#A9C9F2';
+const COMIC_BUTTON_HEIGHT: number = 56;
+const COMIC_BUTTON_RADIUS: number = 7;
+// Supported older ArkUI runtimes suppress component shadows when radius is zero.
+// A 1px blur keeps near-hard ink edges without changing layout; textShadow is separate.
+export const INK_SHADOW_RADIUS: number = 1;
 // Keep ink-shadow styling independent of legacy page geometry and corner radii.
-export const CARD_SHADOW: ShadowOptions = { radius: 0, offsetX: 3, offsetY: 4, color: INK };
-export const CONTROL_SHADOW: ShadowOptions = { radius: 0, offsetX: 2, offsetY: 2, color: INK };
+export const CARD_SHADOW: ShadowOptions = { radius: INK_SHADOW_RADIUS, offsetX: 3, offsetY: 4, color: INK };
+export const CONTROL_SHADOW: ShadowOptions = { radius: INK_SHADOW_RADIUS, offsetX: 2, offsetY: 2, color: INK };
+
+/** Solid ink backing with numeric vp offsets, independent of native shadow blur. */
+export interface ComicHardShadowOptions {
+  offsetX: number;
+  offsetY: number;
+  color: string;
+}
 
 export function lobbyAvatars(soloTeam: boolean): string[] {
   return rosterKeysForLobby(soloTeam);
@@ -72,19 +84,64 @@ export struct ComicButton {
   @Prop label: string = '';
   @Prop fill: string = CORAL;
   @Prop active: boolean = true;
-  // The home page keeps its original shadow while other pages use the shared style.
+  @Prop badgeLabel: string = '';
+  @Prop badgeIcon: string = '';
+  @Prop badgeFill: string = PAPER;
+  // Existing pages retain native shadow rendering unless a solid backing is supplied.
   @Prop inkShadow: ShadowOptions = CARD_SHADOW;
+  @Prop hardShadow: ComicHardShadowOptions | undefined = undefined;
   action: () => void = () => {};
-  build() {
+
+  @Builder
+  private buttonFace() {
     Button({ type: ButtonType.Normal }) {
       Row() {
         Text(this.label).fontSize(22).fontWeight(900).fontStyle(FontStyle.Italic).fontColor(INK)
         Blank()
+        if (this.badgeLabel.length > 0 && this.badgeIcon.length > 0) {
+          Row({ space: 5 }) {
+            Image($rawfile(this.badgeIcon))
+              .width(22)
+              .height(22)
+              .objectFit(ImageFit.Contain)
+            Text(this.badgeLabel)
+              .fontSize(9)
+              .fontWeight(900)
+              .fontColor(INK)
+              .letterSpacing(0.7)
+          }
+          .width(92)
+          .height(30)
+          .justifyContent(FlexAlign.Center)
+          .backgroundColor(this.badgeFill)
+          .border({ width: 1.2, color: INK })
+          .borderRadius(4)
+          .rotate({ angle: -2 })
+          .margin({ right: 9 })
+        }
         Text('›').fontSize(30).fontColor(INK)
       }.width('100%').padding({ left: 16, right: 14 })
-    }.width('100%').height(56).backgroundColor(this.fill)
-      .border({ width: 1.5, color: INK }).borderRadius(7)
-      .shadow(this.inkShadow)
+    }.width('100%').height(COMIC_BUTTON_HEIGHT).backgroundColor(this.fill)
+      .border({ width: 1.5, color: INK }).borderRadius(COMIC_BUTTON_RADIUS)
+      .shadow(this.hardShadow !== undefined ? { radius: 0, color: '#00000000' } : this.inkShadow)
       .enabled(this.active).opacity(this.active ? 1 : 0.5).onClick(this.action)
+  }
+
+  build() {
+    if (this.hardShadow !== undefined) {
+      // Older supported runtimes suppress zero-radius shadows. Use a solid backing
+      // instead; translation must not enlarge layout or intercept button taps.
+      Stack({ alignContent: Alignment.TopStart }) {
+        Row()
+          .width('100%').height(COMIC_BUTTON_HEIGHT)
+          .backgroundColor(this.hardShadow?.color ?? INK).borderRadius(COMIC_BUTTON_RADIUS)
+          .translate({ x: this.hardShadow?.offsetX ?? 0, y: this.hardShadow?.offsetY ?? 0 })
+          .opacity(this.active ? 1 : 0.5)
+          .hitTestBehavior(HitTestMode.None).accessibilityLevel('no')
+        this.buttonFace()
+      }.width('100%').height(COMIC_BUTTON_HEIGHT).clip(false)
+    } else {
+      this.buttonFace()
+    }
   }
 }

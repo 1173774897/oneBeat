@@ -7,9 +7,13 @@ import {
   PAPER,
   WHITE,
   CARD_SHADOW,
-  CONTROL_SHADOW
+  CONTROL_SHADOW,
+  INK_SHADOW_RADIUS
 } from '../components/ComicKit';
 import { isProDrumMachineAccessible } from '../store/EntitlementStore';
+import { EditableBpm } from '../components/EditableBpm';
+import { EditableMeter, MeterEditorOverlay } from '../components/EditableMeter';
+import { beatUnitLabel, stepsPerBeatForUnit } from '../common/MeterModel';
 import {
   buildDrumPattern,
   defaultDrumProgram,
@@ -48,6 +52,10 @@ interface DrumContextState {
   selections: DrumSectionSelectionState[];
 }
 
+const DRUM_EDITOR_CELL_WIDTH: number = 24;
+const DRUM_EDITOR_BUTTON_WIDTH: number = 23;
+const DRUM_EDITOR_VIEWPORT_HEIGHT: number = 258;
+
 @Entry
 @Component
 struct DrumMachinePage {
@@ -70,6 +78,7 @@ struct DrumMachinePage {
   @State dropdownSectionIndex: number = 0;
   @State saveDialogVisible: boolean = false;
   @State overwriteDialogVisible: boolean = false;
+  @State meterEditorVisible: boolean = false;
   @State saveName: string = '';
   @State savedPrograms: SavedDrumProgram[] = [];
   @StorageLink('safeAreaTop') topSafeInset: number = 0;
@@ -96,14 +105,37 @@ struct DrumMachinePage {
       }
     }
     this.styleKey = program.styleKey;
-    this.beatsPerBar = program.beatsPerBar;
-    this.beatUnit = program.beatUnit;
-    if (controller !== undefined) {
-      this.bpm = controller.bpm;
-    }
     this.sections = program.sections;
+    const editorSettings = controller?.getProDrumEditorSettings();
+    if (editorSettings !== undefined) {
+      this.beatsPerBar = editorSettings.beatsPerBar;
+      this.beatUnit = editorSettings.beatUnit;
+      this.bpm = editorSettings.bpm;
+    } else if (controller !== undefined) {
+      // The lobby's live leader settings are the source of truth when opening PRO;
+      // a previously saved arrangement may carry an older meter.
+      this.beatsPerBar = controller.beatsPerBar;
+      this.beatUnit = controller.beatUnit;
+      this.bpm = controller.bpm;
+    } else {
+      this.beatsPerBar = program.beatsPerBar;
+      this.beatUnit = program.beatUnit;
+    }
     this.contextStates = [];
     this.storeCurrentContext();
+  }
+
+  private rememberEditedTempoAndMeter(): void {
+    AppSession.get()?.controller.rememberProDrumEditorSettings(
+      this.beatsPerBar, this.beatUnit, this.bpm);
+  }
+
+  onBackPress(): boolean {
+    if (this.meterEditorVisible) {
+      this.meterEditorVisible = false;
+      return true;
+    }
+    return false;
   }
 
   private loadSavedPrograms(): void {
@@ -194,6 +226,7 @@ struct DrumMachinePage {
     this.dropdownTarget = '';
     this.contextStates = [];
     this.storeCurrentContext();
+    this.rememberEditedTempoAndMeter();
     promptAction.showToast({ message: `已载入 ${saved.name}` });
     if (wasPreviewing) {
       void this.refreshActivePreview();
@@ -506,20 +539,24 @@ struct DrumMachinePage {
     this.beatUnit = unit;
     this.restoreContext(this.styleKey, beats, unit);
     this.dropdownTarget = '';
+    this.rememberEditedTempoAndMeter();
     void this.refreshActivePreview();
   }
 
   private editorStepCount(): number {
-    return this.beatsPerBar * (this.beatUnit === 8 ? 2 : 4);
+    return this.beatsPerBar * stepsPerBeatForUnit(this.beatUnit);
+  }
+
+  private editorGridWidth(): number {
+    return this.editorStepCount() * DRUM_EDITOR_CELL_WIDTH;
   }
 
   private editorStepIndexes(): number[] {
     return Array.from({ length: this.editorStepCount() }, (_value: number, step: number) => step);
   }
 
-  private editorStepGroups(): string[] {
-    return this.editorStepCount() === 16 ? ['1–4', '5–8', '9–12', '13–16'] :
-      ['1–4', '5–8', '9–12'];
+  private editorBeatIndexes(): number[] {
+    return Array.from({ length: this.beatsPerBar }, (_value: number, beat: number) => beat);
   }
 
   private openEditor(index: number, mode: number): void {
@@ -725,6 +762,18 @@ struct DrumMachinePage {
     }
     await controller.updateBpm(controller.bpm + delta);
     this.bpm = controller.bpm;
+    this.rememberEditedTempoAndMeter();
+    void this.refreshActivePreview();
+  }
+
+  private async setBpm(value: number): Promise<void> {
+    const controller = AppSession.get()?.controller;
+    if (controller === undefined || !controller.isLeader) {
+      return;
+    }
+    await controller.updateBpm(value);
+    this.bpm = controller.bpm;
+    this.rememberEditedTempoAndMeter();
     void this.refreshActivePreview();
   }
 
@@ -1001,7 +1050,7 @@ struct DrumMachinePage {
       }
       .width('88%').padding(16).backgroundColor('#FFF9EE')
       .border({ width: 2, color: INK }).borderRadius(8)
-      .shadow({ radius: 0, offsetX: 6, offsetY: 7, color: INK })
+      .shadow({ radius: INK_SHADOW_RADIUS, offsetX: 6, offsetY: 7, color: INK })
     }
     .width('100%').height('100%').backgroundColor('#77000000').zIndex(110)
   }
@@ -1028,7 +1077,7 @@ struct DrumMachinePage {
       }
       .width('88%').padding(17).backgroundColor('#FFF1D7')
       .border({ width: 2.5, color: INK }).borderRadius(8)
-      .shadow({ radius: 0, offsetX: 7, offsetY: 8, color: INK })
+      .shadow({ radius: INK_SHADOW_RADIUS, offsetX: 7, offsetY: 8, color: INK })
     }
     .width('100%').height('100%').backgroundColor('#77000000').zIndex(120)
   }
@@ -1045,39 +1094,52 @@ struct DrumMachinePage {
         }.width('100%')
         Text(`${this.beatsPerBar}/${this.beatUnit} · 第 1 小节 · 点击格子开关鼓点`)
           .fontSize(11).fontColor('#625D55').width('100%')
-        Column({ space: 6 }) {
-          Row({ space: 5 }) {
-            Text('').width(44)
-            Row({ space: 4 }) {
-              ForEach(this.editorStepGroups(), (group: string) => {
-                Text(group).layoutWeight(1).height(18).textAlign(TextAlign.Center)
-                  .fontSize(9).fontWeight(FontWeight.Bold).fontColor('#625D55')
-                  .border({ width: { top: 1, left: 1, right: 1 }, color: '#9A9287' })
-              })
-            }.layoutWeight(1)
-          }.width('100%')
-          Row({ space: 5 }) {
-            Text('').width(44)
-            Row({ space: 1 }) {
-              ForEach(this.editorStepIndexes(), (step: number) => {
-                Text(`${step + 1}`).layoutWeight(1).height(16).textAlign(TextAlign.Center)
-                  .fontSize(8).fontWeight(FontWeight.Bold).fontColor(INK)
-              })
-            }.layoutWeight(1)
-          }.width('100%')
-          ForEach(DRUM_TRACKS, (track: DrumTrack, trackIndex: number) => {
-            Row({ space: 5 }) {
-              Text(track.name).width(44).fontSize(10).fontWeight(FontWeight.Bold).maxLines(1)
-              Row({ space: 1 }) {
+        Row({ space: 5 }) {
+          Column() {
+            Text('拍').width(44).height(18).fontSize(9).fontWeight(900).fontColor('#625D55')
+            Text('').width(44).height(16)
+            ForEach(DRUM_TRACKS, (track: DrumTrack) => {
+              Text(track.name).width(44).height(28).fontSize(10)
+                .fontWeight(FontWeight.Bold).maxLines(1)
+            }, (track: DrumTrack) => track.key)
+          }.width(44)
+          Scroll() {
+            Column() {
+              Row() {
+                ForEach(this.editorBeatIndexes(), (beat: number) => {
+                  Text(`第 ${beat + 1} 拍`)
+                    .width(stepsPerBeatForUnit(this.beatUnit) * DRUM_EDITOR_CELL_WIDTH)
+                    .height(18)
+                    .textAlign(TextAlign.Center)
+                    .fontSize(9)
+                    .fontWeight(FontWeight.Bold)
+                    .fontColor('#625D55')
+                    .border({ width: { top: 1, left: 1, right: 1 }, color: '#9A9287' })
+                }, (beat: number) => `${beat}`)
+              }.width(this.editorGridWidth())
+              Row() {
                 ForEach(this.editorStepIndexes(), (step: number) => {
-                  Button('', { type: ButtonType.Normal }).layoutWeight(1).height(25).padding(0).borderRadius(3)
-                    .backgroundColor(this.editorRows[trackIndex].charAt(step) === '1' ?
-                      (step % (this.beatUnit === 8 ? 2 : 4) === 0 ? CORAL : LILAC) : '#E9E2D5')
-                    .border({ width: 1, color: INK }).onClick(() => this.toggleStep(trackIndex, step))
-                })
-              }.layoutWeight(1)
-            }.height(28).width('100%')
-          })
+                  Text(`${step + 1}`).width(DRUM_EDITOR_CELL_WIDTH).height(16).textAlign(TextAlign.Center)
+                    .fontSize(8).fontWeight(FontWeight.Bold).fontColor(INK)
+                }, (step: number) => `${step}`)
+              }.width(this.editorGridWidth())
+              ForEach(DRUM_TRACKS, (_track: DrumTrack, trackIndex: number) => {
+                Row({ space: 1 }) {
+                  ForEach(this.editorStepIndexes(), (step: number) => {
+                    Button('', { type: ButtonType.Normal }).width(DRUM_EDITOR_BUTTON_WIDTH)
+                      .height(25).padding(0).borderRadius(3)
+                      .backgroundColor(this.editorRows[trackIndex].charAt(step) === '1' ?
+                        (step % stepsPerBeatForUnit(this.beatUnit) === 0 ? CORAL : LILAC) : '#E9E2D5')
+                      .border({ width: 1, color: INK }).onClick(() => this.toggleStep(trackIndex, step))
+                  }, (step: number) => `${step}`)
+                }.height(28).width(this.editorGridWidth())
+              }, (track: DrumTrack) => track.key)
+            }.width(this.editorGridWidth())
+          }
+          .scrollable(ScrollDirection.Horizontal)
+          .scrollBar(BarState.Auto)
+          .layoutWeight(1)
+          .height(DRUM_EDITOR_VIEWPORT_HEIGHT)
         }.width('100%').padding({ left: 8, right: 8, top: 9, bottom: 10 })
         .backgroundColor(PAPER).border({ width: 1, color: INK }).borderRadius(5)
         Row({ space: 8 }) {
@@ -1091,7 +1153,7 @@ struct DrumMachinePage {
         }.width('100%')
       }
       .width('96%').padding(12).backgroundColor('#FFF9EEF8').border({ width: 2, color: INK }).borderRadius(8)
-      .shadow({ radius: 0, offsetX: 5, offsetY: 6, color: INK })
+      .shadow({ radius: INK_SHADOW_RADIUS, offsetX: 5, offsetY: 6, color: INK })
     }
     .width('100%').height('100%').backgroundColor('#66000000').zIndex(100)
   }
@@ -1136,12 +1198,16 @@ struct DrumMachinePage {
           Divider().strokeWidth(1).color('#D4CBBE')
           Row() {
             Text('拍号').fontSize(16).fontWeight(900).width(58)
-            ForEach([4, 3, 6], (beats: number) => {
-              Button(`${beats}/${beats === 6 ? 8 : 4}`, { type: ButtonType.Normal }).layoutWeight(1).height(38)
-                .fontColor(INK).backgroundColor(this.beatsPerBar === beats ? CORAL : PAPER)
-                .border({ width: 1, color: INK }).borderRadius(4).shadow(CONTROL_SHADOW)
-              .onClick(() => this.chooseMeter(beats, beats === 6 ? 8 : 4))
+            EditableMeter({
+              beats: this.beatsPerBar,
+              unit: this.beatUnit,
+              editable: this.isLeader(),
+              controlWidth: '100%',
+              controlHeight: 38,
+              valueFontSize: 20,
+              onEdit: (): void => { this.meterEditorVisible = true; }
             })
+            .layoutWeight(1)
           }.width('100%')
           Divider().strokeWidth(1).color('#D4CBBE')
           Row({ space: 8 }) {
@@ -1152,8 +1218,15 @@ struct DrumMachinePage {
               .border({ width: 1, color: INK }).borderRadius(4).shadow(CONTROL_SHADOW)
               .enabled(this.isLeader() && this.bpm > 40)
               .onClick(() => { void this.changeBpm(-1); })
-            Text(`${this.bpm}`).layoutWeight(1).textAlign(TextAlign.Center)
-              .fontSize(32).fontWeight(900).fontStyle(FontStyle.Italic).fontColor(INK)
+            EditableBpm({
+              value: this.bpm,
+              editable: this.isLeader(),
+              inputId: 'drum-machine-bpm-input',
+              controlWidth: '100%',
+              controlHeight: 38,
+              valueFontSize: 32,
+              onCommit: (value: number): void => { void this.setBpm(value); }
+            }).layoutWeight(1)
             Button({ type: ButtonType.Normal }) {
               Text('+').fontSize(21).fontWeight(900).fontColor(INK).lineHeight(24)
             }.width(38).height(38).padding(0).backgroundColor(PAPER)
@@ -1161,7 +1234,7 @@ struct DrumMachinePage {
               .enabled(this.isLeader() && this.bpm < 240)
               .onClick(() => { void this.changeBpm(1); })
           }.width('100%')
-          Text(`每分钟 ${this.bpm} 个${this.beatUnit === 8 ? '八分' : '四分'}音符拍点`)
+          Text(`每分钟 ${this.bpm} 个${beatUnitLabel(this.beatUnit)}音符拍点`)
             .fontSize(11).fontColor('#66615A').width('100%')
           Divider().strokeWidth(1).color('#D4CBBE')
           Row() {
@@ -1176,8 +1249,15 @@ struct DrumMachinePage {
             .fontColor(INK).backgroundColor(LILAC).border({ width: 1.5, color: INK }).borderRadius(6).shadow(CONTROL_SHADOW)
             .onClick(() => this.addSection())
           Row({ space: 8 }) {
-            Button(this.previewTarget === 'song' ? '■ 停止整曲' : '▶ 试听整曲',
-              { type: ButtonType.Normal }).layoutWeight(1).height(48)
+            Button({ type: ButtonType.Normal }) {
+              Row({ space: 6 }) {
+                Image($rawfile(this.previewTarget === 'song' ?
+                  'comic/icons/stop.svg' : 'comic/icons/play.svg'))
+                  .width(19).height(19).objectFit(ImageFit.Contain)
+                Text(this.previewTarget === 'song' ? '停止整曲' : '试听整曲')
+                  .fontSize(14).fontWeight(900).fontColor(INK)
+              }.justifyContent(FlexAlign.Center)
+            }.layoutWeight(1).height(48).padding(0)
               .fontColor(INK).backgroundColor(WHITE).border({ width: 1.5, color: INK }).borderRadius(6).shadow(CONTROL_SHADOW)
               .enabled(this.previewTarget.length === 0 || this.previewTarget === 'song')
               .onClick(() => { void this.togglePreview(); })
@@ -1221,6 +1301,14 @@ struct DrumMachinePage {
       }
       if (this.overwriteDialogVisible) {
         this.overwriteDialogOverlay()
+      }
+      if (this.meterEditorVisible) {
+        MeterEditorOverlay({
+          initialBeats: this.beatsPerBar,
+          initialUnit: this.beatUnit,
+          onChange: (beats: number, unit: number): void => { this.chooseMeter(beats, unit); },
+          onDismiss: (): void => { this.meterEditorVisible = false; }
+        })
       }
     }.width('100%').height('100%').backgroundColor(PAPER)
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])

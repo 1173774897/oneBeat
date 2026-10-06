@@ -5,6 +5,9 @@ import { AppSession } from '../app/AppSession';
 import { SessionController } from '../session/SessionController';
 import { SessionMember } from '../protocol/messages';
 import { RandomCharacterFilm, RANDOM_FILM_HEIGHT } from '../components/RandomCharacterFilm';
+import { EditableBpm } from '../components/EditableBpm';
+import { EditableMeter, MeterEditorOverlay } from '../components/EditableMeter';
+import { beatUnitLabel } from '../common/MeterModel';
 import {
   avatarDisplayName,
   ComicButton,
@@ -13,10 +16,12 @@ import {
   INK,
   CORAL,
   LILAC,
+  TEAL,
   WHITE,
   BLUE,
   CARD_SHADOW,
-  CONTROL_SHADOW
+  CONTROL_SHADOW,
+  INK_SHADOW_RADIUS
 } from '../components/ComicKit';
 import {
   CharacterPickState,
@@ -44,6 +49,7 @@ import {
   limitedFreeCharacterKeys
 } from '../store/EntitlementStore';
 import { refreshStoreEntitlementsNow } from '../store/StoreBootstrapSync';
+import { SESSION_MAX_MEMBER_COUNT } from '../common/Constants';
 
 interface LobbySceneOption {
   key: string;
@@ -83,6 +89,14 @@ const CHARACTER_BADGE_ICON_SIZE: number = 16;
 const CHARACTER_BADGE_ICON_PADDING: number = 3;
 const CHARACTER_FREE_BADGE_WIDTH: number = 28;
 const CHARACTER_FREE_BADGE_HEIGHT: number = 17;
+const ROSTER_AVATAR_SIZE: number = 43;
+const ROSTER_READY_BADGE_WIDTH: number = 50;
+const ROSTER_READY_BADGE_HEIGHT: number = 16;
+const ROSTER_READY_BADGE_POINTER_SIZE: number = 6;
+/** 给头像上方的准备气泡预留空间；增大则整排头像下移。 */
+const ROSTER_ROW_TOP_PADDING: number = 15;
+/** 相对头像顶边的位置；减小会把准备气泡继续上移。 */
+const ROSTER_READY_BADGE_TOP: number = -13;
 
 @Entry
 @Component
@@ -109,6 +123,7 @@ struct LeaderLobbyPage {
   @State localReady: boolean = false;
   @State leaderCanDepart: boolean = false;
   @State rhythmDropdownOpen: boolean = false;
+  @State meterEditorVisible: boolean = false;
   @State rhythmDropdownX: number = 0;
   @State rhythmDropdownY: number = 0;
   @State rhythmDropdownWidth: number = 200;
@@ -120,6 +135,7 @@ struct LeaderLobbyPage {
   private rhythms: string[] = ['均匀节拍', '双分节拍', '仅小节重音'];
   private enteringStage: boolean = false;
   private refreshingConnectivity: boolean = false;
+  private readonly rosterScroller: Scroller = new Scroller();
   private randomSelectionToken: number = 0;
   private randomPreviewPreviousDrawId: number = 0;
   // Retain dismissal even if the authoritative result arrives after active changes.
@@ -146,6 +162,10 @@ struct LeaderLobbyPage {
     }
   }
   onBackPress(): boolean {
+    if (this.meterEditorVisible) {
+      this.meterEditorVisible = false;
+      return true;
+    }
     void this.leaveLobby();
     return true;
   }
@@ -268,6 +288,20 @@ struct LeaderLobbyPage {
     this.completeInterruptedRandomPreviews();
     if (!this.soloTeam && !this.leader && c.lobbyDeparted) {
       void this.enterStage();
+    }
+  }
+
+  private async applyMeter(beats: number, unit: number): Promise<void> {
+    if (!this.leader || this.loading) {
+      return;
+    }
+    this.beats = beats;
+    this.unit = unit;
+    try {
+      await AppSession.get()?.controller.updateMeter(beats, unit);
+      this.refresh();
+    } catch (_e) {
+      promptAction.showToast({ message: '拍号修改失败，请重试' });
     }
   }
 
@@ -686,7 +720,17 @@ struct LeaderLobbyPage {
   }
 
   private canAddSoloBotSlot(): boolean {
-    return AppSession.get()?.controller.canAddSoloBot() ?? false;
+    return this.members.length < SESSION_MAX_MEMBER_COUNT &&
+      (AppSession.get()?.controller.canAddSoloBot() ?? false);
+  }
+
+  private keepRosterAddSlotVisible(): void {
+    if (!this.soloTeam || !this.leader) {
+      return;
+    }
+    // The add slot is the final item, so the smallest shift that keeps it visible
+    // is the horizontal scroll container's current end position.
+    this.rosterScroller.scrollEdge(Edge.End);
   }
 
   private async addSoloBotSlot(): Promise<void> {
@@ -719,6 +763,45 @@ struct LeaderLobbyPage {
   }
 
   @Builder
+  private rosterReadyBadge() {
+    Stack({ alignContent: Alignment.TopStart }) {
+      Row() {
+        Text('✓ 已准备')
+          .fontSize(9)
+          .fontWeight(900)
+          .fontColor(INK)
+      }
+      .width(ROSTER_READY_BADGE_WIDTH)
+      .height(ROSTER_READY_BADGE_HEIGHT)
+      .justifyContent(FlexAlign.Center)
+      .backgroundColor(TEAL)
+      .border({ width: 1, color: INK })
+      .borderRadius(8)
+      .shadow({ radius: 1, offsetX: 1, offsetY: 1, color: INK })
+      .zIndex(2)
+      Row()
+        .width(ROSTER_READY_BADGE_POINTER_SIZE)
+        .height(ROSTER_READY_BADGE_POINTER_SIZE)
+        .backgroundColor(TEAL)
+        .border({ width: 1, color: INK })
+        .rotate({ angle: 45 })
+        .position({
+          x: (ROSTER_READY_BADGE_WIDTH - ROSTER_READY_BADGE_POINTER_SIZE) / 2,
+          y: ROSTER_READY_BADGE_HEIGHT - ROSTER_READY_BADGE_POINTER_SIZE / 2
+        })
+        .zIndex(1)
+    }
+    .width(ROSTER_READY_BADGE_WIDTH)
+    .height(ROSTER_READY_BADGE_HEIGHT + ROSTER_READY_BADGE_POINTER_SIZE)
+    .position({
+      x: (ROSTER_AVATAR_SIZE - ROSTER_READY_BADGE_WIDTH) / 2,
+      y: ROSTER_READY_BADGE_TOP
+    })
+    .clip(false)
+    .hitTestBehavior(HitTestMode.None)
+  }
+
+  @Builder
   private rosterMemberSlot(member: SessionMember) {
     Column({ space: 2 }) {
       Stack({ alignContent: Alignment.TopEnd }) {
@@ -726,7 +809,7 @@ struct LeaderLobbyPage {
           avatar: member.avatarKey,
           portrait: true,
           mysteryAvatar: this.revealedMemberMysteryAvatar(member)
-        }).width(43).height(43)
+        }).width(ROSTER_AVATAR_SIZE).height(ROSTER_AVATAR_SIZE)
           .border({
             width: this.editingMemberId === member.id ? 2 : 0,
             color: INK
@@ -736,15 +819,7 @@ struct LeaderLobbyPage {
           .opacity(this.canEditMember(member.id) ? 1 : 0.88)
           .onClick(() => { this.selectEditingMember(member.id); })
         if (member.lobbyReady === true) {
-          Text('备')
-            .fontSize(9)
-            .fontWeight(FontWeight.Bold)
-            .fontColor(INK)
-            .backgroundColor(BLUE)
-            .padding({ left: 3, right: 3, top: 1, bottom: 1 })
-            .borderRadius(3)
-            .margin({ top: 1, left: 1 })
-            .hitTestBehavior(HitTestMode.None)
+          this.rosterReadyBadge()
         }
         if (this.soloTeam && this.leader && SessionController.isSoloBotMemberId(member.id)) {
           Text('×')
@@ -760,8 +835,8 @@ struct LeaderLobbyPage {
             .onClick(() => { void this.removeSoloBotSlot(member.id); })
         }
       }
-      .width(43)
-      .height(43)
+      .width(ROSTER_AVATAR_SIZE)
+      .height(ROSTER_AVATAR_SIZE)
       .clip(false)
       Text(member.displayName).fontSize(10).maxLines(1).width(58).textAlign(TextAlign.Center)
     }
@@ -783,6 +858,7 @@ struct LeaderLobbyPage {
       .backgroundColor(PAPER)
       .shadow(CONTROL_SHADOW)
       .opacity(this.canAddSoloBotSlot() ? 1 : 0.42)
+      .enabled(this.canAddSoloBotSlot())
       .hitTestBehavior(this.canAddSoloBotSlot() ? HitTestMode.Default : HitTestMode.None)
       .onClick(() => { void this.addSoloBotSlot(); })
       Text(' ').fontSize(10).opacity(0)
@@ -897,10 +973,10 @@ struct LeaderLobbyPage {
   }
 
   @Builder
-  private proChain() {
+  private proChain(asset: string) {
     // The image box matches the source aspect ratio, so Contain cannot introduce
     // letterboxing between the 45/235 px anchors and the button's outer edges.
-    Image($rawfile('comic/decor/pro-chain-anchored.png'))
+    Image($rawfile(asset))
       .width(PRO_CHAIN_WIDTH).height(PRO_CHAIN_HEIGHT)
       .objectFit(ImageFit.Contain).align(Alignment.TopEnd)
       .translate({ x: PRO_CHAIN_OFFSET_X, y: PRO_CHAIN_TOP_OFFSET })
@@ -908,21 +984,22 @@ struct LeaderLobbyPage {
   }
 
   @Builder
-  private lockedProDrumMachineEntry() {
+  private proDrumMachineEntryWithChain(asset: string, locked: boolean) {
     Stack({ alignContent: Alignment.TopEnd }) {
       Row()
         .width('100%').height(PRO_DRUM_BUTTON_HEIGHT).backgroundColor(LILAC)
         .border({ width: 1.5, color: INK }).borderRadius(7)
-        .shadow(CARD_SHADOW).opacity(0.68)
+        .shadow(CARD_SHADOW).opacity(locked ? 0.68 : 1)
         .align(Alignment.Top).translate({ y: PRO_DRUM_ENTRY_PADDING })
-      this.proChain()
+      this.proChain(asset)
       // Keep the title above the decorative chain so narrow-screen labels stay readable.
       Row() {
         Text('PRO 定制鼓机').fontSize(21).fontWeight(900).fontStyle(FontStyle.Italic).fontColor(INK)
         Blank()
         Text('›').fontSize(30).fontColor(INK)
       }
-      .width('100%').height(PRO_DRUM_BUTTON_HEIGHT).padding({ left: 16, right: 14 }).opacity(0.68)
+      .width('100%').height(PRO_DRUM_BUTTON_HEIGHT).padding({ left: 16, right: 14 })
+      .opacity(locked ? 0.68 : 1)
       .align(Alignment.Top).translate({ y: PRO_DRUM_ENTRY_PADDING })
       .onClick(() => this.editDrumMachine())
     }
@@ -934,11 +1011,9 @@ struct LeaderLobbyPage {
   @Builder
   private proDrumMachineEntry() {
     if (isProDrumMachineAccessible()) {
-      ComicButton({ label: 'PRO 定制鼓机', fill: LILAC, action: () => {
-        this.editDrumMachine();
-      } })
+      this.proDrumMachineEntryWithChain('comic/decor/pro-chain-anchored.png', false)
     } else {
-      this.lockedProDrumMachineEntry()
+      this.proDrumMachineEntryWithChain('comic/decor/pro-chain-locked.png', true)
     }
   }
 
@@ -1059,20 +1134,23 @@ struct LeaderLobbyPage {
               Text('本机练习').fontSize(12).fontColor('#66615A')
             }
           }.width('100%')
-          Scroll() {
+          Scroll(this.rosterScroller) {
             Row({ space: 10 }) {
               ForEach(this.members, (m: SessionMember) => {
                 this.rosterMemberSlot(m)
-              }, (m: SessionMember) => `${m.id}-${m.avatarKey}-${m.randomDrawId ?? 0}-${this.revealedMemberMysteryAvatar(m)}`)
+              }, (m: SessionMember) => `${m.id}-${m.avatarKey}-${m.randomDrawId ?? 0}-` +
+                `${this.revealedMemberMysteryAvatar(m)}-${m.lobbyReady === true ? 1 : 0}`)
               if (this.soloTeam && this.leader) {
                 this.rosterAddSlot()
               }
             }
-            .padding({ top: 2, bottom: 2 })
+            .padding({ top: ROSTER_ROW_TOP_PADDING, bottom: 2 })
+            .onAreaChange(() => { this.keepRosterAddSlotVisible(); })
           }
           .scrollable(ScrollDirection.Horizontal)
           .width('100%')
           .clip(false)
+          .onAreaChange(() => { this.keepRosterAddSlotVisible(); })
           if (this.invite && this.qr.length > 0) {
             QRCode(this.qr).width(150).height(150).backgroundColor(Color.White)
             Text(`加入码  ${AppSession.get()?.controller.joinCode ?? '------'}`)
@@ -1183,21 +1261,36 @@ struct LeaderLobbyPage {
             }.width('100%')
             Row({ space: 8 }) {
               Text('拍号').fontSize(14).width(60)
-              ForEach([4, 3, 6], (n: number) => {
-                Button(`${n}/${n === 6 ? 8 : 4}`, { type: ButtonType.Normal }).layoutWeight(1).height(35)
-                  .fontColor(INK).backgroundColor(this.beats === n ? CORAL : PAPER).borderRadius(4).shadow(CONTROL_SHADOW).border({ width: 1, color: INK })
-                  .enabled(this.leader && !this.loading).onClick(() => { void AppSession.get()?.controller.updateMeter(n, n === 6 ? 8 : 4); })
+              EditableMeter({
+                beats: this.beats,
+                unit: this.unit,
+                editable: this.leader && !this.loading,
+                controlWidth: '100%',
+                controlHeight: 38,
+                valueFontSize: 20,
+                onEdit: (): void => { this.meterEditorVisible = true; }
               })
+              .layoutWeight(1)
             }.width('100%')
             Row({ space: 12 }) {
               Text('BPM').width(56).fontWeight(FontWeight.Bold)
               Button('−').backgroundColor(PAPER).fontColor(INK).border({ width: 1, color: INK }).borderRadius(4).shadow(CONTROL_SHADOW)
                 .enabled(this.leader && this.bpm > 40).onClick(() => { void AppSession.get()?.controller.updateBpm(this.bpm - 1); })
-              Text(`${this.bpm}`).fontSize(40).fontWeight(900).fontStyle(FontStyle.Italic).layoutWeight(1).textAlign(TextAlign.Center)
+              EditableBpm({
+                value: this.bpm,
+                editable: this.leader && !this.loading,
+                inputId: 'lobby-bpm-input',
+                controlWidth: '100%',
+                controlHeight: 48,
+                valueFontSize: 40,
+                onCommit: (value: number): void => {
+                  void AppSession.get()?.controller.updateBpm(value);
+                }
+              }).layoutWeight(1)
               Button('+').backgroundColor(PAPER).fontColor(INK).border({ width: 1, color: INK }).borderRadius(4).shadow(CONTROL_SHADOW)
                 .enabled(this.leader && this.bpm < 240).onClick(() => { void AppSession.get()?.controller.updateBpm(this.bpm + 1); })
             }.width('100%')
-            Text(`每分钟 ${this.bpm} 个${this.unit === 8 ? '八分' : '四分'}音符拍点`).fontSize(11).fontColor('#66615A').width('100%')
+            Text(`每分钟 ${this.bpm} 个${beatUnitLabel(this.unit)}音符拍点`).fontSize(11).fontColor('#66615A').width('100%')
           }.width('100%').padding(12).backgroundColor(WHITE)
             .border({ width: 1, color: INK }).borderRadius(7).shadow(CARD_SHADOW)
         }
@@ -1220,7 +1313,29 @@ struct LeaderLobbyPage {
               Column({ space: 3 }) {
                 Text(this.activeDrumStyleName()).fontSize(25).fontWeight(900).fontStyle(FontStyle.Italic).width('100%')
                 Text(this.activeDrumStyleCaption()).fontSize(12).fontWeight(FontWeight.Bold).fontColor('#5D574F').width('100%')
-                Text(`${this.beats}/${this.unit} · ${this.bpm} BPM`).fontSize(13).fontWeight(900).width('100%')
+                Row({ space: 4 }) {
+                  EditableMeter({
+                    beats: this.beats,
+                    unit: this.unit,
+                    editable: this.leader && !this.loading,
+                    controlWidth: 66,
+                    controlHeight: 28,
+                    valueFontSize: 14,
+                    onEdit: (): void => { this.meterEditorVisible = true; }
+                  })
+                  EditableBpm({
+                    value: this.bpm,
+                    editable: this.leader && !this.loading,
+                    inputId: 'lobby-drum-bpm-input',
+                    controlWidth: 55,
+                    controlHeight: 26,
+                    valueFontSize: 18,
+                    onCommit: (value: number): void => {
+                      void AppSession.get()?.controller.updateBpm(value);
+                    }
+                  })
+                  Text('BPM').fontSize(13).fontWeight(900)
+                }.width('100%').alignItems(VerticalAlign.Center)
               }.layoutWeight(1)
             }.width('100%')
             Row({ space: 8 }) {
@@ -1248,7 +1363,7 @@ struct LeaderLobbyPage {
           }
           .width('100%').padding(14).backgroundColor('#EDE6FF')
           .border({ width: 2, color: INK }).borderRadius(8)
-          .shadow({ radius: 0, offsetX: 3, offsetY: 4, color: INK })
+          .shadow({ radius: INK_SHADOW_RADIUS, offsetX: 3, offsetY: 4, color: INK })
         } else if (this.leader) {
           this.proDrumMachineEntry()
         }
@@ -1277,6 +1392,14 @@ struct LeaderLobbyPage {
       }.height('100%').width('100%').backgroundColor(PAPER)
       if (this.rhythmDropdownOpen) {
         this.rhythmDropdownOverlay()
+      }
+      if (this.meterEditorVisible) {
+        MeterEditorOverlay({
+          initialBeats: this.beats,
+          initialUnit: this.unit,
+          onChange: (beats: number, unit: number): void => { void this.applyMeter(beats, unit); },
+          onDismiss: (): void => { this.meterEditorVisible = false; }
+        })
       }
     }.height('100%').width('100%').backgroundColor(PAPER)
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])

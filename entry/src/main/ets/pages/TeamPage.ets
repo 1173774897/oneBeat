@@ -1,7 +1,11 @@
 import { router } from '@kit.ArkUI';
-import { ComicCharacter, PAPER, INK, CORAL, LILAC, WHITE, BLUE, CARD_SHADOW, CONTROL_SHADOW } from '../components/ComicKit';
+import { ComicCharacter, PAPER, INK, CORAL, LILAC, TEAL, CARD_SHADOW, CONTROL_SHADOW, INK_SHADOW_RADIUS } from '../components/ComicKit';
 
 const PLAYER_DISPLAY_NAME_KEY: string = 'playerDisplayName';
+const TEAM_HERO_HEIGHT: number = 190;
+const NICKNAME_HINT_WIDTH: number = 182;
+const NICKNAME_HINT_BODY_HEIGHT: number = 50;
+const NICKNAME_HINT_HEIGHT: number = 67;
 
 @Entry
 @Component
@@ -10,6 +14,9 @@ struct TeamPage {
   @StorageLink('safeAreaBottom') bottomSafeInset: number = 0;
   @State displayName: string = '';
   @State showNicknameHint: boolean = false;
+  @State nicknameHintScale: number = 1;
+  @State nicknameHintOpacity: number = 1;
+  private nicknameHintPulseRevision: number = 0;
   private nicknamePool: string[] = [
     '云朵侠', '节拍猫', '慢半拍', '闪电腿', '小旋风', '踩点王',
     '奶油飞侠', '月球散步', '乱拍天才', '霓虹旅人', '云端舞者', '走路带风',
@@ -37,11 +44,38 @@ struct TeamPage {
     const trimmed = this.displayName.trim();
     if (trimmed.length === 0) {
       this.showNicknameHint = true;
+      this.pulseNicknameHint();
       return '';
     }
     this.showNicknameHint = false;
     AppStorage.setOrCreate(PLAYER_DISPLAY_NAME_KEY, trimmed);
     return trimmed;
+  }
+
+  private pulseNicknameHint(): void {
+    const revision = ++this.nicknameHintPulseRevision;
+    this.nicknameHintScale = 1;
+    this.nicknameHintOpacity = 1;
+    // The hint may be entering the conditional tree on this same tap; defer the
+    // first frame so both a newly shown and an existing bubble animate reliably.
+    setTimeout(() => {
+      if (revision !== this.nicknameHintPulseRevision) {
+        return;
+      }
+      animateTo({ duration: 90, curve: Curve.EaseOut }, () => {
+        this.nicknameHintScale = 1.045;
+        this.nicknameHintOpacity = 0.48;
+      });
+      setTimeout(() => {
+        if (revision !== this.nicknameHintPulseRevision) {
+          return;
+        }
+        animateTo({ duration: 150, curve: Curve.EaseInOut }, () => {
+          this.nicknameHintScale = 1;
+          this.nicknameHintOpacity = 1;
+        });
+      }, 95);
+    }, 0);
   }
 
   private createTeam(): void {
@@ -97,21 +131,22 @@ struct TeamPage {
         }.width('100%')
 
         Stack({ alignContent: Alignment.Bottom }) {
-          Image($rawfile('comic/decor/stage_speedlines.png'))
+          Image($rawfile('comic/decor/team_beat_collage.png'))
             .width('100%')
             .height('100%')
-            .objectFit(ImageFit.Fill)
-          Row({ space: -44 }) {
+            .objectFit(ImageFit.Contain)
+            .hitTestBehavior(HitTestMode.None)
+          Row({ space: -58 }) {
             ComicCharacter({ avatar: 'mismatch', pose: 'mismatch' })
               .width('52%')
-              .height(190)
-              .translate({ x: 22 })
+              .height(TEAM_HERO_HEIGHT)
+              .translate({ x: 53 })
               .rotate({ angle: -7 })
             ComicCharacter({ avatar: 'wave', pose: 'wave' })
               .width('52%')
-              .height(190)
+              .height(TEAM_HERO_HEIGHT)
               .scale({ x: 0.85, y: 0.85, centerX: '50%', centerY: '100%' })
-              .translate({ x: -22 })
+              .translate({ x: -53 })
               .rotate({ angle: 7 })
           }.width('100%').justifyContent(FlexAlign.Center)
           Text('一个节拍，一起出发！')
@@ -125,7 +160,7 @@ struct TeamPage {
             .rotate({ angle: -2 })
         }
         .width('100%')
-        .height(190)
+        .height(TEAM_HERO_HEIGHT)
         .clip(true)
 
         Column({ space: 6 }) {
@@ -136,28 +171,28 @@ struct TeamPage {
           if (this.showNicknameHint) {
             Row() {
               Blank()
-              Column({ space: -7 }) {
+              Stack({ alignContent: Alignment.TopStart }) {
+                // SVG viewBox keeps the body, pointer, and hard shadow in one
+                // density-independent outline on both phone and preview runtimes.
+                Image($rawfile('comic/decor/nickname_hint_bubble.svg'))
+                  .width(NICKNAME_HINT_WIDTH)
+                  .height(NICKNAME_HINT_HEIGHT)
+                  .objectFit(ImageFit.Fill)
+                  .hitTestBehavior(HitTestMode.None)
                 Text('先给自己起个名字！\n不想费脑筋？点这里')
-                  .width(178)
+                  .width(NICKNAME_HINT_WIDTH - 24)
+                  .height(NICKNAME_HINT_BODY_HEIGHT - 16)
                   .fontSize(12)
                   .fontWeight(900)
                   .lineHeight(17)
                   .fontColor(INK)
-                  .backgroundColor(CORAL)
-                  .padding({ left: 11, right: 11, top: 8, bottom: 8 })
-                  .border({ width: 1.5, color: INK })
-                  .borderRadius(7)
-                  .shadow({ radius: 0, offsetX: 2, offsetY: 3, color: INK })
-                  .rotate({ angle: -2 })
-                Stack() {
-                  Text('▼').fontSize(25).fontColor(INK)
-                  Text('▼').fontSize(19).fontColor(CORAL).margin({ top: -1 })
-                }
-                .width(28)
-                .height(22)
-                .margin({ right: 29 })
-                .alignSelf(ItemAlign.End)
+                  .position({ x: 12, y: 9 })
               }
+              .width(NICKNAME_HINT_WIDTH)
+              .height(NICKNAME_HINT_HEIGHT)
+              .rotate({ angle: -2 })
+              .scale({ x: this.nicknameHintScale, y: this.nicknameHintScale })
+              .opacity(this.nicknameHintOpacity)
             }.width('100%')
           }
           Row({ space: 8 }) {
@@ -181,10 +216,10 @@ struct TeamPage {
               .fontSize(13)
               .fontWeight(900)
               .fontColor(INK)
-              .backgroundColor(BLUE)
+              .backgroundColor(TEAL)
               .border({ width: 1.5, color: INK })
               .borderRadius(5)
-              .shadow({ radius: 0, offsetX: 2, offsetY: 2, color: INK })
+              .shadow({ radius: INK_SHADOW_RADIUS, offsetX: 2, offsetY: 2, color: INK })
               .onClick(() => this.fillRandomNickname())
           }.width('100%')
         }
@@ -207,6 +242,14 @@ struct TeamPage {
         }.width('100%')
 
         Stack({ alignContent: Alignment.BottomEnd }) {
+          Image($rawfile('comic/decor/lightning_accents.png'))
+            .width(130)
+            .height(104)
+            .objectFit(ImageFit.Contain)
+            .opacity(0.72)
+            .margin({ right: 8, bottom: 56 })
+            .rotate({ angle: -8 })
+            .hitTestBehavior(HitTestMode.None)
           Column({ space: 7 }) {
             Text('我是队长')
               .fontSize(11)
@@ -248,11 +291,20 @@ struct TeamPage {
         .backgroundColor(CORAL)
         .border({ width: 2, color: INK })
         .borderRadius(8)
-        .shadow({ radius: 0, offsetX: 3, offsetY: 4, color: INK })
+        .shadow({ radius: INK_SHADOW_RADIUS, offsetX: 3, offsetY: 4, color: INK })
         .clip(true)
         .onClick(() => this.createTeam())
 
         Stack({ alignContent: Alignment.BottomEnd }) {
+          Image($rawfile('comic/decor/lightning_accents.png'))
+            .width(138)
+            .height(110)
+            .objectFit(ImageFit.Contain)
+            .opacity(0.68)
+            .scale({ x: -1, y: 1 })
+            .margin({ right: 4, bottom: 64 })
+            .rotate({ angle: 8 })
+            .hitTestBehavior(HitTestMode.None)
           Column({ space: 7 }) {
             Text('我是队员')
               .fontSize(11)
@@ -275,7 +327,7 @@ struct TeamPage {
               Text('扫码')
                 .fontSize(11)
                 .fontWeight(900)
-                .backgroundColor(BLUE)
+                .backgroundColor(TEAL)
                 .padding({ left: 7, right: 7, top: 4, bottom: 4 })
                 .border({ width: 1, color: INK })
                 .borderRadius(3).shadow(CONTROL_SHADOW)
@@ -303,10 +355,10 @@ struct TeamPage {
         }
         .width('100%')
         .height(176)
-        .backgroundColor(WHITE)
+        .backgroundColor(LILAC)
         .border({ width: 2, color: INK })
         .borderRadius(8)
-        .shadow({ radius: 0, offsetX: 3, offsetY: 4, color: INK })
+        .shadow({ radius: INK_SHADOW_RADIUS, offsetX: 3, offsetY: 4, color: INK })
         .clip(true)
         .onClick(() => this.joinTeam())
 

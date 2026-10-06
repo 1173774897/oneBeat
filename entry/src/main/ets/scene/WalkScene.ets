@@ -20,28 +20,26 @@ const WALKER_SPRITE_H: number = 140;
 const WALKER_RANK_H: number = 22;
 /** 增大则人物下移 */
 const SPRITE_FEET_LIFT: number = -25;
-/** 队员列左右留白（px）；增大则整体更靠中间、人物更挤 */
-const WALKER_STAND_SIDE_MARGIN: number = 5;
 /** 相对 walkerColumnTop() 的纵向偏移；增大上界则人物整体下移 */
 const WALKER_STAND_Y_OFFSET_MIN: number = -38;
 const WALKER_STAND_Y_OFFSET_MAX: number = 26;
 const WALKER_COLUMN_HALF_WIDTH: number = 70;
-const WALKER_COLUMN_WIDTH: number = WALKER_COLUMN_HALF_WIDTH * 2;
-/** 纵深缩放：yOffset 最小（远）与最大（近）对应的 scale（站位间距公式会引用 NEAR） */
+const WALKER_MEMBERS_PER_COLUMN: number = 3;
+/** 相邻两列人物中心的水平距离固定为屏宽的 比例。 */
+const WALKER_COLUMN_GAP_SCREEN_RATIO: number = 32 / 100;
+/** 纵深缩放：yOffset 最小（远）与最大（近）对应的 scale。 */
 const WALKER_DEPTH_SCALE_FAR: number = 0.80;
 const WALKER_DEPTH_SCALE_NEAR: number = 1.12;
-/** 两队员列中心最小水平间距（px），约为最大缩放列宽 + 余量 */
-const WALKER_STAND_MIN_CENTER_SEP_PX: number =
-  Math.ceil(WALKER_COLUMN_WIDTH * WALKER_DEPTH_SCALE_NEAR) + 22;
+/** 最近人物除中心缩放外额外向左移动的最大距离。 */
+const WALKER_DEPTH_LEFT_SHIFT_MAX_PX: number = 85;
+/** 整队按实际人物范围居中后的手动水平微调；正值向右。 */
+const WALKER_FORMATION_CENTER_ADJUST_X: number = 0;
 /** 行进页人物 z 基底（低于 neon 前景遮挡，见 neonForeground zIndex） */
 const WALKER_STAND_Z_BASE: number = 18;
 /** 远近之间 z 增量（远=BASE，近=BASE+SPAN，均须 < NEON_FOREGROUND_Z_INDEX） */
 const WALKER_STAND_Z_SPAN: number = 10;
-/** 槽位在安全带内的横向区间（0～1），尽量用满可站宽度 */
-const WALKER_STAND_SLOT_X_MIN: number = 0.03;
-const WALKER_STAND_SLOT_X_MAX: number = 0.97;
-/** 槽位内 x 随机抖动；仅在未与其它队员水平重叠时应用 */
-const WALKER_STAND_X_JITTER_RATIO: number = 0.06;
+/** 夕阳道路近景侧路边物须遮挡全部人物，但仍低于更高的场景覆盖层。 */
+const SUNSET_FOREGROUND_ROADSIDE_Z_INDEX: number = WALKER_STAND_Z_BASE + WALKER_STAND_Z_SPAN + 1;
 /** 霓虹前景遮挡层 zIndex（须在人物之上） */
 const NEON_FOREGROUND_Z_INDEX: number = 30;
 /** 列内脚底锚点（自列顶向下 px），与 scale center 对齐 */
@@ -110,7 +108,7 @@ interface NeonOccluderSegment {
   gapAfter: number;
 }
 
-/** 与 members 下标一一对应；xRatio 为安全带宽内 0～1 */
+/** 与 members 下标一一对应；xRatio 为人物中心相对屏宽的位置。 */
 interface WalkerStandSlot {
   xRatio: number;
   yOffset: number;
@@ -197,9 +195,11 @@ export struct WalkScene {
     }
     const step = Math.min(WALK_FRAMES_PER_BEAT - 1,
       Math.floor(snapshot.beatPhase * WALK_FRAMES_PER_BEAT));
-    if (this.animBeatIndex !== snapshot.beatIndex || this.animBeatInBar !== snapshot.beatInBar ||
+    // Count-in beats belong to the transport clock but not the walk cycle. Derive
+    // the animation beat from main playback so its first beat always starts at frame 1.
+    if (this.animBeatIndex !== snapshot.mainBeatIndex || this.animBeatInBar !== snapshot.beatInBar ||
       this.animStepInBeat !== step) {
-      this.animBeatIndex = snapshot.beatIndex;
+      this.animBeatIndex = snapshot.mainBeatIndex;
       this.animBeatInBar = snapshot.beatInBar;
       this.animStepInBeat = step;
     }
@@ -556,6 +556,9 @@ export struct WalkScene {
   }
 
   private entityZIndex(item: SideEntityView): number {
+    if (this.sceneKey === 'sunset_coast' && item.isForeground) {
+      return SUNSET_FOREGROUND_ROADSIDE_Z_INDEX;
+    }
     return item.isForeground ? 25 : 12;
   }
 
@@ -571,38 +574,16 @@ export struct WalkScene {
   }
 
   private vegetationZIndex(item: VegetationView): number {
+    if (this.sceneKey === 'sunset_coast' && item.isForeground) {
+      return SUNSET_FOREGROUND_ROADSIDE_Z_INDEX;
+    }
     return item.isForeground ? 23 : 11;
   }
 
-  /** 人物列锚点（列顶边）允许的最小/最大 x，保证整列在屏内 */
-  private walkerStandLeftMinXPx(): number {
-    return WALKER_STAND_SIDE_MARGIN;
-  }
-
-  private walkerStandLeftMaxXPx(): number {
-    const maxLeft = this.sceneWidth - WALKER_STAND_SIDE_MARGIN - WALKER_COLUMN_WIDTH;
-    return Math.max(this.walkerStandLeftMinXPx(), maxLeft);
-  }
-
-  private walkerStandCenterMinXPx(): number {
-    return this.walkerStandLeftMinXPx() + WALKER_COLUMN_HALF_WIDTH;
-  }
-
-  private walkerStandCenterMaxXPx(): number {
-    return this.walkerStandLeftMaxXPx() + WALKER_COLUMN_HALF_WIDTH;
-  }
-
-  private walkerStandCenterSpanPx(): number {
-    return Math.max(0, this.walkerStandCenterMaxXPx() - this.walkerStandCenterMinXPx());
-  }
-
-  /** xRatio∈[0,1] 映射到安全带宽内的列中心，再转为列左边 x 并钳制 */
+  /** xRatio 映射到屏幕中的人物中心，再转为人物列左边 x。 */
   private walkerLeftXFromRatio(xRatio: number): number {
-    const span = this.walkerStandCenterSpanPx();
     const clampedRatio = Math.max(0, Math.min(1, xRatio));
-    const centerX = this.walkerStandCenterMinXPx() + span * clampedRatio;
-    const leftX = centerX - WALKER_COLUMN_HALF_WIDTH;
-    return Math.max(this.walkerStandLeftMinXPx(), Math.min(this.walkerStandLeftMaxXPx(), leftX));
+    return this.sceneWidth * clampedRatio - WALKER_COLUMN_HALF_WIDTH;
   }
 
   private walkerStandsAreComplete(): boolean {
@@ -621,35 +602,46 @@ export struct WalkScene {
     return sig;
   }
 
+  private walkerColumnCount(total: number): number {
+    return Math.max(1, Math.ceil(total / WALKER_MEMBERS_PER_COLUMN));
+  }
+
+  /** 成员顺序每三人一列，首列在最右侧，后续列依次向左。 */
+  private walkerColumnForMember(memberIndex: number, total: number): number {
+    const fillColumn = Math.floor(memberIndex / WALKER_MEMBERS_PER_COLUMN);
+    return this.walkerColumnCount(total) - 1 - fillColumn;
+  }
+
+  private walkerColumnSizeForMember(memberIndex: number, total: number): number {
+    const fillColumn = Math.floor(memberIndex / WALKER_MEMBERS_PER_COLUMN);
+    return Math.max(0, Math.min(WALKER_MEMBERS_PER_COLUMN,
+      total - fillColumn * WALKER_MEMBERS_PER_COLUMN));
+  }
+
+  private walkerIndexInColumn(memberIndex: number): number {
+    return memberIndex % WALKER_MEMBERS_PER_COLUMN;
+  }
+
   private walkerSlotXRatio(memberIndex: number, total: number): number {
-    if (total <= 1) {
+    const columnCount = this.walkerColumnCount(total);
+    if (columnCount <= 1) {
       return 0.5;
     }
-    // Only reverse spatial slots; roster order still owns labels, avatars and member identity.
-    const slot = 1 - memberIndex / (total - 1);
-    return WALKER_STAND_SLOT_X_MIN + (WALKER_STAND_SLOT_X_MAX - WALKER_STAND_SLOT_X_MIN) * slot;
+    const column = this.walkerColumnForMember(memberIndex, total);
+    return 0.5 + (column - (columnCount - 1) / 2) * WALKER_COLUMN_GAP_SCREEN_RATIO;
   }
 
   private walkerDefaultYOffset(memberIndex: number, total: number): number {
     const ySpan = WALKER_STAND_Y_OFFSET_MAX - WALKER_STAND_Y_OFFSET_MIN;
-    if (total <= 1) {
+    const columnSize = this.walkerColumnSizeForMember(memberIndex, total);
+    if (columnSize <= 1) {
       return 0;
     }
-    const tier = memberIndex % 3;
-    return WALKER_STAND_Y_OFFSET_MIN + (ySpan * tier) / 2;
+    const depthIndex = this.walkerIndexInColumn(memberIndex);
+    return WALKER_STAND_Y_OFFSET_MIN + ySpan * depthIndex / (columnSize - 1);
   }
 
-  private standHorizontalSepOk(centerX: number, placed: number[][]): boolean {
-    const minHoriz = WALKER_STAND_MIN_CENTER_SEP_PX;
-    for (let i = 0; i < placed.length; i++) {
-      if (Math.abs(centerX - placed[i][0]) < minHoriz) {
-        return false;
-      }
-    }
-    return true;
-  }
-
-  /** 队员 id 集合变化或重新进入行进页（sig 已清空）时整组随机站位 */
+  /** 队员变化时按每列最多三人、从右向左重新生成 1～3 列的居中队形。 */
   private ensureWalkerStands(): void {
     if (this.sceneWidth <= 0 || this.members.length === 0) {
       return;
@@ -660,37 +652,12 @@ export struct WalkScene {
     }
     this.walkerLayoutMemberSig = sig;
     const total = this.members.length;
-    const baseY = this.walkerColumnTop();
-    const ySpan = WALKER_STAND_Y_OFFSET_MAX - WALKER_STAND_Y_OFFSET_MIN;
-    const centerSpan = this.walkerStandCenterSpanPx();
-    const centerMin = this.walkerStandCenterMinXPx();
-    const placed: number[][] = [];
     const stands: WalkerStandSlot[] = [];
     for (let m = 0; m < total; m++) {
-      const slotRatio = this.walkerSlotXRatio(m, total);
-      let xRatio = slotRatio;
-      let yOffset = this.walkerDefaultYOffset(m, total);
-      let placedOk = false;
-      for (let attempt = 0; attempt < 25 && !placedOk; attempt++) {
-        const jitter = attempt === 0 ? 0 : (Math.random() - 0.5) * WALKER_STAND_X_JITTER_RATIO;
-        const yJitter = attempt === 0 ? 0 : (Math.random() - 0.5) * ySpan * 0.22;
-        const candidateRatio = Math.max(0, Math.min(1, slotRatio + jitter));
-        const candidateY = Math.max(WALKER_STAND_Y_OFFSET_MIN,
-          Math.min(WALKER_STAND_Y_OFFSET_MAX, this.walkerDefaultYOffset(m, total) + yJitter));
-        const centerX = centerMin + centerSpan * candidateRatio;
-        if (placed.length === 0 || this.standHorizontalSepOk(centerX, placed)) {
-          xRatio = candidateRatio;
-          yOffset = candidateY;
-          placed.push([centerX, baseY + candidateY]);
-          placedOk = true;
-        }
-      }
-      if (!placedOk) {
-        xRatio = slotRatio;
-        yOffset = this.walkerDefaultYOffset(m, total);
-        placed.push([centerMin + centerSpan * xRatio, baseY + yOffset]);
-      }
-      stands.push({ xRatio: xRatio, yOffset: yOffset });
+      stands.push({
+        xRatio: this.walkerSlotXRatio(m, total),
+        yOffset: this.walkerDefaultYOffset(m, total)
+      });
     }
     this.walkerStands = stands.slice();
   }
@@ -702,12 +669,36 @@ export struct WalkScene {
     return this.walkerStands[index];
   }
 
-  private walkerPositionX(index: number): number {
+  private walkerUncenteredCenterX(index: number): number {
     const stand = this.walkerStandAt(index);
     if (stand !== undefined) {
-      return this.walkerLeftXFromRatio(stand.xRatio);
+      return this.walkerLeftXFromRatio(stand.xRatio) + WALKER_COLUMN_HALF_WIDTH -
+        this.walkerDepthLeftShift(index);
     }
-    return this.walkerLeftXFromRatio(this.walkerSlotXRatio(index, this.members.length));
+    return this.walkerLeftXFromRatio(this.walkerSlotXRatio(index, this.members.length)) +
+      WALKER_COLUMN_HALF_WIDTH -
+      this.walkerDepthLeftShift(index);
+  }
+
+  private walkerFormationCenterOffset(): number {
+    if (this.members.length === 0) {
+      return 0;
+    }
+    let leftmost = this.walkerUncenteredCenterX(0);
+    let rightmost = leftmost;
+    for (let index = 1; index < this.members.length; index++) {
+      const centerX = this.walkerUncenteredCenterX(index);
+      leftmost = Math.min(leftmost, centerX);
+      rightmost = Math.max(rightmost, centerX);
+    }
+    // Center the actual shifted member range; centering column anchors alone would
+    // leave the whole formation left-heavy when near members receive larger shifts.
+    return this.sceneWidth / 2 + WALKER_FORMATION_CENTER_ADJUST_X - (leftmost + rightmost) / 2;
+  }
+
+  private walkerPositionX(index: number): number {
+    return this.walkerUncenteredCenterX(index) - WALKER_COLUMN_HALF_WIDTH +
+      this.walkerFormationCenterOffset();
   }
 
   private walkerPositionY(index: number): number {
@@ -743,6 +734,10 @@ export struct WalkScene {
   private walkerDepthScale(index: number): number {
     const t = this.walkerDepthT(index);
     return WALKER_DEPTH_SCALE_FAR + t * (WALKER_DEPTH_SCALE_NEAR - WALKER_DEPTH_SCALE_FAR);
+  }
+
+  private walkerDepthLeftShift(index: number): number {
+    return this.walkerDepthT(index) * WALKER_DEPTH_LEFT_SHIFT_MAX_PX;
   }
 
   @Builder

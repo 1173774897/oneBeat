@@ -1,4 +1,5 @@
 import { PROTOCOL_VERSION } from '../common/Constants';
+import { BeatPointState } from '../common/MeterModel';
 
 export type MessageType =
   | 'PING'
@@ -6,6 +7,8 @@ export type MessageType =
   | 'SYNC_RESULT'
   | 'SESSION_SNAPSHOT'
   | 'TRANSPORT'
+  | 'TRANSPORT_PREPARE'
+  | 'TRANSPORT_READY'
   | 'TRANSPORT_PAUSE'
   | 'TRANSPORT_RESUME'
   | 'MEMBER_UPDATE'
@@ -39,6 +42,7 @@ export interface SessionSnapshotPayload {
   bpm: number;
   beatsPerBar: number;
   beatUnit?: number;
+  beatPointStates?: BeatPointState[];
   rhythm?: number;
   drumProgram?: string;
   sceneKey?: string;
@@ -56,6 +60,10 @@ export interface TransportPayload {
   countdownMs: number;
   beatIndex: number;
   countInBeats?: number;
+}
+
+export interface TransportPreparePayload {
+  id: string;
 }
 
 export interface TransportPausePayload {

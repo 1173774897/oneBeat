@@ -120,6 +120,7 @@ export class AppSession {
 
   syncEngineFromSession(): void {
     this.metronome.setBpm(this.controller.bpm, this.controller.beatsPerBar);
+    this.metronome.setBeatPointStates(this.controller.beatPointStates);
     this.metronome.setOffsetMs(this.controller.getOffsetMs());
     if (this.controller.rhythm === 3 && this.controller.drumProgram.length > 0) {
       void this.metronome.configureProgram(this.controller.drumProgram);
@@ -232,6 +233,13 @@ export class AppSession {
       const goIp = await this.p2p.connectToLeader(invitation, joinFeedback?.rejection);
       await this.controller.connectMember(goIp, invitation.port, invitation);
       this.syncEngineFromSession();
+      try {
+        // Members prepare their renderer while still in the lobby; otherwise a
+        // slow first allocation can make only that device miss the shared start.
+        await this.metronome.ensureRenderer();
+      } catch (err) {
+        console.warn(`MetronomeEngine member prewarm failed: ${(err as Error).message}`);
+      }
       this.handleTransportFromStorage();
       await SessionBackgroundKeeper.start(false); // 队员：隐藏媒体卡片
     } catch (err) {
@@ -255,6 +263,13 @@ export class AppSession {
   }
 
   async leaderStart(): Promise<void> {
+    try {
+      // Create the stream before the leader publishes a shared deadline so
+      // renderer allocation time cannot consume the synchronization window.
+      await this.metronome.ensureRenderer();
+    } catch (err) {
+      console.warn(`MetronomeEngine prewarm failed: ${(err as Error).message}`);
+    }
     await this.controller.startTransport();
   }
 

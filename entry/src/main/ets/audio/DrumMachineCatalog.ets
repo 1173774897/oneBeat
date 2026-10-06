@@ -1,4 +1,5 @@
 import { DEFAULT_TICKS_PER_BEAT, SequencerEvent, SequencerPattern } from './RhythmTimeline';
+import { isValidMeter, stepsPerBeatForUnit } from '../common/MeterModel';
 
 export interface DrumStyle {
   key: string;
@@ -72,7 +73,11 @@ export function parseDrumProgram(raw: string): DrumProgram {
     return defaultDrumProgram();
   }
   try {
-    return JSON.parse(raw) as DrumProgram;
+    const parsed = JSON.parse(raw) as DrumProgram;
+    if (!isValidMeter(parsed.beatsPerBar, parsed.beatUnit)) {
+      return defaultDrumProgram();
+    }
+    return parsed;
   } catch (_e) {
     return defaultDrumProgram();
   }
@@ -390,7 +395,7 @@ function kickVelocity(styleKey: string, beat: number, sub: number, variant: numb
 }
 
 function customPattern(rows: string[], beatsPerBar: number, beatUnit: number): SequencerPattern {
-  const stepsPerBeat = beatUnit === 8 ? 2 : 4;
+  const stepsPerBeat = stepsPerBeatForUnit(beatUnit);
   const stepCount = beatsPerBar * stepsPerBeat;
   const events: SequencerEvent[] = [];
   for (let track = 0; track < DRUM_TRACKS.length; track++) {
@@ -655,7 +660,7 @@ function pushStyleFill(events: SequencerEvent[], styleKey: string, fillIndex: nu
 
 export function buildDrumPattern(styleKey: string, variant: number, beatsPerBar: number,
   beatUnit: number, fillIndex: number = -1, customRows?: string[]): SequencerPattern {
-  const stepsPerBeat = beatUnit === 8 ? 2 : 4;
+  const stepsPerBeat = stepsPerBeatForUnit(beatUnit);
   const stepCount = beatsPerBar * stepsPerBeat;
   const hasCustomRows = customRows !== undefined && customRows.length > 0;
   const events: SequencerEvent[] = hasCustomRows ?
@@ -723,7 +728,7 @@ export function buildProgramSequence(program: DrumProgram): SequencerPattern[] {
 }
 
 export function emptyCustomRows(beatsPerBar: number, beatUnit: number): string[] {
-  const stepCount = beatsPerBar * (beatUnit === 8 ? 2 : 4);
+  const stepCount = beatsPerBar * stepsPerBeatForUnit(beatUnit);
   const rows: string[] = [];
   for (let i = 0; i < DRUM_TRACKS.length; i++) {
     rows.push('0'.repeat(stepCount));
@@ -732,7 +737,7 @@ export function emptyCustomRows(beatsPerBar: number, beatUnit: number): string[]
 }
 
 export function patternToRows(pattern: SequencerPattern, beatsPerBar: number, beatUnit: number): string[] {
-  const stepsPerBeat = beatUnit === 8 ? 2 : 4;
+  const stepsPerBeat = stepsPerBeatForUnit(beatUnit);
   const stepCount = beatsPerBar * stepsPerBeat;
   const chars: string[][] = [];
   for (let track = 0; track < DRUM_TRACKS.length; track++) {

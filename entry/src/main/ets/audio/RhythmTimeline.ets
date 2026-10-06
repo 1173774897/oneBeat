@@ -1,3 +1,5 @@
+import { BeatPointState, normalizeBeatPointStates } from '../common/MeterModel';
+
 export const DEFAULT_TICKS_PER_BEAT: number = 480;
 
 export interface SequencerEvent {
@@ -23,17 +25,20 @@ export class SequencerPattern {
  * Additional drum tracks only need new sample keys and events.
  */
 export class BuiltInRhythmFactory {
-  static create(rhythm: number, beatsPerBar: number): SequencerPattern {
+  static create(rhythm: number, beatsPerBar: number, beatPointStates?: BeatPointState[]): SequencerPattern {
     const events: SequencerEvent[] = [];
+    const states = normalizeBeatPointStates(beatPointStates, beatsPerBar);
     for (let beat = 0; beat < beatsPerBar; beat++) {
-      if (rhythm !== 2 || beat === 0) {
+      const state = states[beat];
+      const audible = state !== 'silent';
+      if (audible) {
         events.push({
           tick: beat * DEFAULT_TICKS_PER_BEAT,
-          sampleKey: beat === 0 ? 'accent' : 'weak',
+          sampleKey: state === 'accent' ? 'accent' : 'weak',
           velocity: 1
         });
       }
-      if (rhythm === 1) {
+      if (rhythm === 1 && state !== 'silent') {
         events.push({
           tick: beat * DEFAULT_TICKS_PER_BEAT + DEFAULT_TICKS_PER_BEAT / 2,
           sampleKey: 'weak',

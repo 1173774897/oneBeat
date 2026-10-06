@@ -9,7 +9,8 @@ import {
   LILAC,
   PAPER,
   CARD_SHADOW,
-  CONTROL_SHADOW
+  CONTROL_SHADOW,
+  INK_SHADOW_RADIUS
 } from '../components/ComicKit';
 import { fetchStoreBootstrap, redeemStoreCode, restoreStorePurchases, verifyStorePurchase } from '../store/StoreApi';
 import { isStoreApiConfigured } from '../store/StoreApiConfig';
@@ -51,19 +52,31 @@ interface StoreScene {
   productId: string;
 }
 
-const STORE_CHARACTERS: StoreCharacter[] = [
-  { key: 'braids', name: '神秘角色', caption: '随机池成员 · 行进时揭晓', asset: 'braids', color: '#B9B2C7', productId: '', mystery: true },
-  { key: 'boonie', name: '神秘角色', caption: '随机池成员 · 行进时揭晓', asset: 'boonie', color: '#B7C7BC', productId: '', mystery: true },
-  { key: 'curly', name: '神秘角色', caption: '随机池成员 · 行进时揭晓', asset: 'curly', color: '#B6C7C8', productId: '', mystery: true },
-  { key: 'buzz', name: '神秘角色', caption: '随机池成员 · 行进时揭晓', asset: 'buzz', color: '#C7BEBA', productId: '', mystery: true },
+const STORE_EXCLUSIVE_CHARACTERS: StoreCharacter[] = [
   { key: 'cloud', name: '云行者', caption: '轻盈天空拍', asset: 'cloud', color: '#DCE9FA', productId: 'onebeat.character.cloud' },
   { key: 'teapot', name: '茶壶太太', caption: '慢火稳拍', asset: 'teapot', color: '#FFD06A', productId: 'onebeat.character.teapot' },
   { key: 'wave', name: 'Wave', caption: '浪线步态', asset: 'wave', color: '#7EC8FF', productId: 'onebeat.character.wave' },
   { key: 'mismatch', name: '条纹步客', caption: '酷脸推进', asset: 'mismatch', color: '#E8DFF6', productId: 'onebeat.character.mismatch' },
   { key: 'scooter', name: '思古特', caption: '双拍十六帧', asset: 'scooter', color: '#FF9E7A', productId: 'onebeat.character.scooter' },
   { key: 'lilroll', name: '轮滑小子', caption: '贴地飞行', asset: 'lilroll', color: '#C7B8EC', productId: 'onebeat.character.lilroll' },
-  { key: 'lamp', name: '台灯漫游者', caption: '独占角色', asset: 'lamp', color: '#FFB347', productId: 'onebeat.character.lamp' }
+  { key: 'lamp', name: '台灯漫游者', caption: '暖光引路', asset: 'lamp', color: '#FFB347', productId: 'onebeat.character.lamp' }
 ];
+
+const STORE_MULTI_CHARACTERS: StoreCharacter[] = [
+  { key: 'braids', name: '神秘角色', caption: '随机池成员 · 行进时揭晓', asset: 'braids', color: '#B9B2C7', productId: '', mystery: true },
+  { key: 'boonie', name: '神秘角色', caption: '随机池成员 · 行进时揭晓', asset: 'boonie', color: '#B7C7BC', productId: '', mystery: true },
+  { key: 'curly', name: '神秘角色', caption: '随机池成员 · 行进时揭晓', asset: 'curly', color: '#B6C7C8', productId: '', mystery: true },
+  { key: 'buzz', name: '神秘角色', caption: '随机池成员 · 行进时揭晓', asset: 'buzz', color: '#C7BEBA', productId: '', mystery: true }
+];
+
+const EXCLUSIVE_CHARACTER_SECTION_TITLE: string = '独占角色';
+const EXCLUSIVE_CHARACTER_SECTION_HINT: string =
+  '每个独占角色在队伍里只有一席，先选先得。';
+const MULTI_CHARACTER_SECTION_TITLE: string = '随机角色';
+const MULTI_CHARACTER_SECTION_HINT: string =
+  '随机池成员可在同一队伍中同时出现多份，互不占用。';
+
+const STORE_CHARACTERS: StoreCharacter[] = STORE_EXCLUSIVE_CHARACTERS.concat(STORE_MULTI_CHARACTERS);
 
 const STORE_SCENES: StoreScene[] = [
   { key: 'sunset_coast', name: '夕阳海边', caption: '海水、云层与土路循环行进', productId: '' },
@@ -72,6 +85,44 @@ const STORE_SCENES: StoreScene[] = [
 
 const PASS_PRODUCT_ID: string = 'onebeat.pass.monthly';
 const IAP_ERROR_ALREADY_OWNED: number = 1001860051;
+
+// Keep this split in sync with monthly_pass_coupon.svg (254 / 352).
+// Only the decoration stretches; live text and the action never follow a ticket curve.
+const PASS_BANNER_HEIGHT: number = 192;
+const PASS_BANNER_FACE_HEIGHT: number = 184;
+const PASS_BANNER_MAX_WIDTH: number = 460;
+const PASS_BANNER_MAIN_SHARE: string = '72%';
+const PASS_BANNER_STUB_SHARE: string = '28%';
+const PASS_BANNER_ART_WIDTH_MAX: number = 110;
+const PASS_BANNER_ART_WIDTH_SHARE: number = 0.34;
+const PASS_BANNER_ART_HEIGHT: number = 136;
+const PASS_BANNER_ART_TOP: number = 11;
+const PASS_BANNER_ART_RIGHT: number = 3;
+const PASS_BANNER_TEXT_LEFT: number = 19;
+const PASS_BANNER_TEXT_TOP: number = 19;
+const PASS_BANNER_TITLE_TOP: number = 34;
+const PASS_BANNER_TITLE_HEIGHT: number = 60;
+const PASS_BANNER_TITLE_GAP: number = 9;
+const PASS_BANNER_TITLE_INSET: number = 4;
+const PASS_BANNER_TITLE_ADVANCE: number = 4.2;
+const PASS_BANNER_DRUMS_TOP: number = 92;
+const PASS_BANNER_DRUMS_HEIGHT: number = 44;
+const PASS_BANNER_DESCRIPTION_TOP: number = 138;
+const PASS_BANNER_DESCRIPTION_HEIGHT: number = 32;
+const PASS_BANNER_DESCRIPTION_LINE_HEIGHT: number = 14;
+const PASS_BANNER_DESCRIPTION_FONT_MIN: number = 7;
+const PASS_BANNER_DESCRIPTION_FONT_MAX: number = 11;
+
+// The bubble hugs two five-character phrases instead of stretching with the viewport.
+const REDEMPTION_SPEECH_WIDTH: number = 168;
+const REDEMPTION_SPEECH_BODY_HEIGHT: number = 98;
+const REDEMPTION_SPEECH_TAIL_HEIGHT: number = 12;
+const REDEMPTION_SPEECH_PADDING_X: number = 19;
+const REDEMPTION_HERO_HEIGHT: number = 266;
+const REDEMPTION_CHARACTER_WIDTH: number = 160;
+const REDEMPTION_CHARACTER_HEIGHT: number = 240;
+const REDEMPTION_CHARACTER_TOP: number = 14;
+const REDEMPTION_CHARACTER_RIGHT_BLEED: number = -20;
 
 @Entry
 @Component
@@ -88,6 +139,7 @@ struct StorePage {
   @State passAutoRenewing: boolean = false;
   @State passSource: string = '';
   @State passIapPurchaseAllowed: boolean = true;
+  @State passBannerMainWidth: number = 203;
   @State limitedFreeCharacters: string[] = [];
   @State limitedFreeScenes: string[] = [];
   @State passCharacters: string[] = [];
@@ -135,11 +187,17 @@ struct StorePage {
     return host as common.UIAbilityContext;
   }
 
-  private purchaseFailureMessage(error: Object): string {
+  private purchaseFailureMessage(error: Object, fallback: string = '购买未完成，请稍后重试'): string {
     if (error instanceof Error && error.message.length > 0) {
       return error.message;
     }
-    return '购买未完成，请稍后重试';
+    const business = error as BusinessError;
+    const businessMessage = business.message !== undefined ? `${business.message}`.trim() : '';
+    if (businessMessage.length > 0) {
+      const code = business.code ?? 0;
+      return code !== 0 ? `${businessMessage}(${code})` : businessMessage;
+    }
+    return fallback;
   }
 
   private async refreshStoreData(): Promise<void> {
@@ -256,11 +314,24 @@ struct StorePage {
     return count;
   }
 
-  private visibleCharacterCount(onlyAccessible: boolean): number {
+  private visibleCharacterCountInList(items: StoreCharacter[], onlyAccessible: boolean): number {
     if (!onlyAccessible) {
-      return STORE_CHARACTERS.length;
+      return items.length;
     }
-    return this.ownedCharacterCount();
+    let count = 0;
+    for (let i = 0; i < items.length; i++) {
+      if (this.hasCharacter(items[i].key)) {
+        count++;
+      }
+    }
+    return count;
+  }
+
+  private characterGridHeight(itemCount: number): number {
+    if (itemCount <= 0) {
+      return 0;
+    }
+    return Math.ceil(itemCount / 2) * 244;
   }
 
   private openCharacterPurchase(item: StoreCharacter): void {
@@ -407,10 +478,30 @@ struct StorePage {
   private async synchronizePurchasesBeforeRedemption(accessToken: string): Promise<void> {
     // Huawei cannot query all subscriptions by OneBeat user ID. Restore the
     // purchases visible on this device before asking the server to grant a pass.
-    const purchases = this.restorablePurchases(await queryRestorablePurchases(this.hostContext()));
-    const bootstrap = await restoreStorePurchases(accessToken, purchases);
-    applyStoreBootstrap(bootstrap);
-    this.loadPurchases();
+    // queryPurchases may throw BusinessError (not instanceof Error); that must not
+    // block redemption — treat as "no local receipts" and still refresh bootstrap.
+    let purchases: StorePurchaseSubmission[] = [];
+    try {
+      purchases = this.restorablePurchases(await queryRestorablePurchases(this.hostContext()));
+    } catch (_queryError) {
+      purchases = [];
+    }
+    try {
+      const bootstrap = await restoreStorePurchases(accessToken, purchases);
+      applyStoreBootstrap(bootstrap);
+      this.loadPurchases();
+    } catch (restoreError) {
+      if (purchases.length === 0) {
+        if (restoreError instanceof Error) {
+          throw restoreError;
+        }
+        throw new Error(String(restoreError));
+      }
+      // Stale or unverifiable local JWS should not prevent a code redemption attempt.
+      const bootstrap = await restoreStorePurchases(accessToken, []);
+      applyStoreBootstrap(bootstrap);
+      this.loadPurchases();
+    }
   }
 
   private async submitRedemption(): Promise<void> {
@@ -432,7 +523,7 @@ struct StorePage {
       }
       const result = await redeemStoreCode(accessToken, {
         idempotencyKey: this.redemptionIdempotencyKey,
-        code: this.redemptionCode
+        code: this.redemptionCode.trim()
       });
       const bootstrap = await fetchStoreBootstrap(accessToken);
       if (bootstrap !== null) {
@@ -444,7 +535,7 @@ struct StorePage {
       this.redemptionStatus = `领取成功，赠送月卡可用至 ${this.passDate(result.pass.expiresAt ?? '')}`;
       promptAction.showToast({ message: '口令兑换成功，畅游月卡已到账' });
     } catch (e) {
-      const detail = this.purchaseFailureMessage(e);
+      const detail = this.purchaseFailureMessage(e, '兑换未完成，请稍后重试');
       this.redemptionStatus = detail;
       promptAction.showToast({ message: detail });
     } finally {
@@ -572,9 +663,9 @@ struct StorePage {
       if (this.passSource === 'PASS_REDEMPTION') {
         return expires.length > 0 ? `口令赠送 · 可使用至 ${expires}` : '口令赠送月卡';
       }
-      return expires.length > 0 ? `可使用至 ${expires}` : '全部角色与场景';
+      return expires.length > 0 ? `可使用至 ${expires}` : '付费角色与场景';
     }
-    return '全部角色、场景与 PRO 鼓机';
+    return '付费角色、场景与 PRO 定制鼓机';
   }
 
   private passButtonLabel(): string {
@@ -613,7 +704,7 @@ struct StorePage {
           Button(this.redemptionBusy ? '兑换中…' : '立即兑换', { type: ButtonType.Normal })
             .width('100%').height(46).padding(0).fontSize(15).fontWeight(900).fontColor(INK)
             .backgroundColor(CORAL).border({ width: 1.5, color: INK }).borderRadius(5)
-            .shadow({ radius: 0, offsetX: 3, offsetY: 4, color: INK })
+            .shadow({ radius: INK_SHADOW_RADIUS, offsetX: 3, offsetY: 4, color: INK })
             .enabled(!this.redemptionBusy && this.redemptionCode.trim().length > 0)
             .onClick(() => void this.submitRedemption())
         }.width('100%')
@@ -629,7 +720,7 @@ struct StorePage {
       }
     }.width('100%').padding({ left: 16, right: 16, top: 16, bottom: 18 })
     .backgroundColor(LILAC).border({ width: 2, color: INK }).borderRadius(8)
-    .shadow({ radius: 0, offsetX: 5, offsetY: 6, color: INK })
+    .shadow({ radius: INK_SHADOW_RADIUS, offsetX: 5, offsetY: 6, color: INK })
   }
 
   @Builder
@@ -639,7 +730,7 @@ struct StorePage {
         .width(33).height(24).backgroundColor(LILAC)
         .border({ width: 2, color: INK }).borderRadius(4)
         .rotate({ angle: -7 })
-        .shadow({ radius: 0, offsetX: 2, offsetY: 2, color: INK })
+        .shadow({ radius: INK_SHADOW_RADIUS, offsetX: 2, offsetY: 2, color: INK })
       Text('兑').fontSize(14).fontWeight(900).fontStyle(FontStyle.Italic).rotate({ angle: -7 })
       if (this.redemptionAvailable) {
         Circle().width(9).height(9).fill(CORAL).stroke(PAPER).strokeWidth(1.5)
@@ -648,6 +739,48 @@ struct StorePage {
     }
     .width(46).height(42)
     .onClick(() => this.redemptionVisible = true)
+  }
+
+  @Builder
+  private redemptionSpeechBubble() {
+    Stack({ alignContent: Alignment.TopStart }) {
+      // The SVG contains the face and tail as one silhouette, including its solid
+      // ink backing. Text stays native; no separate tail shadow can get clipped.
+      Image($rawfile('comic/decor/redemption_speech_bubble.svg'))
+        .width(REDEMPTION_SPEECH_WIDTH + 8)
+        .height(REDEMPTION_SPEECH_BODY_HEIGHT + REDEMPTION_SPEECH_TAIL_HEIGHT + 8)
+        .objectFit(ImageFit.Fill).hitTestBehavior(HitTestMode.None).accessibilityLevel('no')
+      Column({ space: 0 }) {
+        Text('说出暗号，').fontSize(25).fontWeight(900).fontStyle(FontStyle.Italic)
+          .fontColor(INK).lineHeight(35).height(35).width('100%').maxLines(1)
+        Text('节拍开门！').fontSize(25).fontWeight(900).fontStyle(FontStyle.Italic)
+          .fontColor(INK).lineHeight(35).height(35).width('100%').maxLines(1)
+      }.width(REDEMPTION_SPEECH_WIDTH).height(REDEMPTION_SPEECH_BODY_HEIGHT)
+        .padding({ left: REDEMPTION_SPEECH_PADDING_X, right: REDEMPTION_SPEECH_PADDING_X })
+        .justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Start)
+        .position({ x: 1, y: 1 })
+    }.width(REDEMPTION_SPEECH_WIDTH + 8)
+      .height(REDEMPTION_SPEECH_BODY_HEIGHT + REDEMPTION_SPEECH_TAIL_HEIGHT + 8)
+      .rotate({ angle: -2 }).clip(false).position({ x: 0, y: 8 })
+  }
+
+  @Builder
+  private redemptionHero() {
+    Stack({ alignContent: Alignment.TopStart }) {
+      // Mirroring places the tickets towards the speech bubble. The pose has a
+      // transparent outer margin: the small overhang keeps its visible ink inside
+      // the page inset while clearing the bubble even on a 320vp screen.
+      ComicCharacter({ avatar: 'mismatch', pose: 'mismatch-ticket' })
+        .width(REDEMPTION_CHARACTER_WIDTH).height(REDEMPTION_CHARACTER_HEIGHT)
+        .scale({ x: -1, y: 1 })
+        .position({ x: '100%', y: REDEMPTION_CHARACTER_TOP })
+        .translate({ x: REDEMPTION_CHARACTER_RIGHT_BLEED - REDEMPTION_CHARACTER_WIDTH })
+        .hitTestBehavior(HitTestMode.None).accessibilityLevel('no')
+      this.redemptionSpeechBubble()
+      Text('有效口令会直接为当前账号送上一张畅游月卡。')
+        .fontSize(13).fontWeight(FontWeight.Bold).lineHeight(20).fontColor('#5D574F')
+        .width('46%').maxLines(4).position({ x: 0, y: 184 })
+    }.width('100%').height(REDEMPTION_HERO_HEIGHT).clip(false)
   }
 
   @Builder
@@ -667,15 +800,7 @@ struct StorePage {
             Text('兑').fontSize(17).fontWeight(900).rotate({ angle: 7 })
           }.width(52).height(44)
         }.width('100%')
-        Row({ space: 12 }) {
-          Column({ space: 7 }) {
-            Text('说出暗号，节拍开门！').fontSize(26).fontWeight(900).fontStyle(FontStyle.Italic)
-              .minFontSize(20).maxFontSize(26).width('100%').maxLines(2)
-            Text('有效口令会直接为当前账号送上一张畅游月卡。')
-              .fontSize(13).fontWeight(FontWeight.Bold).lineHeight(20).fontColor('#5D574F').width('100%')
-          }.layoutWeight(1).alignItems(HorizontalAlign.Start)
-          ComicCharacter({ avatar: 'mismatch', pose: 'mismatch-ticket' }).width('38%').height(160)
-        }.width('100%')
+        this.redemptionHero()
         this.redemptionCard()
         Text('口令区分具体字符，请按活动公布的原文输入。')
           .width('100%').fontSize(10).fontColor('#6B655D').textAlign(TextAlign.Center)
@@ -738,26 +863,135 @@ struct StorePage {
     }.width('96%').height('96%')
   }
 
+  private passBannerArtWidth(): number {
+    return Math.min(PASS_BANNER_ART_WIDTH_MAX, this.passBannerMainWidth * PASS_BANNER_ART_WIDTH_SHARE);
+  }
+
+  private passBannerTitleWidth(): number {
+    return this.passBannerMainWidth - this.passBannerArtWidth() - PASS_BANNER_ART_RIGHT -
+      PASS_BANNER_TEXT_LEFT - PASS_BANNER_TITLE_GAP;
+  }
+
+  private passBannerTitleSize(): number {
+    // All outline layers share one measured size; separately auto-fitting them
+    // would misregister the edges. Leave space for the italic overhang and ink.
+    return (this.passBannerTitleWidth() - PASS_BANNER_TITLE_INSET * 2) / PASS_BANNER_TITLE_ADVANCE;
+  }
+
+  private passBannerTitleOutline(color: string, width: number): ShadowOptions[] {
+    if (width <= 0) {
+      return [];
+    }
+    const radius = width * this.passBannerTitleSize() / 33;
+    // Dense circular offsets keep the sticker rim continuous without baking the text into an image.
+    const shadows: ShadowOptions[] = [];
+    for (let index = 0; index < 24; index++) {
+      const angle = index * Math.PI / 12;
+      shadows.push({ radius: 0, color, offsetX: Math.cos(angle) * radius, offsetY: Math.sin(angle) * radius });
+    }
+    return shadows;
+  }
+
+  @Builder
+  private passBannerTitleLayer(color: string, outline: number) {
+    Text('畅游月卡').fontSize(this.passBannerTitleSize()).fontWeight(900).fontStyle(FontStyle.Italic)
+      .fontColor(color).textShadow(this.passBannerTitleOutline(color, outline))
+      .width('100%').height(PASS_BANNER_TITLE_HEIGHT).maxLines(1)
+      .padding({ left: PASS_BANNER_TITLE_INSET, right: PASS_BANNER_TITLE_INSET })
+      .accessibilityLevel('no')
+  }
+
+  @Builder
+  private passBannerTitle() {
+    Stack({ alignContent: Alignment.TopStart }) {
+      this.passBannerTitleLayer(INK, 10)
+      this.passBannerTitleLayer(LILAC, 8)
+      this.passBannerTitleLayer(INK, 1.35)
+      this.passBannerTitleLayer(PAPER, 0)
+    }.width(this.passBannerTitleWidth()).height(PASS_BANNER_TITLE_HEIGHT).clip(false)
+      .position({ x: PASS_BANNER_TEXT_LEFT, y: PASS_BANNER_TITLE_TOP })
+      .accessibilityGroup(true).accessibilityText('畅游月卡')
+      .hitTestBehavior(HitTestMode.None)
+  }
+
+  @Builder
+  private passBannerArt() {
+    Stack({ alignContent: Alignment.TopStart }) {
+      // Only show paid characters covered by the pass, not free random-pool members.
+      // Alternate face positions while clipping bodies above the live entitlement copy.
+      ComicCharacter({ avatar: 'cloud', portrait: true })
+        .width(this.passBannerArtWidth() * 0.86).height(this.passBannerArtWidth() * 0.86)
+        .rotate({ angle: -8 }).position({ x: this.passBannerArtWidth() * 0.14, y: -8 })
+      ComicCharacter({ avatar: 'lilroll', portrait: true })
+        .width(this.passBannerArtWidth() * 0.90).height(this.passBannerArtWidth() * 0.90)
+        .scale({ x: -1, y: 1 })
+        .rotate({ angle: 6 }).position({ x: -this.passBannerArtWidth() * 0.20, y: 30 })
+      ComicCharacter({ avatar: 'mismatch', portrait: true })
+        .width(this.passBannerArtWidth() * 0.90).height(this.passBannerArtWidth() * 0.90)
+        .rotate({ angle: -6 }).position({ x: this.passBannerArtWidth() * 0.24, y: 66 })
+    }.width(this.passBannerArtWidth()).height(PASS_BANNER_ART_HEIGHT).clip(true)
+      .position({ x: '100%', y: PASS_BANNER_ART_TOP })
+      .translate({ x: -this.passBannerArtWidth() - PASS_BANNER_ART_RIGHT })
+      .hitTestBehavior(HitTestMode.None).accessibilityLevel('no')
+  }
+
   @Builder
   private passBanner() {
-    Stack() {
-      Image($rawfile('comic/decor/subscription_ticket.png')).width('100%').height('100%').objectFit(ImageFit.Fill)
-      Row() {
-        Column({ space: 4 }) {
-          Text(this.passActive ? '月卡正在生效' : '畅游月卡')
-            .fontSize(25).fontWeight(900).fontStyle(FontStyle.Italic).width('100%').maxLines(1)
-          Text(this.passDescription()).fontSize(13).fontWeight(900).width('100%').maxLines(2)
-          Button(this.passButtonLabel(), { type: ButtonType.Normal })
-            .height(34).padding({ left: 13, right: 13 }).fontSize(12).fontWeight(900)
-            .fontColor(INK).backgroundColor(PAPER).border({ width: 1.2, color: INK }).borderRadius(17)
-            .enabled(this.passIapPurchaseAllowed && !this.passActive).onClick(() => this.openPassPurchase())
-        }.width('62%').padding({ left: 13 }).alignItems(HorizontalAlign.Start)
-        Row({ space: -22 }) {
-          ComicCharacter({ avatar: 'cloud' }).width(72).height(118)
-          ComicCharacter({ avatar: 'mismatch' }).width(84).height(126)
-        }.width('38%').justifyContent(FlexAlign.Center)
-      }.width('100%').height('100%').padding({ left: 10, right: 4, top: 14, bottom: 12 })
-    }.width('100%').height(184)
+    Stack({ alignContent: Alignment.TopStart }) {
+      // The vector has a matching solid ink silhouette, including both notches.
+      // It contains no lettering or character art, so status and width can change independently.
+      Image($rawfile('comic/decor/monthly_pass_coupon.svg'))
+        .width('100%').height(PASS_BANNER_HEIGHT).objectFit(ImageFit.Fill).zIndex(0)
+        .hitTestBehavior(HitTestMode.None).accessibilityLevel('no')
+      Row({ space: 0 }) {
+        Stack({ alignContent: Alignment.TopStart }) {
+          this.passBannerArt()
+          Text('ONEBEAT').fontSize(9).fontWeight(900).letterSpacing(1.4)
+            .fontColor(INK).height(19).width(this.passBannerTitleWidth()).maxLines(1)
+            .position({ x: PASS_BANNER_TEXT_LEFT, y: PASS_BANNER_TEXT_TOP })
+          this.passBannerTitle()
+          Image($rawfile('comic/decor/monthly_pass_rhythm.svg'))
+            .width(this.passBannerTitleWidth()).height(PASS_BANNER_DRUMS_HEIGHT).objectFit(ImageFit.Contain)
+            .position({ x: PASS_BANNER_TEXT_LEFT, y: PASS_BANNER_DRUMS_TOP })
+            .hitTestBehavior(HitTestMode.None).accessibilityLevel('no')
+          Text(this.passDescription())
+            // Preserve the complete entitlement/date wording; shrink only when the single line needs it.
+            .fontSize(PASS_BANNER_DESCRIPTION_FONT_MAX)
+            .minFontSize(PASS_BANNER_DESCRIPTION_FONT_MIN).maxFontSize(PASS_BANNER_DESCRIPTION_FONT_MAX)
+            .heightAdaptivePolicy(TextHeightAdaptivePolicy.MIN_FONT_SIZE_FIRST)
+            .fontWeight(FontWeight.Bold).fontColor('#5D574F').lineHeight(PASS_BANNER_DESCRIPTION_LINE_HEIGHT)
+            .width('100%').height(PASS_BANNER_DESCRIPTION_HEIGHT).maxLines(1).align(Alignment.Start)
+            .padding({ left: PASS_BANNER_TEXT_LEFT, right: 16 })
+            .position({ x: 0, y: PASS_BANNER_DESCRIPTION_TOP })
+        }.width(PASS_BANNER_MAIN_SHARE).height(PASS_BANNER_FACE_HEIGHT)
+          .onAreaChange((_oldArea, area) => {
+            const width = Number(area.width);
+            if (Number.isFinite(width) && width > 0 && Math.abs(width - this.passBannerMainWidth) >= 0.5) {
+              this.passBannerMainWidth = width;
+            }
+          })
+        Column({ space: 0 }) {
+          Text('MONTHLY').fontSize(8).fontWeight(900).letterSpacing(1)
+            .fontColor(INK).height(17).width('100%').maxLines(1).textAlign(TextAlign.Center)
+          Text('PASS').fontSize(23).fontWeight(900).fontStyle(FontStyle.Italic)
+            .minFontSize(20).maxFontSize(23).heightAdaptivePolicy(TextHeightAdaptivePolicy.MIN_FONT_SIZE_FIRST)
+            .fontColor(INK).lineHeight(34).height(34).width('100%').maxLines(1).textAlign(TextAlign.Center)
+          Text(this.passActive ? '生效中' : '全权益通行').fontSize(10).fontWeight(900)
+            .fontColor(INK).height(23).width('100%').maxLines(1).textAlign(TextAlign.Center)
+          Blank()
+          // Native disabled opacity must not reach this opaque backing: it masks ticket perforations in every state.
+          Stack() {
+            Button(this.passButtonLabel(), { type: ButtonType.Normal })
+              .width('100%').height(34).padding({ left: 2, right: 2 }).fontSize(10.5).fontWeight(900)
+              .fontColor(INK).backgroundColor('#00000000').borderRadius(5)
+              .enabled(this.passIapPurchaseAllowed && !this.passActive).onClick(() => this.openPassPurchase())
+          }.width('100%').height(34).backgroundColor(PAPER)
+            .border({ width: 1.5, color: INK }).borderRadius(5).shadow(CONTROL_SHADOW).zIndex(2)
+        }.width(PASS_BANNER_STUB_SHARE).height(PASS_BANNER_FACE_HEIGHT)
+          .padding({ left: 9, right: 9, top: 23, bottom: 16 })
+      // 352 / 360 leaves the SVG's hard shadow outside the interactive face.
+      }.width('97.78%').height(PASS_BANNER_FACE_HEIGHT).zIndex(1)
+    }.width('100%').constraintSize({ maxWidth: PASS_BANNER_MAX_WIDTH }).height(PASS_BANNER_HEIGHT).clip(false)
   }
 
   @Builder
@@ -796,9 +1030,22 @@ struct StorePage {
   }
 
   @Builder
-  private characterGrid(onlyAccessible: boolean) {
+  private characterRoleSectionHeader(title: string, hint: string) {
+    Column({ space: 8 }) {
+      Row({ space: 10 }) {
+        Divider().color(INK).strokeWidth(1).layoutWeight(1)
+        Text(title).fontSize(11).fontWeight(900).fontColor('#655F57')
+        Divider().color(INK).strokeWidth(1).layoutWeight(1)
+      }.width('100%')
+      Text(hint).fontSize(10).fontWeight(FontWeight.Medium).fontColor('#6B655D')
+        .lineHeight(15).width('100%').textAlign(TextAlign.Start)
+    }.width('100%').margin({ top: 4, bottom: 10 })
+  }
+
+  @Builder
+  private characterGridForList(items: StoreCharacter[], onlyAccessible: boolean) {
     Grid() {
-      ForEach(STORE_CHARACTERS, (item: StoreCharacter) => {
+      ForEach(items, (item: StoreCharacter) => {
         if (!onlyAccessible || this.hasCharacter(item.key)) {
           GridItem() {
             this.characterCard(item)
@@ -806,7 +1053,26 @@ struct StorePage {
         }
       }, (item: StoreCharacter) => this.storeOfferRenderKey('character', item.key, item.productId))
     }.columnsTemplate('1fr 1fr').columnsGap(10).rowsGap(10).width('100%')
-    .height(Math.ceil(this.visibleCharacterCount(onlyAccessible) / 2) * 244)
+    .height(this.characterGridHeight(this.visibleCharacterCountInList(items, onlyAccessible)))
+  }
+
+  @Builder
+  private characterCatalog(onlyAccessible: boolean) {
+    Column({ space: 0 }) {
+      if (onlyAccessible) {
+        // “我的”只展示已拥有的独占角色，无需分区标题或随机池卡片。
+        this.characterGridForList(STORE_EXCLUSIVE_CHARACTERS, true)
+      } else {
+        if (this.visibleCharacterCountInList(STORE_EXCLUSIVE_CHARACTERS, false) > 0) {
+          this.characterRoleSectionHeader(EXCLUSIVE_CHARACTER_SECTION_TITLE, EXCLUSIVE_CHARACTER_SECTION_HINT)
+          this.characterGridForList(STORE_EXCLUSIVE_CHARACTERS, false)
+        }
+        if (this.visibleCharacterCountInList(STORE_MULTI_CHARACTERS, false) > 0) {
+          this.characterRoleSectionHeader(MULTI_CHARACTER_SECTION_TITLE, MULTI_CHARACTER_SECTION_HINT)
+          this.characterGridForList(STORE_MULTI_CHARACTERS, false)
+        }
+      }
+    }.width('100%')
   }
 
   @Builder
@@ -907,7 +1173,7 @@ struct StorePage {
           .padding({ left: 9, right: 9, top: 4, bottom: 4 }).rotate({ angle: -3 })
           .shadow(CONTROL_SHADOW)
         Text(this.pendingName).fontSize(27).fontWeight(900).fontStyle(FontStyle.Italic)
-        Text(this.pendingType === 'pass' ? '开通后可使用当前及后续上架的所有角色和场景。' :
+        Text(this.pendingType === 'pass' ? '开通后可使用当前及后续上架的所有角色、场景和 pro 鼓机。' :
           '购买后会加入“我的”，可在角色选择页使用。')
           .fontSize(13).fontWeight(FontWeight.Bold).lineHeight(20).width('100%')
         Text(this.pendingPrice).fontSize(22).fontWeight(900).fontColor(CORAL)
@@ -923,7 +1189,7 @@ struct StorePage {
           .fontSize(9).fontColor('#6B655D').width('100%')
       }.width('88%').padding(17).backgroundColor('#FFF1D7')
       .border({ width: 2.5, color: INK }).borderRadius(8)
-      .shadow({ radius: 0, offsetX: 7, offsetY: 8, color: INK })
+      .shadow({ radius: INK_SHADOW_RADIUS, offsetX: 7, offsetY: 8, color: INK })
     }.width('100%').height('100%').backgroundColor('#77000000').zIndex(100)
   }
 
@@ -945,7 +1211,7 @@ struct StorePage {
           }
           this.tabBar()
           if (this.selectedTab === 0) {
-            this.characterGrid(false)
+            this.characterCatalog(false)
           } else if (this.selectedTab === 1) {
             ForEach(STORE_SCENES, (item: StoreScene) => {
               this.sceneCard(item)
@@ -961,7 +1227,7 @@ struct StorePage {
               Blank()
               Text(`${this.ownedCharacterCount()} 个`).fontSize(11).fontColor('#655F57')
             }.width('100%')
-            this.characterGrid(true)
+            this.characterCatalog(true)
             Text('我的场景').fontSize(17).fontWeight(900).width('100%')
             ForEach(STORE_SCENES, (item: StoreScene) => {
               if (this.hasScene(item.key)) {

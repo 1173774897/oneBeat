@@ -1,0 +1,5 @@
+<svg width="156" height="118" viewBox="0 0 156 118" xmlns="http://www.w3.org/2000/svg">
+  <!-- The shared face-and-tail contour carries a 3 x 4 hard shadow. Copy stays native ArkUI. -->
+  <path d="M6 1H144Q149 1 149 6V94Q149 99 144 99H127L131 111L107 99H6Q1 99 1 94V6Q1 1 6 1Z" fill="#171B1F" stroke="#171B1F" stroke-width="2" stroke-linejoin="round" transform="translate(3 4)"/>
+  <path d="M6 1H144Q149 1 149 6V94Q149 99 144 99H127L131 111L107 99H6Q1 99 1 94V6Q1 1 6 1Z" fill="#FFFDF8" stroke="#171B1F" stroke-width="2" stroke-linejoin="round"/>
+</svg>

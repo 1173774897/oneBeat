@@ -1,8 +1,8 @@
 import { router } from '@kit.ArkUI';
-import { ComicButton, ComicCharacter, PAPER, INK, LILAC, WHITE } from '../components/ComicKit';
+import { ComicButton, ComicCharacter, ComicHardShadowOptions, PAPER, INK, LILAC, WHITE } from '../components/ComicKit';
 import { ensureStoreBootstrapReady } from '../store/StoreBootstrapSync';
 
-const HOME_BUTTON_SHADOW: ShadowOptions = { radius: 0, offsetX: 2, offsetY: 3, color: INK };
+const HOME_BUTTON_SHADOW: ComicHardShadowOptions = { offsetX: 2, offsetY: 3, color: INK };
 
 @Entry
 @Component
@@ -35,6 +35,14 @@ struct Index {
         }.width('100%')
         Stack() {
           Image($rawfile('comic/decor/entry_burst.png')).width('100%').height('100%').objectFit(ImageFit.Fill)
+          Image($rawfile('comic/decor/lightning_accents.png'))
+            .width(224)
+            .height(179)
+            .objectFit(ImageFit.Contain)
+            .opacity(0.88)
+            .translate({ y: 8 })
+            .rotate({ angle: -4 })
+            .hitTestBehavior(HitTestMode.None)
           Row({ space: -30 }) {
             ComicCharacter({ avatar: 'teapot' }).width('53%').height(240).rotate({ angle: -8 })
             ComicCharacter({ avatar: 'cloud' }).width('53%').height(240).rotate({ angle: 8 })
@@ -42,13 +50,29 @@ struct Index {
           Text('GOOD PEOPLE. SAME BEAT!').fontSize(12).fontWeight(900)
             .backgroundColor(PAPER).padding(5).align(Alignment.BottomEnd)
         }.width('100%').height(245).clip(true)
-        ComicButton({ label: '多人练习', inkShadow: HOME_BUTTON_SHADOW,
+        ComicButton({
+          label: '多人练习',
+          badgeLabel: 'TEAM',
+          badgeIcon: 'comic/icons/multi-person.svg',
+          hardShadow: HOME_BUTTON_SHADOW,
           action: () => this.goTeam() })
-        ComicButton({ label: '单人练习', fill: WHITE, inkShadow: HOME_BUTTON_SHADOW,
+        ComicButton({
+          label: '单人练习',
+          fill: WHITE,
+          badgeLabel: 'SOLO',
+          badgeIcon: 'comic/icons/solo-person.svg',
+          badgeFill: '#FF7056',
+          hardShadow: HOME_BUTTON_SHADOW,
           action: () => this.goSolo() })
-        ComicButton({ label: '收藏小铺', fill: LILAC, inkShadow: HOME_BUTTON_SHADOW, action: () => {
-          router.pushUrl({ url: 'pages/StorePage' });
-        } })
+        ComicButton({
+          label: '收藏小铺',
+          fill: LILAC,
+          badgeLabel: 'SHOP',
+          badgeIcon: 'comic/icons/limited-free-ticket.svg',
+          hardShadow: HOME_BUTTON_SHADOW,
+          action: () => {
+            router.pushUrl({ url: 'pages/StorePage' });
+          } })
         Row() {
           Blank()
           Text('隐私声明').fontSize(12).fontColor('#66615A').decoration({ type: TextDecorationType.Underline })

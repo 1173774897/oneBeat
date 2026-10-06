@@ -1,6 +1,6 @@
 import { curves } from '@kit.ArkUI';
 import { RANDOM_CHARACTER_KEYS } from '../assets/CharacterCatalog';
-import { CORAL, INK, LILAC, WHITE } from './ComicKit';
+import { CORAL, INK, LILAC, WHITE, INK_SHADOW_RADIUS } from './ComicKit';
 
 export const RANDOM_FILM_HEIGHT: number = 250;
 const FILM_SIDE_INSET: number = 12;
@@ -343,7 +343,7 @@ export struct RandomCharacterFilm {
       this.sprocketHoles(FILM_CARD_HEIGHT - 10)
     }.width(FILM_CARD_WIDTH).height(FILM_CARD_HEIGHT).flexShrink(0)
       .backgroundColor(WHITE).border({ width: 2, color: INK }).borderRadius(3)
-      .shadow({ radius: 0, offsetX: 2, offsetY: 3, color: INK })
+      .shadow({ radius: INK_SHADOW_RADIUS, offsetX: 2, offsetY: 3, color: INK })
   }
 
   @Builder
@@ -380,7 +380,7 @@ export struct RandomCharacterFilm {
         Text('RANDOM PICK').fontSize(12).fontWeight(900).fontStyle(FontStyle.Italic).fontColor(INK)
           .padding({ left: 7, right: 7, top: 3, bottom: 3 })
           .backgroundColor(CORAL).border({ width: 1.5, color: INK }).borderRadius(3)
-          .shadow({ radius: 0, offsetX: 2, offsetY: 2, color: INK }).rotate({ angle: -3 })
+          .shadow({ radius: INK_SHADOW_RADIUS, offsetX: 2, offsetY: 2, color: INK }).rotate({ angle: -3 })
         Blank()
         Text(this.statusLabel()).fontSize(11).fontWeight(FontWeight.Bold).fontColor(INK)
       }.width('100%').height(FILM_REEL_TOP)

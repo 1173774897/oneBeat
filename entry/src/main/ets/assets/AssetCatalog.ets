@@ -3,7 +3,6 @@ import { isAvatarAllowedForSession, isRandomAvatar, isRandomPoolCharacter } from
 export const WALK_FRAME_COUNT: number = 8;
 export const LILROLL_WALK_FRAME_COUNT: number = 16;
 export const WALK_FRAMES_PER_BEAT: number = 4;
-export const LILROLL_BEATS_PER_CYCLE: number = 4;
 export const SCOOTER_WALK_FRAME_COUNT: number = 16;
 
 export const ROAD_IMAGES: string[] = [
@@ -203,32 +202,19 @@ export function walkFramePath(avatar: WalkerAvatarKey, frameIndex: number, color
   return `walk/${avatar}/frame_${suffix}.png`;
 }
 
-/**
- * cloud/mismatch：每 2 拍一轮；scooter：同 mismatch 步进，4 拍播完 16 帧；lilroll：小节内第 1–4 拍各 4 帧
- * beatInBar：1-based 小节拍位（与节拍器 beatInBar 一致）
- */
+/** Every beat owns four consecutive frames; the global beat index prevents a
+ * short meter such as 3/4 from resetting a 16-frame walk cycle at each bar. */
 export function walkerAnimFrameIndex(
   avatar: WalkerAvatarKey,
   beatIndex: number,
   stepInBeat: number,
-  beatInBar: number = 1
+  _beatInBar: number = 1
 ): number {
   const step = Math.max(0, Math.min(WALK_FRAMES_PER_BEAT - 1, stepInBeat));
-  if (avatar === 'lilroll') {
-    let beatSlot = beatInBar - 1;
-    if (beatSlot < 0 || beatSlot >= LILROLL_BEATS_PER_CYCLE) {
-      beatSlot = ((beatIndex % LILROLL_BEATS_PER_CYCLE) + LILROLL_BEATS_PER_CYCLE) % LILROLL_BEATS_PER_CYCLE;
-    }
-    return beatSlot * WALK_FRAMES_PER_BEAT + step;
-  }
-  if (avatar === 'scooter') {
-    const beatInCycle = ((beatIndex % 2) + 2) % 2;
-    const tick = beatInCycle * WALK_FRAMES_PER_BEAT + step;
-    const half = Math.floor(beatIndex / 2) % 2;
-    return half * WALK_FRAME_COUNT + tick;
-  }
-  const beatInCycle = ((beatIndex % 2) + 2) % 2;
-  return beatInCycle * WALK_FRAMES_PER_BEAT + step;
+  const frameCount = avatar === 'lilroll' ? LILROLL_WALK_FRAME_COUNT :
+    avatar === 'scooter' ? SCOOTER_WALK_FRAME_COUNT : WALK_FRAME_COUNT;
+  const absoluteFrame = beatIndex * WALK_FRAMES_PER_BEAT + step;
+  return ((absoluteFrame % frameCount) + frameCount) % frameCount;
 }
 
 export function avatarForSlot(slot: number): WalkerAvatarKey {
