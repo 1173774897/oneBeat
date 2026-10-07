@@ -6,8 +6,8 @@ export const PROTOCOL_VERSION: number = 3;
 export const SESSION_MAX_MEMBER_COUNT: number = 9;
 /** 首次播放和恢复时预留给网络、音频流启动及硬件时间戳锁定的同步时间。 */
 export const TRANSPORT_PREROLL_MS: number = 650;
-/** 行进中改节拍时渲染器已经就绪，只保留设备间发布共享拍点所需的时间。 */
-export const TRANSPORT_RESTART_PREROLL_MS: number = 350;
+/** 行进中改节拍同样会重启渲染器并重新锁定硬件时间戳，故与首次/恢复一致预留充足同步时间。 */
+export const TRANSPORT_RESTART_PREROLL_MS: number = 650;
 /** 正式行进前播放的准备拍小节数。 */
 export const COUNT_IN_BARS: number = 1;
 /** 行进期间更频繁地估算队长时钟，减小设备晶振与网络变化带来的长期漂移。 */

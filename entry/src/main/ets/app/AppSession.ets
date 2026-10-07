@@ -1,5 +1,6 @@
 import { SessionController } from '../session/SessionController';
 import { MetronomeEngine } from '../audio/MetronomeEngine';
+import { AudioOutputMonitor } from '../audio/AudioOutputMonitor';
 import { WifiP2pManager } from '../network/p2p/WifiP2pManager';
 import { BleRoomDiscovery } from '../network/p2p/BleRoomDiscovery';
 import {
@@ -29,6 +30,10 @@ export class AppSession {
 
   private constructor(controller: SessionController) {
     AppStorage.setOrCreate('lastTransportMessage', '');
+    AppStorage.setOrCreate('btAudioActive', false);
+    AudioOutputMonitor.start((active: boolean) => {
+      AppStorage.setOrCreate('btAudioActive', active);
+    });
     this.controller = controller;
     SessionBackgroundKeeper.setControlHandler({
       onPlay: () => {
@@ -114,6 +119,7 @@ export class AppSession {
       await this.controller.disconnect();
       await this.p2p.teardown();
     } finally {
+      AudioOutputMonitor.stop();
       await SessionBackgroundKeeper.stop();
     }
   }

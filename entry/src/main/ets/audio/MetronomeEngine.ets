@@ -15,10 +15,11 @@ import {
 } from './DrumMachineCatalog';
 import { DrumSampleBank } from './DrumSampleBank';
 import { BeatPointState, defaultBeatPointStates, normalizeBeatPointStates } from '../common/MeterModel';
+import { DEBUG } from 'BuildProfile';
 
 const SAMPLE_RATE: number = 44100;
 const BYTES_PER_SAMPLE: number = 2;
-const AUDIO_PREROLL_MS: number = 450;
+const AUDIO_PREROLL_MS: number = 650;
 const AUDIO_CLOCK_LOCK_RETRY_MS: number = 8;
 const AUDIO_CLOCK_LOCK_TIMEOUT_MS: number = 300;
 const AUDIO_CLOCK_LOCK_MIN_REMAINING_MS: number = 80;
@@ -26,8 +27,17 @@ const AUDIO_CALLBACK_STALL_MS: number = 1500;
 // Sub-audible dither floor laid under the click samples so the stream is never
 // pure digital zero. Pure zero runs are what the smart PA silence detector
 // (CustStreamCheck -> SmartpaPowerOff) keys on to power off the amplifier.
-// ~ -72dBFS peak; raise only if device logs still show zero_volume=true.
-const DITHER_FLOOR_GAIN: number = 0.00025;
+// ~ -80dBFS peak; raise only if device logs still show zero_volume=true.
+const DITHER_FLOOR_GAIN: number = 0.0001;
+// 播放中持续相位锁定的校正参数。
+// 相位误差（音频播放头相对墙钟时间轴）超过该阈值时启动插帧/丢帧校正。
+const AUDIO_PHASE_LOCK_THRESHOLD_FRAMES: number = 44; // 约 1ms
+// 每次校正的最大步长，保证插帧/丢帧足够渐进、听感不可察觉。
+const AUDIO_PHASE_LOCK_MAX_STEP_FRAMES: number = 16; // 约 0.36ms
+// 拍点内“安全区”起点：越过强拍 click 衰减尾后（约 1.25 倍 click 时长）才允许校正，
+// 避免在 click 瞬态上插帧/丢帧造成可闻毛刺。
+const AUDIO_PHASE_LOCK_SAFE_FRAMES: number =
+  Math.ceil(Math.max(ACCENT_DURATION_MS, WEAK_DURATION_MS) * 1.25 * SAMPLE_RATE / 1000);
 
 function applyDitherFloorToRange(samples: Int16Array, start: number, end: number): void {
   for (let i = start; i < end; i++) {
@@ -64,8 +74,10 @@ interface RenderedBar {
 
 export class MetronomeEngine {
   private renderer: audio.AudioRenderer | undefined = undefined;
+  private rendererStreamId: number = -1;
   private rendererStarted: boolean = false;
   private rendererOperation: Promise<void> = Promise.resolve();
+  private outputLatencyMs: number = 0;
   private recoveringAudio: boolean = false;
   private writeCallbackCount: number = 0;
   private observedWriteCallbackCount: number = 0;
@@ -110,6 +122,10 @@ export class MetronomeEngine {
   private audioLeadSamples: number = 0;
   private audioStartAnchorPending: boolean = false;
   private audioSubmittedFrames: number = 0;
+  /** 已提交但尚未被 DAC 播出的帧数（提交坐标 - 硬件播放坐标的偏移量）。 */
+  private queueDepthFrames: number = 0;
+  /** 播放中待执行的相位校正帧数（正值=插帧延迟，负值=丢帧追赶）。 */
+  private phaseCorrectionFrames: number = 0;
   private audioFrameCursor: number = 0;
   private lastUnderflowCount: number = 0;
   private transportRevision: number = 0;
@@ -281,7 +297,10 @@ export class MetronomeEngine {
       encodingType: audio.AudioEncodingType.ENCODING_TYPE_RAW
     };
     const rendererInfo: audio.AudioRendererInfo = {
-      usage: audio.StreamUsage.STREAM_USAGE_MUSIC,
+      // STREAM_USAGE_MUSIC 默认走低功耗渲染器（内部缓冲最大 1000ms），
+      // 该缓冲不被 getAudioTimestampInfo / getLatency 上报，会导致设备间数百 ms 的可闻偏差。
+      // 改用 STREAM_USAGE_GAME 走普通/低时延通路，规避低功耗大缓冲。
+      usage: audio.StreamUsage.STREAM_USAGE_GAME,
       rendererFlags: 0
     };
     const created = await audio.createAudioRenderer({
@@ -304,6 +323,13 @@ export class MetronomeEngine {
       }
     });
     this.renderer = created;
+    // 只读诊断：读取框架分配的流 ID（不改 stream usage / 状态 / 缓冲），失败静默。
+    try {
+      this.rendererStreamId = created.getAudioStreamIdSync();
+      console.info(`MetronomeEngine streamId=${this.rendererStreamId}`);
+    } catch (e) {
+      this.rendererStreamId = -1;
+    }
   }
 
   async stopEngine(): Promise<void> {
@@ -359,6 +385,12 @@ export class MetronomeEngine {
     this.transportRevision++;
     this.resetAudioTimestampState();
     const audioDelay = Math.max(0, localStart - MonotonicClock.nowMs() - AUDIO_PREROLL_MS);
+    if (DEBUG) {
+      console.info(`OneBeatSync schedule offsetMs=${this.offsetMs.toFixed(2)} ` +
+        `startAtLeader=${startAtLeaderMonoMs.toFixed(2)}ms localStart=${localStart.toFixed(2)}ms ` +
+        `now=${now.toFixed(2)}ms audioDelay=${audioDelay.toFixed(2)}ms ` +
+        `countIn=${countInBeats} beat=${firstBeatIndex} bpm=${this.transportBpm.toFixed(1)}`);
+    }
     this.audioStartTimerId = setTimeout(() => {
       void this.startAudioStream(localStart, firstBeatIndex, remainingCountInBeats, token);
     }, audioDelay);
@@ -400,7 +432,18 @@ export class MetronomeEngine {
 
   private async startAudioStream(localStart: number, beatIndex: number,
     countInBeats: number, token: number): Promise<void> {
-    await this.queueRendererOperation(() => this.startAudioStreamNow(localStart, beatIndex, countInBeats, token));
+    // 声学输出延迟校准：提前提交音频，使可闻节拍对齐到 localStart。
+    // UI 节拍仍以 localStart 为准，仅音频时间轴前移。
+    // 符号修正：audibleStart = localStart - latency（正值=提前），运行时 getLatency 取代固定 -20。
+    this.refreshOutputLatency();
+    const acousticDelayMs = this.outputLatencyMs;
+    const audibleStart = localStart - acousticDelayMs;
+    if (DEBUG) {
+      console.info(`OneBeatSync audio offsetMs=${this.offsetMs.toFixed(2)} ` +
+        `localStart=${localStart.toFixed(2)}ms audibleStart=${audibleStart.toFixed(2)}ms ` +
+        `acousticDelay=${acousticDelayMs} countIn=${countInBeats} beat=${beatIndex}`);
+    }
+    await this.queueRendererOperation(() => this.startAudioStreamNow(audibleStart, beatIndex, countInBeats, token));
   }
 
   private async startAudioStreamNow(localStart: number, beatIndex: number,
@@ -428,15 +471,19 @@ export class MetronomeEngine {
     const fallbackFirstBeatFrame = Math.max(0,
       Math.round((localStart - rendererStartRequestedAtMs) * SAMPLE_RATE / 1000));
     this.audioSubmittedFrames = 0;
-    this.audioLeadSamples = 0;
+    // 先用墙钟估算的 lead 占位：renderer.start() 会立即触发写回调，若这里保持 0，
+    // 写回调会在 lock 完成前把整个大缓冲区灌满静音（overshoot），首拍被逼到 ~210ms 之后。
+    this.audioLeadSamples = fallbackFirstBeatFrame;
     this.audioStartAnchorPending = true;
     // Recovery rejoins the current beat while the original visual/session
     // timeline keeps advancing; flushed hardware frames start from zero again.
     this.audioTimelineLeadFrames = fallbackFirstBeatFrame -
       Math.round((localStart - this.transportStartLocalMs) * SAMPLE_RATE / 1000);
     if (rendererPositionReset) {
+      // flush() 不会把硬件帧计数器归零（日志 framePos 跨拍持续累加），
+      // 所以不能用 0 当基准；保持 baseReady=false，交给 lock 在首个有效样本里用真实 framePos 建立基准。
       this.audioTimestampBaseFrame = 0;
-      this.audioTimestampBaseReady = true;
+      this.audioTimestampBaseReady = false;
     }
     this.audioStreaming = true;
     try {
@@ -616,9 +663,17 @@ export class MetronomeEngine {
         return;
       }
       if (this.audioStartAnchorPending) {
-        applyDitherFloorToRange(output, outputCursor, output.length);
-        this.audioSubmittedFrames += output.length - outputCursor;
-        return;
+        // 封顶 preroll 静音到已知的墙钟 lead，填满即切内容，避免大缓冲区 overshoot 首拍。
+        const silenceFrames = Math.min(this.audioLeadSamples, output.length - outputCursor);
+        if (silenceFrames > 0) {
+          applyDitherFloorToRange(output, outputCursor, outputCursor + silenceFrames);
+          outputCursor += silenceFrames;
+          this.audioLeadSamples -= silenceFrames;
+          this.audioSubmittedFrames += silenceFrames;
+          continue;
+        }
+        this.audioStartAnchorPending = false;
+        continue;
       }
       if (this.audioLeadSamples > 0) {
         const silenceFrames = Math.min(this.audioLeadSamples, output.length - outputCursor);
@@ -637,6 +692,31 @@ export class MetronomeEngine {
       if (bar === undefined) {
         output.fill(0, outputCursor);
         return;
+      }
+
+      // 播放中持续相位锁定：在拍点 dither floor（静音区）插帧/丢帧，逐步校正相位误差，
+      // 避免在 click 瞬态上操作产生可闻毛刺。
+      if (this.phaseCorrectionFrames !== 0) {
+        const samplesPerBeat = Math.max(1, Math.round(bar.samplesPerBeat));
+        const posInBeat = this.audioFrameCursor % samplesPerBeat;
+        if (posInBeat >= AUDIO_PHASE_LOCK_SAFE_FRAMES) {
+          if (this.phaseCorrectionFrames > 0) {
+            const insertFrames = Math.min(this.phaseCorrectionFrames, output.length - outputCursor);
+            applyDitherFloorToRange(output, outputCursor, outputCursor + insertFrames);
+            outputCursor += insertFrames;
+            this.audioSubmittedFrames += insertFrames;
+            this.phaseCorrectionFrames -= insertFrames;
+            continue;
+          }
+          const dropFrames = Math.min(-this.phaseCorrectionFrames,
+            bar.frameCount - this.audioFrameCursor, output.length - outputCursor);
+          this.audioFrameCursor += dropFrames;
+          this.phaseCorrectionFrames += dropFrames;
+          if (this.audioFrameCursor >= bar.frameCount) {
+            this.advanceAudioBar();
+          }
+          continue;
+        }
       }
 
       const copyFrames = Math.min(bar.frameCount - this.audioFrameCursor, output.length - outputCursor);
@@ -660,24 +740,74 @@ export class MetronomeEngine {
     const lockDeadline = Math.min(
       rendererStartRequestedAtMs + AUDIO_CLOCK_LOCK_TIMEOUT_MS,
       localStart - AUDIO_CLOCK_LOCK_MIN_REMAINING_MS);
+    let tsProbed = false;
+    let clockOffsetMs: number | undefined = undefined;
     while (token === this.runToken && this.running && MonotonicClock.nowMs() <= lockDeadline) {
       try {
         const info = renderer.getAudioTimestampInfoSync();
         const timestampMs = info.timestamp / 1000000;
         const now = MonotonicClock.nowMs();
-        if (info.timestamp > 0 && timestampMs >= rendererStartRequestedAtMs - 10 &&
-          timestampMs <= now + 10) {
-          const targetFrame = Math.round(info.framePos + (localStart - timestampMs) * SAMPLE_RATE / 1000);
-          if (targetFrame > this.audioSubmittedFrames) {
-            this.audioLeadSamples = targetFrame - this.audioSubmittedFrames;
-            this.audioTimelineLeadFrames = targetFrame -
-              Math.round((localStart - this.transportStartLocalMs) * SAMPLE_RATE / 1000);
-            this.audioStartAnchorPending = false;
-            return;
+        if (!tsProbed) {
+          tsProbed = true;
+          if (DEBUG) {
+            console.info(`MetronomeEngine lockClock[tsProbe] rawNs=${info.timestamp} ` +
+              `tsMs=${timestampMs.toFixed(2)} nowMs=${now.toFixed(2)} ` +
+              `deltaMs=${(timestampMs - now).toFixed(2)} framePos=${info.framePos} ` +
+              `reqStart=${rendererStartRequestedAtMs.toFixed(2)}`);
           }
         }
-      } catch (_e) {
-        // API 12-18 devices do not expose presentation timestamps.
+        if (info.timestamp > 0) {
+          if (clockOffsetMs === undefined) {
+            // info.timestamp 与 MonotonicClock 时基不同（日志 deltaMs 为固定偏移），
+            // 首次有效样本算出两者偏移，后续把硬件时间戳折算到应用单调时钟时基再比较。
+            clockOffsetMs = timestampMs - now;
+          }
+          const timestampInNowBase = timestampMs - clockOffsetMs;
+          if (timestampInNowBase >= rendererStartRequestedAtMs - 10 &&
+            timestampInNowBase <= now + 10) {
+            if (!this.audioTimestampBaseReady) {
+              this.audioTimestampBaseFrame = info.framePos;
+              this.audioTimestampBaseReady = true;
+            }
+            // 首样本时 base 刚重置为当前 framePos、now≈timestampInNowBase，playedFramesNow 会被算成 0，
+            // 漏掉 renderer.start() 以来已实际播放的帧数。补上这段墙钟已播帧，避免写回调 bursts
+            // 把首拍 lead 顶到下溢（表现为 dev 数十 ms 的迟到）。
+            // 但墙钟估计不能超过已提交帧数（写回调尚未触发时 submitted=0，否则 played>submitted 会令首拍提前）。
+            const playedFramesNow = Math.min(this.audioSubmittedFrames, Math.max(0,
+              info.framePos - this.audioTimestampBaseFrame +
+              Math.max(0, Math.min(250, now - timestampInNowBase)) * SAMPLE_RATE / 1000 +
+              Math.max(0, now - rendererStartRequestedAtMs) * SAMPLE_RATE / 1000));
+          // 统一帧坐标系（以“流启动以来”的帧序号为基准）：
+          // queueDepthFrames = 已提交帧 - 已播放帧，即仍在音频管线中排队待播出的帧数。
+          this.queueDepthFrames = Math.max(0, this.audioSubmittedFrames - playedFramesNow);
+          // 目标首拍内容帧在统一坐标下的位置 S_content = (localStart - now)*SR/1000 + playedFramesNow。
+          // 剩余 lead = S_content - audioSubmittedFrames = (localStart - now)*SR/1000 - queueDepthFrames，
+          // 从而避免把硬件 framePos 与应用提交计数直接相减（仅当 framePos 启动时归零才成立，跨设备不可靠）。
+          this.audioLeadSamples = Math.max(0,
+            Math.round((localStart - now) * SAMPLE_RATE / 1000 - this.queueDepthFrames));
+          this.audioTimelineLeadFrames = playedFramesNow +
+            (this.transportStartLocalMs - now) * SAMPLE_RATE / 1000;
+          this.audioStartAnchorPending = false;
+          const actualFirstBeatMs = now +
+            (this.audioSubmittedFrames + this.audioLeadSamples - playedFramesNow) * 1000 / SAMPLE_RATE;
+          if (DEBUG) {
+            console.info(`OneBeatSync lockClock[hw] offsetMs=${this.offsetMs.toFixed(2)} expected=${localStart.toFixed(2)}ms ` +
+              `actual=${actualFirstBeatMs.toFixed(2)}ms dev=${(actualFirstBeatMs - localStart).toFixed(2)}ms ` +
+              `now=${now.toFixed(2)} hwTs=${timestampInNowBase.toFixed(2)} framePos=${info.framePos} ` +
+              `played=${playedFramesNow.toFixed(1)} submitted=${this.audioSubmittedFrames} ` +
+              `queue=${this.queueDepthFrames.toFixed(1)} lead=${this.audioLeadSamples} ` +
+              `latency=${MetronomeEngine.readOutputLatencyMs(renderer)}`);
+          }
+          return;
+        }
+        }
+      } catch (e) {
+        if (!tsProbed) {
+          tsProbed = true;
+          if (DEBUG) {
+            console.warn(`MetronomeEngine lockClock[tsProbe] getAudioTimestampInfoSync threw: ${e}`);
+          }
+        }
       }
       await MetronomeEngine.delay(AUDIO_CLOCK_LOCK_RETRY_MS);
     }
@@ -687,11 +817,41 @@ export class MetronomeEngine {
     this.audioLeadSamples = fallbackTargetFrame - this.audioSubmittedFrames;
     this.audioTimelineLeadFrames = fallbackTargetFrame -
       Math.round((localStart - this.transportStartLocalMs) * SAMPLE_RATE / 1000);
+    const actualFirstBeatMs = rendererStartRequestedAtMs + fallbackTargetFrame * 1000 / SAMPLE_RATE;
+    if (DEBUG) {
+      console.info(`OneBeatSync lockClock[fallback] offsetMs=${this.offsetMs.toFixed(2)} expected=${localStart.toFixed(2)}ms ` +
+        `actual=${actualFirstBeatMs.toFixed(2)}ms dev=${(actualFirstBeatMs - localStart).toFixed(2)}ms ` +
+        `rendererStart=${rendererStartRequestedAtMs.toFixed(2)} ` +
+        `fallbackFrame=${fallbackFirstBeatFrame} targetFrame=${fallbackTargetFrame} ` +
+        `submitted=${this.audioSubmittedFrames} lead=${this.audioLeadSamples} ` +
+        `latency=${MetronomeEngine.readOutputLatencyMs(renderer)}`);
+    }
     this.audioStartAnchorPending = false;
   }
 
   private static delay(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  /** 读取当前音频路由的估算输出时延（DAC/设备/无线），毫秒。失败返回 -1。 */
+  private static readOutputLatencyMs(renderer: audio.AudioRenderer): number {
+    try {
+      return renderer.getLatency(audio.AudioLatencyType.LATENCY_TYPE_ALL);
+    } catch (e) {
+      return -1;
+    }
+  }
+
+  /** 刷新并缓存当前音频路由的输出时延；getLatency 在流尚未路由时可能返回 0，此时保留旧值。 */
+  private refreshOutputLatency(): void {
+    const renderer = this.renderer;
+    if (renderer === undefined) {
+      return;
+    }
+    const latency = MetronomeEngine.readOutputLatencyMs(renderer);
+    if (latency > 0) {
+      this.outputLatencyMs = latency;
+    }
   }
 
   private advanceAudioBar(): void {
@@ -730,6 +890,8 @@ export class MetronomeEngine {
     this.lastAudioPlayheadMs = 0;
     this.lastAudioSampleMonoMs = 0;
     this.lastTimestampQueryMonoMs = -1;
+    this.queueDepthFrames = 0;
+    this.phaseCorrectionFrames = 0;
   }
 
   private primeAudioTimestamp(renderer: audio.AudioRenderer): void {
@@ -791,6 +953,20 @@ export class MetronomeEngine {
     }
   }
 
+  /** 当前音频播放头相对墙钟时间轴的相位误差（帧）。正值=音频偏快，需插帧延迟；负值=音频偏慢，需丢帧追赶。 */
+  private measurePhaseErrorFrames(): number {
+    if (!this.audioClockLocked || !this.audioStreaming || this.activeSequenceFinished) {
+      return 0;
+    }
+    const nowMs = MonotonicClock.nowMs();
+    const playhead = this.readAudioPlayheadMs(nowMs);
+    if (playhead === undefined) {
+      return 0;
+    }
+    const expected = nowMs - this.transportStartLocalMs;
+    return Math.round((playhead - expected) * SAMPLE_RATE / 1000);
+  }
+
   private reportUnderflowIfNeeded(): void {
     const renderer = this.renderer;
     if (renderer === undefined || !this.rendererStarted) {
@@ -812,6 +988,14 @@ export class MetronomeEngine {
     if (!this.audioStreaming || renderer === undefined || this.recoveringAudio ||
       renderer.state !== audio.AudioState.STATE_RUNNING || this.activeSequenceFinished) {
       return;
+    }
+    // 播放中持续相位锁定：每拍评估一次相位误差，超出阈值就调度一小步插帧/丢帧，
+    // 实际校正会在 fillAudioData 的 dither floor（静音区）中渐进完成。
+    const phaseError = this.measurePhaseErrorFrames();
+    if (Math.abs(phaseError) >= AUDIO_PHASE_LOCK_THRESHOLD_FRAMES) {
+      const step = Math.max(-AUDIO_PHASE_LOCK_MAX_STEP_FRAMES,
+        Math.min(AUDIO_PHASE_LOCK_MAX_STEP_FRAMES, phaseError));
+      this.phaseCorrectionFrames += step;
     }
     if (this.observedWriteCallbackCount !== this.writeCallbackCount) {
       this.observedWriteCallbackCount = this.writeCallbackCount;

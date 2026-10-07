@@ -10,6 +10,7 @@ import {
   TRANSPORT_PREROLL_MS,
   TRANSPORT_RESTART_PREROLL_MS
 } from '../common/Constants';
+import { DEBUG } from 'BuildProfile';
 import { MonotonicClock } from '../common/MonotonicClock';
 import { createMessage } from '../protocol/messages';
 import {
@@ -772,11 +773,16 @@ export class SessionController {
   private async restartRunningTransportAfterConfiguration(): Promise<void> {
     // Configure every peer first, then restart on a shared future downbeat. Applying
     // on packet receipt would let network latency put devices in different bars.
+    // 发送前先强制队员重采样时钟偏移，避免重启时刻 offset 陈旧导致即使有充足 preroll 仍偏。
+    await this.prepareConnectedMembersForTransport();
     this.state = 'countdown';
     await this.broadcastSnapshot();
     const nextBarBeatIndex = (Math.floor(this.beatIndex / this.beatsPerBar) + 1) * this.beatsPerBar;
     this.beatIndex = nextBarBeatIndex;
     const restartAt = MonotonicClock.nowMs() + TRANSPORT_RESTART_PREROLL_MS;
+    if (DEBUG) {
+      console.info(`OneBeatSync restart[leader] restartAt=${restartAt.toFixed(2)}ms beat=${nextBarBeatIndex} beatsPerBar=${this.beatsPerBar} now=${MonotonicClock.nowMs().toFixed(2)}ms`);
+    }
     const payload: TransportPayload = {
       startAtLeaderMonoMs: restartAt,
       countdownMs: 0,
@@ -823,6 +829,8 @@ export class SessionController {
     }
     await this.prepareConnectedMembersForTransport();
     this.state = 'countdown';
+    // 全新起拍从第一小节 downbeat（第 1 拍）开始，避免沿用上一次停在中途的拍号
+    this.beatIndex = 0;
     const countInBeats = this.beatsPerBar * COUNT_IN_BARS;
     const countdownMs = Math.round(countInBeats * 60000 / this.bpm);
     const startAt = MonotonicClock.nowMs() + TRANSPORT_PREROLL_MS;
@@ -857,6 +865,8 @@ export class SessionController {
     }
     await this.prepareConnectedMembersForTransport();
     this.state = 'countdown';
+    // 恢复时把拍号对齐到下一小节 downbeat，保证 count-in 结束后主循环从第 1 拍（小节头）切入
+    this.beatIndex = Math.ceil(this.beatIndex / this.beatsPerBar) * this.beatsPerBar;
     const countInBeats = this.beatsPerBar * COUNT_IN_BARS;
     const resumeAt = MonotonicClock.nowMs() + TRANSPORT_PREROLL_MS;
     const payload: TransportResumePayload = {
@@ -1233,9 +1243,13 @@ export class SessionController {
     if (active !== undefined) {
       return await active;
     }
-    const work = ClockSyncEstimator.measureWithSender(async (id, clientMono) => {
-      return await this.sendPing(id, clientMono);
-    }, sampleCount);
+    const work = ClockSyncEstimator.measureWithSender(
+      async (id, clientMono) => {
+        return await this.sendPing(id, clientMono);
+      },
+      sampleCount,
+      (offsetMs, rttMs) => this.clockSync.recordSample(offsetMs, rttMs)
+    );
     this.clockSyncWork = work;
     try {
       return await work;

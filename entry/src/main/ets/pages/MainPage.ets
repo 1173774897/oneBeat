@@ -70,6 +70,7 @@ struct MainPage {
   @StorageLink('safeAreaTop') topSafeInset: number = 0;
   @StorageLink('safeAreaBottom') bottomSafeInset: number = 0;
   @StorageLink('selectedSceneKey') sceneKey: string = 'sunset_coast';
+  @StorageLink('btAudioActive') @Watch('onBtAudioActiveChanged') btAudioActive: boolean = false;
   @State soloTeam: boolean = false;
   private sounds: string[] = ['电子', '清脆', '低音'];
   private visualTimer: number = -1;
@@ -648,6 +649,33 @@ struct MainPage {
     .opacity(this.chromeVisible ? 1 : 0)
   }
 
+  onBtAudioActiveChanged(): void {
+    if (this.btAudioActive) {
+      promptAction.showToast({ message: '检测到蓝牙耳机输出，节拍可能延迟，建议外放或有线耳机' });
+    }
+  }
+
+  @Builder
+  bluetoothBanner() {
+    Column() {
+      Row() {
+        Text('蓝牙耳机输出 · 节拍可能延迟')
+          .fontSize(13)
+          .fontColor(INK)
+        Blank()
+        Text('建议外放 / 有线')
+          .fontSize(12)
+          .fontColor(CORAL)
+      }
+      .width('100%')
+      .padding({ left: 14, right: 14, top: 9, bottom: 9 })
+      .backgroundColor(PAPER)
+      .borderRadius(12)
+    }
+    .width('100%')
+    .padding({ left: 16, right: 16, top: this.topSafeInset + 10 })
+  }
+
   build() {
     Stack({ alignContent: Alignment.TopStart }) {
       WalkScene({
@@ -670,6 +698,9 @@ struct MainPage {
       .height('100%')
       .hitTestBehavior(HitTestMode.Transparent)
       .zIndex(50)
+      if (this.btAudioActive) {
+        this.bluetoothBanner()
+      }
       if (this.showExitConfirm) {
         this.exitConfirmOverlay()
       }
