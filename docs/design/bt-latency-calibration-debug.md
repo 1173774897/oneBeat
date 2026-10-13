@@ -632,3 +632,52 @@ ArkTS 调度并入输入侧基线，但 SPK / BT 两阶段使用相同 MIC 配�
 `AudioCapturer.getAudioTimestampInfoSync()` + 从 capturer start 起不重置的全局帧游标重建输入帧
 时钟；不能只把某个 callback buffer 生硬绑定到即时 `framePos`，也不能继续沿用 `<=0` 必为无效
 的“输入时延”语义。
+
+### 9.2 验收问题二：输入侧第一步被过严的 `[CalibClock]` 门控误杀
+
+按 8.9.5 第 2 步在 Pura X / Mate 80 Pro 上用手机外放测输入侧，页面报：
+
+- `输入侧校准失败：未取得稳定的音频硬件时间戳，请保持当前输出设备后重试`
+- `输入侧校准失败：未确认校准音越过硬件播放头，请重试`
+
+日志（两台机同一形态）：
+
+```text
+[CalibDiag] renderer NOT healthy, flush+restart, routeReset=true micRebuild=true exactClock=true
+[CalibDiag] warm-up done queueDepthFrames≈7600–8100 submittedFrames=61440
+[CalibClock] framePos=54464 submittedFrames=65536 rateHz=37k–54k ageMs≈-0.3 queueMs=231–271
+[CalibClock] crossing rate rejected rateHz=40369 targetFrame=65536 framePos=57110
+```
+
+#### 9.2.1 判读
+
+1. `queueMs` 稳定在 231–271ms，不单向膨胀。这不是 9.1 的假队列。
+2. `framePos` 按 882 帧台阶跳动（54464 / 53582 / 55346 / 57110 / 57992）。
+   `882 / 44100 = 20ms`，即华为 `getAudioTimestampInfoSync()` 的 `framePos` 按约 20ms
+   量化更新，不是时钟坏了。
+3. 暖机后 `submitted=61440`、`framePos≈54464`（约 1.23s），差 251ms，和 `leadMs=251`
+   对得上。渲染器在走，playhead 只是还没到 `targetFrame=65536`。
+4. 9.1.2 的门控是「跨 100ms、速率必须在 44.1kHz ±2%」。20ms 量化下，100ms 窗口只覆盖
+   约 5 个台阶；少/多一个台阶就把观测速率打到 37–54kHz，正好对应日志。
+5. 偶发 `rateHz=44305`（误差 0.5%）过了稳态门，66ms 后 `framePos` 从 54464 到 57110
+   （+60ms 音频 / +66ms 时间戳 = 40369Hz）。crossing 对这一下短窗直接 `return undefined`，
+   playhead 还差 ~170ms 才到 65536。于是出现第二条报错。
+6. 失败后会置 `routeReset + micRebuild`，下一轮又 flush+重建，所以日志里健康检查
+   永远过不了，看起来像渲染器坏了，其实是门控把自己打进重建循环。
+
+#### 9.2.2 修复
+
+只改 `MetronomeEngine` 的校准时钟门，不改补偿公式、打卡机和保存语义。
+
+- 速率窗口改为至少 400ms，且至少累计 0.3s 的帧差（约 15 个 20ms 台阶），再判速率。
+- 容忍从 ±2% 放宽到 ±8%：用来排除半速/冻结/乱跳，不再当晶体精度检查。
+- crossing 短窗不再一票否决。playhead 先越过 target 也要等够窗口再验收；
+  只有长窗速率仍离谱，或 `framePos` / timestamp 回退，才失败。
+
+`[CalibClock] rateHz` 过门后应落在约 40.6–47.6kHz。`queueMs` 仍应稳定，不应再逐轮膨胀。
+
+#### 9.2.3 复测
+
+同一套 8.9.5 顺序，输入侧第一步应能排到 chirp 并打出 `[CalibClock] crossed`。
+之后仍看 9.1.3：`roundTripMs` 为正、至少 2 个稳定输入样本。若时钟过了但往返仍漂，
+回到 9.1 / Capturer 锚，不要再收紧本门控。

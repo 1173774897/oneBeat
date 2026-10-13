@@ -21,6 +21,12 @@ import { DEBUG } from 'BuildProfile';
 
 const SAMPLE_RATE: number = 44100;
 const BYTES_PER_SAMPLE: number = 2;
+// getAudioTimestampInfoSync() on current Huawei devices advances framePos in
+// ~882-frame (20ms) quanta. A 100ms / ±2% gate then reports 37–54 kHz from a
+// single extra or missing quantum and rejects a healthy speaker clock.
+const CALIB_CLOCK_MIN_RATE_WINDOW_MS: number = 400;
+const CALIB_CLOCK_MIN_FRAME_DELTA: number = Math.round(SAMPLE_RATE * 0.3);
+const CALIB_CLOCK_MAX_RATE_ERROR_RATIO: number = 0.08;
 const AUDIO_PREROLL_MS: number = 650;
 const AUDIO_CLOCK_LOCK_RETRY_MS: number = 8;
 const AUDIO_CLOCK_LOCK_TIMEOUT_MS: number = 300;
@@ -1532,8 +1538,8 @@ export class MetronomeEngine {
       return undefined;
     }
     try {
-      // Millisecond uptime is too coarse for a 100ms / +/-2% rate check. Read
-      // both clock domains in nanoseconds and convert only after sampling.
+      // Nanosecond uptime keeps STARTUP−ACTIVE conversion from dominating the
+      // rate window; framePos itself is still quantized to ~20ms.
       const startupBeforeMs = systemDateTime.getUptime(systemDateTime.TimeType.STARTUP, true) / 1000000;
       const activeBeforeMs = systemDateTime.getUptime(systemDateTime.TimeType.ACTIVE, true) / 1000000;
       const info = renderer.getAudioTimestampInfoSync();
@@ -1560,15 +1566,32 @@ export class MetronomeEngine {
     }
   }
 
+  /**
+   * Observed 44.1k rate only after the window is long enough to outrun the
+   * 20ms framePos quantum. A shorter pair is noise, not a clock verdict.
+   */
+  private calibrationObservedRateHz(from: CalibrationClockSample, to: CalibrationClockSample): number | undefined {
+    const timestampDeltaMs = to.timestampMonoMs - from.timestampMonoMs;
+    const frameDelta = to.framePos - from.framePos;
+    if (timestampDeltaMs < CALIB_CLOCK_MIN_RATE_WINDOW_MS || frameDelta < CALIB_CLOCK_MIN_FRAME_DELTA) {
+      return undefined;
+    }
+    return frameDelta * 1000 / timestampDeltaMs;
+  }
+
+  private calibrationRatePlausible(observedRateHz: number): boolean {
+    const rateErrorRatio = Math.abs(observedRateHz - SAMPLE_RATE) / SAMPLE_RATE;
+    return rateErrorRatio <= CALIB_CLOCK_MAX_RATE_ERROR_RATIO;
+  }
+
   /** Require monotonic frame progress at the configured 44.1 kHz before trusting calibration. */
   private async readStableCalibrationClock(
     renderer: audio.AudioRenderer
   ): Promise<CalibrationClockSample | undefined> {
-    const MIN_RATE_WINDOW_MS = 100;
-    const MAX_RATE_ERROR_RATIO = 0.02;
     const MAX_QUEUE_MS = 2500;
     let first: CalibrationClockSample | undefined = undefined;
-    for (let retry = 0; retry < 20; retry++) {
+    // First sample plus a 400ms rate window, with slack for 20ms timestamp quanta.
+    for (let retry = 0; retry < 40; retry++) {
       const current = this.readCalibrationClockSample(renderer);
       if (current !== undefined) {
         if (first === undefined) {
@@ -1577,11 +1600,8 @@ export class MetronomeEngine {
           current.timestampMonoMs < first.timestampMonoMs) {
           return undefined;
         } else {
-          const timestampDeltaMs = current.timestampMonoMs - first.timestampMonoMs;
-          const frameDelta = current.framePos - first.framePos;
-          if (timestampDeltaMs >= MIN_RATE_WINDOW_MS && frameDelta > 0) {
-            const observedRateHz = frameDelta * 1000 / timestampDeltaMs;
-            const rateErrorRatio = Math.abs(observedRateHz - SAMPLE_RATE) / SAMPLE_RATE;
+          const observedRateHz = this.calibrationObservedRateHz(first, current);
+          if (observedRateHz !== undefined) {
             const timestampAgeMs = current.queryMonoMs - current.timestampMonoMs;
             const playedAtQuery = current.framePos +
               Math.max(0, timestampAgeMs) * SAMPLE_RATE / 1000;
@@ -1590,7 +1610,7 @@ export class MetronomeEngine {
             console.info(`[CalibClock] framePos=${current.framePos} submittedFrames=${this.audioSubmittedFrames} ` +
               `rateHz=${observedRateHz.toFixed(1)} ageMs=${timestampAgeMs.toFixed(1)} ` +
               `queueMs=${queueMs.toFixed(1)}`);
-            if (rateErrorRatio > MAX_RATE_ERROR_RATIO || queueMs < -50 || queueMs > MAX_QUEUE_MS) {
+            if (!this.calibrationRatePlausible(observedRateHz) || queueMs < -50 || queueMs > MAX_QUEUE_MS) {
               return undefined;
             }
             this.queueDepthFrames = Math.max(0, queueFrames);
@@ -1611,10 +1631,10 @@ export class MetronomeEngine {
   private async waitForCalibrationFrameCrossing(renderer: audio.AudioRenderer,
     targetFrame: number, anchor: CalibrationClockSample,
     pendingSignal: PendingCalibrationSignal): Promise<number | undefined> {
-    const MAX_RATE_ERROR_RATIO = 0.02;
     const rendererEpoch = this.rendererEpoch;
     const deadline = MonotonicClock.nowMs() + 4000;
     let previous = anchor;
+    let waitingForRateAfterCross = false;
     while (MonotonicClock.nowMs() < deadline) {
       if (this.renderer !== renderer || this.rendererEpoch !== rendererEpoch ||
         !this.rendererStarted || !this.calibrationFrameOriginExact ||
@@ -1628,12 +1648,9 @@ export class MetronomeEngine {
           current.timestampMonoMs < previous.timestampMonoMs) {
           return undefined;
         }
-        const timestampDeltaMs = current.timestampMonoMs - anchor.timestampMonoMs;
-        const frameDelta = current.framePos - anchor.framePos;
-        if (timestampDeltaMs > 0 && frameDelta > 0) {
-          const observedRateHz = frameDelta * 1000 / timestampDeltaMs;
-          const rateErrorRatio = Math.abs(observedRateHz - SAMPLE_RATE) / SAMPLE_RATE;
-          if (rateErrorRatio > MAX_RATE_ERROR_RATIO) {
+        const observedRateHz = this.calibrationObservedRateHz(anchor, current);
+        if (observedRateHz !== undefined) {
+          if (!this.calibrationRatePlausible(observedRateHz)) {
             console.warn(`[CalibClock] crossing rate rejected rateHz=${observedRateHz.toFixed(1)} ` +
               `targetFrame=${targetFrame} framePos=${current.framePos}`);
             return undefined;
@@ -1647,6 +1664,10 @@ export class MetronomeEngine {
               `presentationMonoMs=${presentationMonoMs.toFixed(1)}`);
             return presentationMonoMs;
           }
+        } else if (current.framePos >= targetFrame && !waitingForRateAfterCross) {
+          waitingForRateAfterCross = true;
+          console.info(`[CalibClock] crossed targetFrame=${targetFrame} framePos=${current.framePos} ` +
+            `waiting for ${CALIB_CLOCK_MIN_RATE_WINDOW_MS}ms rate window`);
         }
         previous = current;
       }
