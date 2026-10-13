@@ -86,32 +86,19 @@ const STORE_SCENES: StoreScene[] = [
 const PASS_PRODUCT_ID: string = 'onebeat.pass.monthly';
 const IAP_ERROR_ALREADY_OWNED: number = 1001860051;
 
-// Keep this split in sync with monthly_pass_coupon.svg (254 / 352).
-// Only the decoration stretches; live text and the action never follow a ticket curve.
-const PASS_BANNER_HEIGHT: number = 192;
-const PASS_BANNER_FACE_HEIGHT: number = 184;
 const PASS_BANNER_MAX_WIDTH: number = 460;
-const PASS_BANNER_MAIN_SHARE: string = '72%';
-const PASS_BANNER_STUB_SHARE: string = '28%';
-const PASS_BANNER_ART_WIDTH_MAX: number = 110;
-const PASS_BANNER_ART_WIDTH_SHARE: number = 0.34;
-const PASS_BANNER_ART_HEIGHT: number = 136;
-const PASS_BANNER_ART_TOP: number = 11;
-const PASS_BANNER_ART_RIGHT: number = 3;
-const PASS_BANNER_TEXT_LEFT: number = 19;
-const PASS_BANNER_TEXT_TOP: number = 19;
-const PASS_BANNER_TITLE_TOP: number = 34;
-const PASS_BANNER_TITLE_HEIGHT: number = 60;
-const PASS_BANNER_TITLE_GAP: number = 9;
-const PASS_BANNER_TITLE_INSET: number = 4;
-const PASS_BANNER_TITLE_ADVANCE: number = 4.2;
-const PASS_BANNER_DRUMS_TOP: number = 92;
-const PASS_BANNER_DRUMS_HEIGHT: number = 44;
-const PASS_BANNER_DESCRIPTION_TOP: number = 138;
-const PASS_BANNER_DESCRIPTION_HEIGHT: number = 32;
-const PASS_BANNER_DESCRIPTION_LINE_HEIGHT: number = 14;
-const PASS_BANNER_DESCRIPTION_FONT_MIN: number = 7;
-const PASS_BANNER_DESCRIPTION_FONT_MAX: number = 11;
+const PASS_BANNER_DEFAULT_WIDTH: number = 360;
+// The PNG canvas keeps transparent room around a 2.52:1 ticket. Cover-cropping
+// it into this ratio preserves the complete ink edge while removing that room.
+const PASS_BANNER_DISPLAY_RATIO: number = 2.42;
+const PASS_BANNER_STATUS_X: string = '6.2%';
+const PASS_BANNER_STATUS_Y: string = '85.2%';
+const PASS_BANNER_STATUS_WIDTH: string = '21%';
+const PASS_BANNER_STATUS_HEIGHT: string = '10%';
+const PASS_BANNER_ACTION_X: string = '78.4%';
+const PASS_BANNER_ACTION_Y: string = '59.2%';
+const PASS_BANNER_ACTION_WIDTH: string = '17.4%';
+const PASS_BANNER_ACTION_HEIGHT: string = '20.5%';
 
 // The bubble hugs two five-character phrases instead of stretching with the viewport.
 const REDEMPTION_SPEECH_WIDTH: number = 168;
@@ -139,7 +126,7 @@ struct StorePage {
   @State passAutoRenewing: boolean = false;
   @State passSource: string = '';
   @State passIapPurchaseAllowed: boolean = true;
-  @State passBannerMainWidth: number = 203;
+  @State passBannerWidth: number = PASS_BANNER_DEFAULT_WIDTH;
   @State limitedFreeCharacters: string[] = [];
   @State limitedFreeScenes: string[] = [];
   @State passCharacters: string[] = [];
@@ -863,135 +850,67 @@ struct StorePage {
     }.width('96%').height('96%')
   }
 
-  private passBannerArtWidth(): number {
-    return Math.min(PASS_BANNER_ART_WIDTH_MAX, this.passBannerMainWidth * PASS_BANNER_ART_WIDTH_SHARE);
-  }
-
-  private passBannerTitleWidth(): number {
-    return this.passBannerMainWidth - this.passBannerArtWidth() - PASS_BANNER_ART_RIGHT -
-      PASS_BANNER_TEXT_LEFT - PASS_BANNER_TITLE_GAP;
-  }
-
-  private passBannerTitleSize(): number {
-    // All outline layers share one measured size; separately auto-fitting them
-    // would misregister the edges. Leave space for the italic overhang and ink.
-    return (this.passBannerTitleWidth() - PASS_BANNER_TITLE_INSET * 2) / PASS_BANNER_TITLE_ADVANCE;
-  }
-
-  private passBannerTitleOutline(color: string, width: number): ShadowOptions[] {
-    if (width <= 0) {
-      return [];
+  private passTicketStatusLabel(): string {
+    const expires = this.passDate(this.passExpiresAt);
+    const shortExpires = expires.length >= 10 ? expires.substring(5) : '';
+    if (this.passStatus === 'CANCELED_ACTIVE' && this.passActive) {
+      return shortExpires.length > 0 ? `有效至 ${shortExpires}` : '本期仍有效';
     }
-    const radius = width * this.passBannerTitleSize() / 33;
-    // Dense circular offsets keep the sticker rim continuous without baking the text into an image.
-    const shadows: ShadowOptions[] = [];
-    for (let index = 0; index < 24; index++) {
-      const angle = index * Math.PI / 12;
-      shadows.push({ radius: 0, color, offsetX: Math.cos(angle) * radius, offsetY: Math.sin(angle) * radius });
+    if (this.passActive && this.passAutoRenewing) {
+      return shortExpires.length > 0 ? `续费至 ${shortExpires}` : '自动续费中';
     }
-    return shadows;
+    if (this.passActive && this.passSource === 'PASS_REDEMPTION') {
+      return shortExpires.length > 0 ? `赠送至 ${shortExpires}` : '赠送月卡';
+    }
+    if (this.passActive) {
+      return shortExpires.length > 0 ? `有效至 ${shortExpires}` : '已开通';
+    }
+    return '全权益通行';
   }
 
-  @Builder
-  private passBannerTitleLayer(color: string, outline: number) {
-    Text('畅游月卡').fontSize(this.passBannerTitleSize()).fontWeight(900).fontStyle(FontStyle.Italic)
-      .fontColor(color).textShadow(this.passBannerTitleOutline(color, outline))
-      .width('100%').height(PASS_BANNER_TITLE_HEIGHT).maxLines(1)
-      .padding({ left: PASS_BANNER_TITLE_INSET, right: PASS_BANNER_TITLE_INSET })
-      .accessibilityLevel('no')
-  }
-
-  @Builder
-  private passBannerTitle() {
-    Stack({ alignContent: Alignment.TopStart }) {
-      this.passBannerTitleLayer(INK, 10)
-      this.passBannerTitleLayer(LILAC, 8)
-      this.passBannerTitleLayer(INK, 1.35)
-      this.passBannerTitleLayer(PAPER, 0)
-    }.width(this.passBannerTitleWidth()).height(PASS_BANNER_TITLE_HEIGHT).clip(false)
-      .position({ x: PASS_BANNER_TEXT_LEFT, y: PASS_BANNER_TITLE_TOP })
-      .accessibilityGroup(true).accessibilityText('畅游月卡')
-      .hitTestBehavior(HitTestMode.None)
-  }
-
-  @Builder
-  private passBannerArt() {
-    Stack({ alignContent: Alignment.TopStart }) {
-      // Only show paid characters covered by the pass, not free random-pool members.
-      // Alternate face positions while clipping bodies above the live entitlement copy.
-      ComicCharacter({ avatar: 'cloud', portrait: true })
-        .width(this.passBannerArtWidth() * 0.86).height(this.passBannerArtWidth() * 0.86)
-        .rotate({ angle: -8 }).position({ x: this.passBannerArtWidth() * 0.14, y: -8 })
-      ComicCharacter({ avatar: 'lilroll', portrait: true })
-        .width(this.passBannerArtWidth() * 0.90).height(this.passBannerArtWidth() * 0.90)
-        .scale({ x: -1, y: 1 })
-        .rotate({ angle: 6 }).position({ x: -this.passBannerArtWidth() * 0.20, y: 30 })
-      ComicCharacter({ avatar: 'mismatch', portrait: true })
-        .width(this.passBannerArtWidth() * 0.90).height(this.passBannerArtWidth() * 0.90)
-        .rotate({ angle: -6 }).position({ x: this.passBannerArtWidth() * 0.24, y: 66 })
-    }.width(this.passBannerArtWidth()).height(PASS_BANNER_ART_HEIGHT).clip(true)
-      .position({ x: '100%', y: PASS_BANNER_ART_TOP })
-      .translate({ x: -this.passBannerArtWidth() - PASS_BANNER_ART_RIGHT })
-      .hitTestBehavior(HitTestMode.None).accessibilityLevel('no')
+  private passBannerScale(): number {
+    return this.passBannerWidth / PASS_BANNER_DEFAULT_WIDTH;
   }
 
   @Builder
   private passBanner() {
     Stack({ alignContent: Alignment.TopStart }) {
-      // The vector has a matching solid ink silhouette, including both notches.
-      // It contains no lettering or character art, so status and width can change independently.
-      Image($rawfile('comic/decor/monthly_pass_coupon.svg'))
-        .width('100%').height(PASS_BANNER_HEIGHT).objectFit(ImageFit.Fill).zIndex(0)
+      // The approved illustration is one composition. Only the short status and
+      // action label stay live because entitlement state changes after purchase.
+      Image($rawfile('comic/decor/monthly_pass_ticket_v2.png'))
+        .width('100%').height('100%').objectFit(ImageFit.Cover).zIndex(0)
         .hitTestBehavior(HitTestMode.None).accessibilityLevel('no')
-      Row({ space: 0 }) {
-        Stack({ alignContent: Alignment.TopStart }) {
-          this.passBannerArt()
-          Text('ONEBEAT').fontSize(9).fontWeight(900).letterSpacing(1.4)
-            .fontColor(INK).height(19).width(this.passBannerTitleWidth()).maxLines(1)
-            .position({ x: PASS_BANNER_TEXT_LEFT, y: PASS_BANNER_TEXT_TOP })
-          this.passBannerTitle()
-          Image($rawfile('comic/decor/monthly_pass_rhythm.svg'))
-            .width(this.passBannerTitleWidth()).height(PASS_BANNER_DRUMS_HEIGHT).objectFit(ImageFit.Contain)
-            .position({ x: PASS_BANNER_TEXT_LEFT, y: PASS_BANNER_DRUMS_TOP })
-            .hitTestBehavior(HitTestMode.None).accessibilityLevel('no')
-          Text(this.passDescription())
-            // Preserve the complete entitlement/date wording; shrink only when the single line needs it.
-            .fontSize(PASS_BANNER_DESCRIPTION_FONT_MAX)
-            .minFontSize(PASS_BANNER_DESCRIPTION_FONT_MIN).maxFontSize(PASS_BANNER_DESCRIPTION_FONT_MAX)
-            .heightAdaptivePolicy(TextHeightAdaptivePolicy.MIN_FONT_SIZE_FIRST)
-            .fontWeight(FontWeight.Bold).fontColor('#5D574F').lineHeight(PASS_BANNER_DESCRIPTION_LINE_HEIGHT)
-            .width('100%').height(PASS_BANNER_DESCRIPTION_HEIGHT).maxLines(1).align(Alignment.Start)
-            .padding({ left: PASS_BANNER_TEXT_LEFT, right: 16 })
-            .position({ x: 0, y: PASS_BANNER_DESCRIPTION_TOP })
-        }.width(PASS_BANNER_MAIN_SHARE).height(PASS_BANNER_FACE_HEIGHT)
-          .onAreaChange((_oldArea, area) => {
-            const width = Number(area.width);
-            if (Number.isFinite(width) && width > 0 && Math.abs(width - this.passBannerMainWidth) >= 0.5) {
-              this.passBannerMainWidth = width;
-            }
-          })
-        Column({ space: 0 }) {
-          Text('MONTHLY').fontSize(8).fontWeight(900).letterSpacing(1)
-            .fontColor(INK).height(17).width('100%').maxLines(1).textAlign(TextAlign.Center)
-          Text('PASS').fontSize(23).fontWeight(900).fontStyle(FontStyle.Italic)
-            .minFontSize(20).maxFontSize(23).heightAdaptivePolicy(TextHeightAdaptivePolicy.MIN_FONT_SIZE_FIRST)
-            .fontColor(INK).lineHeight(34).height(34).width('100%').maxLines(1).textAlign(TextAlign.Center)
-          Text(this.passActive ? '生效中' : '全权益通行').fontSize(10).fontWeight(900)
-            .fontColor(INK).height(23).width('100%').maxLines(1).textAlign(TextAlign.Center)
-          Blank()
-          // Native disabled opacity must not reach this opaque backing: it masks ticket perforations in every state.
-          Stack() {
-            Button(this.passButtonLabel(), { type: ButtonType.Normal })
-              .width('100%').height(34).padding({ left: 2, right: 2 }).fontSize(10.5).fontWeight(900)
-              .fontColor(INK).backgroundColor('#00000000').borderRadius(5)
-              .enabled(this.passIapPurchaseAllowed && !this.passActive).onClick(() => this.openPassPurchase())
-          }.width('100%').height(34).backgroundColor(PAPER)
-            .border({ width: 1.5, color: INK }).borderRadius(5).shadow(CONTROL_SHADOW).zIndex(2)
-        }.width(PASS_BANNER_STUB_SHARE).height(PASS_BANNER_FACE_HEIGHT)
-          .padding({ left: 9, right: 9, top: 23, bottom: 16 })
-      // 352 / 360 leaves the SVG's hard shadow outside the interactive face.
-      }.width('97.78%').height(PASS_BANNER_FACE_HEIGHT).zIndex(1)
-    }.width('100%').constraintSize({ maxWidth: PASS_BANNER_MAX_WIDTH }).height(PASS_BANNER_HEIGHT).clip(false)
+
+      Text(this.passTicketStatusLabel())
+        .width(PASS_BANNER_STATUS_WIDTH).height(PASS_BANNER_STATUS_HEIGHT)
+        .fontSize(7.2 * this.passBannerScale()).fontWeight(900).fontColor(INK)
+        .maxLines(1).textAlign(TextAlign.Center)
+        .position({ x: PASS_BANNER_STATUS_X, y: PASS_BANNER_STATUS_Y })
+        .hitTestBehavior(HitTestMode.None)
+
+      Button(this.passButtonLabel(), { type: ButtonType.Normal })
+        .width(PASS_BANNER_ACTION_WIDTH).height(PASS_BANNER_ACTION_HEIGHT)
+        .padding(0).fontSize(10.5 * this.passBannerScale()).fontWeight(900).fontColor(PAPER)
+        .backgroundColor('#00000000').borderRadius(18)
+        .position({ x: PASS_BANNER_ACTION_X, y: PASS_BANNER_ACTION_Y })
+        .onClick(() => {
+          if (this.passIapPurchaseAllowed && !this.passActive) {
+            this.openPassPurchase();
+          }
+        })
+    }
+    .width('100%')
+    .constraintSize({ maxWidth: PASS_BANNER_MAX_WIDTH })
+    .height(this.passBannerWidth / PASS_BANNER_DISPLAY_RATIO)
+    .clip(true)
+    .accessibilityGroup(true)
+    .accessibilityText(`畅游月卡，${this.passDescription()}，${this.passButtonLabel()}`)
+    .onAreaChange((_oldArea, area) => {
+      const width = Number(area.width);
+      if (Number.isFinite(width) && width > 0 && Math.abs(width - this.passBannerWidth) >= 0.5) {
+        this.passBannerWidth = width;
+      }
+    })
   }
 
   @Builder

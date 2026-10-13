@@ -1,5 +1,7 @@
-import { router } from '@kit.ArkUI';
+import { common } from '@kit.AbilityKit';
+import { router, promptAction } from '@kit.ArkUI';
 import { ComicCharacter, PAPER, INK, CORAL, LILAC, TEAL, CARD_SHADOW, CONTROL_SHADOW, INK_SHADOW_RADIUS } from '../components/ComicKit';
+import { isTeamWifiActive, openWirelessSettings } from '../network/join/TeamNetworkPermissions';
 
 const PLAYER_DISPLAY_NAME_KEY: string = 'playerDisplayName';
 const TEAM_HERO_HEIGHT: number = 190;
@@ -78,9 +80,27 @@ struct TeamPage {
     }, 0);
   }
 
-  private createTeam(): void {
+  private async createTeam(): Promise<void> {
     const displayName = this.validatedDisplayName();
     if (displayName.length === 0) {
+      return;
+    }
+    if (!isTeamWifiActive()) {
+      try {
+        const result = await promptAction.showDialog({
+          title: '建队前先打开 Wi-Fi',
+          message: 'OneBeat 使用 Wi-Fi 直连组队，不需要连接同一个路由器。打开后再回来创建队伍。',
+          buttons: [
+            { text: '暂不创建', color: '#625B53' },
+            { text: '去打开 Wi-Fi', color: CORAL, primary: true }
+          ]
+        });
+        if (result.index === 1) {
+          const ctx = getContext(this) as common.UIAbilityContext;
+          await openWirelessSettings(ctx);
+        }
+      } catch (_e) {
+      }
       return;
     }
     router.pushUrl({
@@ -293,7 +313,7 @@ struct TeamPage {
         .borderRadius(8)
         .shadow({ radius: INK_SHADOW_RADIUS, offsetX: 3, offsetY: 4, color: INK })
         .clip(true)
-        .onClick(() => this.createTeam())
+        .onClick(() => { void this.createTeam(); })
 
         Stack({ alignContent: Alignment.BottomEnd }) {
           Image($rawfile('comic/decor/lightning_accents.png'))

@@ -113,10 +113,25 @@ export class WifiP2pManager {
     }
   }
 
-  async prepareMemberDiscovery(): Promise<void> {
+  async prepareMemberDiscovery(targetDeviceName?: string): Promise<void> {
     await this.assertReadyForOneBeat();
     if (this.discovering) {
       return;
+    }
+    // 预热命中时缓存里可能已有队长设备，直接启动一轮并返回，省去死等首个事件。
+    if (targetDeviceName !== undefined && targetDeviceName.length > 0) {
+      try {
+        const cached = await wifiManager.getP2pPeerDevices();
+        for (let i = 0; i < cached.length; i++) {
+          if (cached[i].deviceName.trim() === targetDeviceName) {
+            wifiManager.startDiscoverDevices();
+            this.discovering = true;
+            return;
+          }
+        }
+      } catch (_e) {
+        // 读取缓存失败则退回等待首个设备事件的流程
+      }
     }
     await new Promise<void>((resolve, reject) => {
       let settled = false;
@@ -154,12 +169,13 @@ export class WifiP2pManager {
 
   async connectToLeader(invitation: P2pRoomInvitation, rejectionSignal?: Promise<Error>): Promise<string> {
     validateP2pRoomInvitation(invitation);
+    const leaderDeviceName = invitation.leaderDeviceName?.trim() ?? '';
     await this.resetPreviousMemberAttempt(invitation);
-    await this.stopDiscovery();
-    await this.prepareMemberDiscovery();
+    // 不在此处 stopDiscovery：若已预热（discovering 为 true），prepareMemberDiscovery
+    // 会直接复用现有发现结果，从而省去一次冷启动等待。
+    await this.prepareMemberDiscovery(leaderDeviceName);
     const startedAt = Date.now();
     const attempted: Set<string> = new Set();
-    const leaderDeviceName = invitation.leaderDeviceName?.trim() ?? '';
     let foundPeer = false;
     let lastError = '';
     try {
@@ -203,7 +219,7 @@ export class WifiP2pManager {
             if (lastError === JOIN_REJECTED_MESSAGE || lastError === JOIN_CONFIRM_TIMEOUT_MESSAGE) {
               throw connectionError;
             }
-            await this.prepareMemberDiscovery();
+            await this.prepareMemberDiscovery(leaderDeviceName);
           }
         }
         await sleep(900);

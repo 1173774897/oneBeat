@@ -14,8 +14,11 @@ export type MessageType =
   | 'MEMBER_UPDATE'
   | 'CLIENT_HELLO'
   | 'CLIENT_LEAVE'
+  | 'SESSION_DISBANDED'
+  | 'SESSION_DISBANDED_ACK'
   | 'RANDOM_PREVIEW_COMPLETE'
-  | 'LOBBY_READY';
+  | 'LOBBY_READY'
+  | 'BLUETOOTH_CALIBRATION_STATE';
 
 export type TransportState = 'idle' | 'countdown' | 'playing' | 'paused';
 
@@ -33,6 +36,8 @@ export interface SessionMember {
   colorSlot?: number;
   /** 队员在组队大厅已点「准备」 */
   lobbyReady?: boolean;
+  /** 当前设备正在进行耳机延迟打卡；仅用于大厅的临时状态提示。 */
+  bluetoothCalibrating?: boolean;
   rttMs: number;
   offsetMs: number;
 }
@@ -110,8 +115,20 @@ export interface ClientLeavePayload {
   reason: string;
 }
 
+export interface SessionDisbandedPayload {
+  reason: 'leader_exit';
+}
+
+export interface SessionDisbandedAckPayload {
+  received: boolean;
+}
+
 export interface LobbyReadyPayload {
   ready: boolean;
+}
+
+export interface BluetoothCalibrationStatePayload {
+  active: boolean;
 }
 
 /** 完成通知只携带抽取版本；队长从已认证连接推断队员与人物。 */

@@ -58,6 +58,9 @@
         "name": "ohos.permission.KEEP_BACKGROUND_RUNNING"
       },
       {
+        "name": "ohos.permission.RUNNING_LOCK"
+      },
+      {
         "name": "ohos.permission.GET_WIFI_INFO",
         "reason": "$string:perm_wifi_reason",
         "usedScene": {
@@ -80,6 +83,16 @@
       {
         "name": "ohos.permission.CAMERA",
         "reason": "$string:perm_camera_reason",
+        "usedScene": {
+          "abilities": [
+            "EntryAbility"
+          ],
+          "when": "inuse"
+        }
+      },
+      {
+        "name": "ohos.permission.MICROPHONE",
+        "reason": "$string:perm_microphone_reason",
         "usedScene": {
           "abilities": [
             "EntryAbility"

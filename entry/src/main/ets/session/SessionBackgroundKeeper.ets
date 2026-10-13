@@ -1,10 +1,14 @@
 import { Context, wantAgent } from '@kit.AbilityKit';
 import { backgroundTaskManager } from '@kit.BackgroundTasksKit';
 import { avSession } from '@kit.AVSessionKit';
+import { runningLock } from '@kit.BasicServicesKit';
 
 const BUNDLE_NAME: string = 'com.onebeat.app';
 const ABILITY_NAME: string = 'EntryAbility';
 const SESSION_TAG: string = 'onebeat-audio';
+const RUNNING_LOCK_NAME: string = 'com.onebeat.app.team-session';
+const RUNNING_LOCK_HOLD_MS: number = 10 * 60 * 1000;
+const RUNNING_LOCK_RENEW_MS: number = 5 * 60 * 1000;
 
 export interface TransportControlHandler {
   onPlay: () => void;
@@ -17,6 +21,8 @@ export class SessionBackgroundKeeper {
   private static operation: Promise<void> = Promise.resolve();
   private static session: avSession.AVSession | undefined = undefined;
   private static controlHandler: TransportControlHandler | undefined = undefined;
+  private static sessionRunningLock: runningLock.RunningLock | undefined = undefined;
+  private static runningLockRenewTimer: number = -1;
 
   static initialize(context: Context): void {
     SessionBackgroundKeeper.context = context;
@@ -51,6 +57,7 @@ export class SessionBackgroundKeeper {
         );
         await SessionBackgroundKeeper.ensureAvSession(showMediaCard);
         SessionBackgroundKeeper.active = true;
+        await SessionBackgroundKeeper.ensureRunningLock();
       } catch (err) {
         console.warn(`SessionBackgroundKeeper start: ${(err as Error).message}`);
       }
@@ -69,6 +76,7 @@ export class SessionBackgroundKeeper {
       } catch (err) {
         console.warn(`SessionBackgroundKeeper stop: ${(err as Error).message}`);
       } finally {
+        SessionBackgroundKeeper.releaseRunningLock();
         SessionBackgroundKeeper.active = false;
       }
     });
@@ -142,5 +150,66 @@ export class SessionBackgroundKeeper {
       console.warn(`SessionBackgroundKeeper destroyAvSession: ${(err as Error).message}`);
     }
     SessionBackgroundKeeper.session = undefined;
+  }
+
+  private static async ensureRunningLock(): Promise<void> {
+    try {
+      if (!runningLock.isSupported(runningLock.RunningLockType.BACKGROUND)) {
+        console.warn('SessionBackgroundKeeper: BACKGROUND running lock is unsupported');
+        return;
+      }
+      if (SessionBackgroundKeeper.sessionRunningLock === undefined) {
+        SessionBackgroundKeeper.sessionRunningLock = await runningLock.create(
+          RUNNING_LOCK_NAME,
+          runningLock.RunningLockType.BACKGROUND
+        );
+      }
+      SessionBackgroundKeeper.renewRunningLock();
+      if (SessionBackgroundKeeper.runningLockRenewTimer < 0) {
+        SessionBackgroundKeeper.runningLockRenewTimer = setInterval(() => {
+          SessionBackgroundKeeper.renewRunningLock();
+        }, RUNNING_LOCK_RENEW_MS);
+      }
+    } catch (err) {
+      // Long-running task and AVSession remain useful fallbacks on devices that
+      // reject the optional lock despite declaring RUNNING_LOCK permission.
+      console.warn(`SessionBackgroundKeeper running lock start: ${(err as Error).message}`);
+    }
+  }
+
+  private static renewRunningLock(): void {
+    const lock = SessionBackgroundKeeper.sessionRunningLock;
+    if (lock === undefined) {
+      return;
+    }
+    try {
+      if (lock.isHolding()) {
+        lock.unhold();
+      }
+      // A finite hold limits leakage after an abnormal process teardown; the
+      // timer renews it while the team session remains active.
+      lock.hold(RUNNING_LOCK_HOLD_MS);
+    } catch (err) {
+      console.warn(`SessionBackgroundKeeper running lock renew: ${(err as Error).message}`);
+    }
+  }
+
+  private static releaseRunningLock(): void {
+    if (SessionBackgroundKeeper.runningLockRenewTimer >= 0) {
+      clearInterval(SessionBackgroundKeeper.runningLockRenewTimer);
+      SessionBackgroundKeeper.runningLockRenewTimer = -1;
+    }
+    const lock = SessionBackgroundKeeper.sessionRunningLock;
+    SessionBackgroundKeeper.sessionRunningLock = undefined;
+    if (lock === undefined) {
+      return;
+    }
+    try {
+      if (lock.isHolding()) {
+        lock.unhold();
+      }
+    } catch (err) {
+      console.warn(`SessionBackgroundKeeper running lock stop: ${(err as Error).message}`);
+    }
   }
 }

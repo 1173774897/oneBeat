@@ -7,6 +7,7 @@ import {
   SESSION_MAX_MEMBER_COUNT,
   SESSION_TCP_PORT,
   TRANSPORT_PREPARE_TIMEOUT_MS,
+  TRANSPORT_PAUSE_PREROLL_MS,
   TRANSPORT_PREROLL_MS,
   TRANSPORT_RESTART_PREROLL_MS
 } from '../common/Constants';
@@ -14,6 +15,7 @@ import { DEBUG } from 'BuildProfile';
 import { MonotonicClock } from '../common/MonotonicClock';
 import { createMessage } from '../protocol/messages';
 import {
+  BluetoothCalibrationStatePayload,
   ClientHelloPayload,
   ClientLeavePayload,
   LobbyReadyPayload,
@@ -21,6 +23,8 @@ import {
   PingResponse,
   PongPayload,
   RandomPreviewCompletePayload,
+  SessionDisbandedAckPayload,
+  SessionDisbandedPayload,
   SessionMember,
   SessionSnapshotPayload,
   TransportPausePayload,
@@ -86,6 +90,10 @@ export const SOLO_MAX_BOT_COUNT: number = SESSION_MAX_MEMBER_COUNT - 1;
 // Publish a future deadline so peers use clock sync, not packet arrival order,
 // to switch their roster avatars. Late packets reveal immediately on receipt.
 const RANDOM_AVATAR_REVEAL_LEAD_MS: number = 250;
+const SESSION_DISBAND_ACK_TIMEOUT_MS: number = 800;
+const MEMBER_RESYNC_FAILURE_LIMIT: number = 3;
+
+type RemoteSessionEndReason = 'leader_exit' | 'connection_lost';
 
 export class SessionController {
   readonly sessionId: string;
@@ -112,6 +120,13 @@ export class SessionController {
   private nextTransportPrepareId: number = 0;
   private transportPrepareWaiter: TransportPrepareWaiter | undefined = undefined;
   private clockSyncWork: Promise<SyncSample> | undefined = undefined;
+  private transportPauseTimer: number = -1;
+  private remoteSessionEndReason: RemoteSessionEndReason | undefined = undefined;
+  private readonly pendingDisbandAcks: Set<string> = new Set();
+  private disbandAckResolver: (() => void) | undefined = undefined;
+  private disbandAckTimer: number = -1;
+  private consecutiveResyncFailures: number = 0;
+  private appInBackground: boolean = false;
 
   bpm: number = 120;
   beatsPerBar: number = 4;
@@ -148,6 +163,7 @@ export class SessionController {
         avatarKey: this.avatarKey,
         colorSlot: -1,
         lobbyReady: false,
+        bluetoothCalibrating: false,
         rttMs: 0,
         offsetMs: 0
       };
@@ -208,17 +224,18 @@ export class SessionController {
 
   allTeamMembersLobbyReady(): boolean {
     const members = this.getMembers();
-    let teamMemberCount: number = 0;
     for (let i = 0; i < members.length; i++) {
       if (members[i].id === 'leader') {
         continue;
       }
-      teamMemberCount += 1;
       if (members[i].lobbyReady !== true) {
         return false;
       }
     }
-    return teamMemberCount > 0;
+    // A multiplayer room with no followers has nobody left to wait for, so the
+    // leader may depart alone. Once a follower joins, every follower must still
+    // be ready before this invariant becomes true.
+    return true;
   }
 
   canLeaderStartWalk(): boolean {
@@ -415,11 +432,38 @@ export class SessionController {
     await this.sendToLeader(createMessage('LOBBY_READY', { ready: ready } as LobbyReadyPayload));
   }
 
+  /** Publish only the active measurement window; previews and saved results are settled states. */
+  async setBluetoothCalibrationActive(active: boolean): Promise<void> {
+    if (active && (this.lobbyDeparted || this.state !== 'idle')) {
+      return;
+    }
+    const memberId = this.getLocalMemberId();
+    if (memberId.length === 0) {
+      return;
+    }
+    const member = this.connectionMembers.get(memberId);
+    if (member === undefined || member.bluetoothCalibrating === active) {
+      return;
+    }
+    member.bluetoothCalibrating = active;
+    if (this.isLeader) {
+      await this.broadcastSnapshot();
+      return;
+    }
+    this.notifyUi();
+    await this.sendToLeader(createMessage('BLUETOOTH_CALIBRATION_STATE', {
+      active: active
+    } as BluetoothCalibrationStatePayload));
+  }
+
   async departLobbyToWalk(): Promise<void> {
     if (!this.isLeader || this.soloTeam || !this.canLeaderStartWalk()) {
       return;
     }
     this.lobbyDeparted = true;
+    this.connectionMembers.forEach((member: SessionMember) => {
+      member.bluetoothCalibrating = false;
+    });
     await this.broadcastSnapshot();
   }
 
@@ -427,6 +471,7 @@ export class SessionController {
     if (!this.isLeader || (!this.soloTeam && !this.lobbyDeparted)) {
       return;
     }
+    this.cancelScheduledPauseState();
     if (!this.soloTeam) {
       const pausePayload: TransportPausePayload = {
         pauseAtLeaderMonoMs: MonotonicClock.nowMs(),
@@ -439,6 +484,7 @@ export class SessionController {
     this.lobbyDeparted = false;
     this.connectionMembers.forEach((member: SessionMember) => {
       member.lobbyReady = false;
+      member.bluetoothCalibrating = false;
     });
     AppStorage.setOrCreate('lastTransportMessage', '');
     await this.broadcastSnapshot();
@@ -543,6 +589,7 @@ export class SessionController {
       avatarKey: this.avatarKey,
       colorSlot: -1,
       lobbyReady: false,
+      bluetoothCalibrating: false,
       rttMs: 0,
       offsetMs: 0
     };
@@ -572,6 +619,7 @@ export class SessionController {
       avatarKey: available[0],
       colorSlot: -1,
       lobbyReady: false,
+      bluetoothCalibrating: false,
       rttMs: 0,
       offsetMs: 0
     };
@@ -652,6 +700,7 @@ export class SessionController {
     this.leaderHost = host;
     this.tcpPort = port;
     this.client.setHandler((message) => this.onMemberMessage(message));
+    this.client.setCloseHandler(() => this.onMemberConnectionClosed());
     await this.client.connect(host, port);
     await this.client.send(createMessage('CLIENT_HELLO', {
       displayName: this.displayName,
@@ -674,9 +723,13 @@ export class SessionController {
     this.stopRandomAvatarRevealTimer();
     this.revealedRandomAvatars.clear();
     this.finishTransportPreparation();
+    this.cancelScheduledPauseState();
     this.stopResyncLoop();
     if (this.isLeader) {
       this.stopHeartbeatSweep();
+      // A deliberate leader exit is a room-level event. Send it before closing
+      // sockets so members can distinguish disbanding from a transient link loss.
+      await this.broadcastSessionDisbanded();
       await this.server.stop();
       this.authenticatedConnections.clear();
       this.connectionLastSeenMs.clear();
@@ -686,6 +739,40 @@ export class SessionController {
       await this.client.disconnect();
     }
     this.notifyUi();
+  }
+
+  getRemoteSessionEndReason(): RemoteSessionEndReason | undefined {
+    return this.remoteSessionEndReason;
+  }
+
+  hasConnectedFollowers(): boolean {
+    return this.authenticatedConnections.size > 0;
+  }
+
+  handleAppForeground(): void {
+    this.appInBackground = false;
+    this.consecutiveResyncFailures = 0;
+    if (this.remoteSessionEndReason !== undefined) {
+      return;
+    }
+    if (this.isLeader) {
+      const now = MonotonicClock.nowMs();
+      // Ability timers may be frozen in the background. Give sockets that are
+      // still open a fresh heartbeat window before the resumed sweep runs.
+      this.authenticatedConnections.forEach((connectionId: string) => {
+        this.connectionLastSeenMs.set(connectionId, now);
+      });
+      return;
+    }
+    // Do not wait up to RESYNC_INTERVAL_MS after foregrounding to prove that a
+    // half-open P2P/TCP path is still usable.
+    if (this.clockSyncWork === undefined) {
+      void this.runLightResync();
+    }
+  }
+
+  handleAppBackground(): void {
+    this.appInBackground = true;
   }
 
   async updateBpm(next: number): Promise<void> {
@@ -701,8 +788,13 @@ export class SessionController {
 
   async updateSoundId(next: number): Promise<void> {
     if (!this.isLeader) { return; }
+    const restartRunningTransport = this.state === 'playing' || this.state === 'countdown';
     this.soundId = next % 3;
-    await this.broadcastSnapshot();
+    if (!restartRunningTransport) {
+      await this.broadcastSnapshot();
+      return;
+    }
+    await this.restartRunningTransportAfterConfiguration();
   }
 
   async updateAvatar(key: string): Promise<void> {
@@ -774,6 +866,7 @@ export class SessionController {
     // Configure every peer first, then restart on a shared future downbeat. Applying
     // on packet receipt would let network latency put devices in different bars.
     // 发送前先强制队员重采样时钟偏移，避免重启时刻 offset 陈旧导致即使有充足 preroll 仍偏。
+    this.cancelScheduledPauseState();
     await this.prepareConnectedMembersForTransport();
     this.state = 'countdown';
     await this.broadcastSnapshot();
@@ -797,11 +890,16 @@ export class SessionController {
 
   async updateRhythm(rhythm: number): Promise<void> {
     if (!this.isLeader || rhythm < 0 || rhythm > 3) { return; }
+    const restartRunningTransport = this.state === 'playing' || this.state === 'countdown';
     this.rhythm = rhythm;
     if (rhythm >= 0 && rhythm <= 2) {
       this.beatPointStates = beatPointStatesForRhythm(rhythm, this.beatsPerBar);
     }
-    await this.broadcastSnapshot();
+    if (!restartRunningTransport) {
+      await this.broadcastSnapshot();
+      return;
+    }
+    await this.restartRunningTransportAfterConfiguration();
   }
 
   async updateDrumProgram(program: string): Promise<void> {
@@ -827,6 +925,7 @@ export class SessionController {
     if (!this.isLeader) {
       return 0;
     }
+    this.cancelScheduledPauseState();
     await this.prepareConnectedMembersForTransport();
     this.state = 'countdown';
     // 全新起拍从第一小节 downbeat（第 1 拍）开始，避免沿用上一次停在中途的拍号
@@ -850,19 +949,24 @@ export class SessionController {
     if (!this.isLeader) {
       return;
     }
-    this.state = 'paused';
+    await this.prepareConnectedMembersForTransport();
+    const pauseAt = MonotonicClock.nowMs() + TRANSPORT_PAUSE_PREROLL_MS;
     const payload: TransportPausePayload = {
-      pauseAtLeaderMonoMs: MonotonicClock.nowMs(),
+      pauseAtLeaderMonoMs: pauseAt,
       beatIndex: this.beatIndex
     };
-    await this.sendToAll(createMessage('TRANSPORT_PAUSE', payload));
-    await this.broadcastSnapshot();
+    const wire = createMessage('TRANSPORT_PAUSE', payload);
+    AppStorage.setOrCreate('lastTransportMessage', JSON.stringify(wire));
+    this.schedulePauseState(payload);
+    this.notifyUi();
+    await this.sendToAll(wire);
   }
 
   async resumeTransport(): Promise<number> {
     if (!this.isLeader) {
       return 0;
     }
+    this.cancelScheduledPauseState();
     await this.prepareConnectedMembersForTransport();
     this.state = 'countdown';
     // 恢复时把拍号对齐到下一小节 downbeat，保证 count-in 结束后主循环从第 1 拍（小节头）切入
@@ -941,6 +1045,12 @@ export class SessionController {
       void connection.close();
       return;
     }
+    if (message.type === 'SESSION_DISBANDED_ACK') {
+      if (this.pendingDisbandAcks.delete(connection.id) && this.pendingDisbandAcks.size === 0) {
+        this.finishDisbandAckWait();
+      }
+      return;
+    }
     if (message.type === 'CLIENT_LEAVE') {
       const removed = this.connectionMembers.delete(connection.id);
       this.authenticatedConnections.delete(connection.id);
@@ -993,6 +1103,21 @@ export class SessionController {
       void this.broadcastSnapshot();
       return;
     }
+    if (message.type === 'BLUETOOTH_CALIBRATION_STATE') {
+      const calibrationPayload = message.payload as BluetoothCalibrationStatePayload;
+      const member = this.connectionMembers.get(connection.id);
+      if (member === undefined || calibrationPayload === undefined || calibrationPayload === null ||
+        typeof calibrationPayload.active !== 'boolean' ||
+        (calibrationPayload.active && (this.lobbyDeparted || this.state !== 'idle'))) {
+        return;
+      }
+      if (member.bluetoothCalibrating === calibrationPayload.active) {
+        return;
+      }
+      member.bluetoothCalibrating = calibrationPayload.active;
+      void this.broadcastSnapshot();
+      return;
+    }
     if (message.type === 'TRANSPORT_READY') {
       const ready = message.payload as TransportPreparePayload;
       const waiter = this.transportPrepareWaiter;
@@ -1032,6 +1157,7 @@ export class SessionController {
         avatarKey: allowedAvatar,
         colorSlot: -1,
         lobbyReady: false,
+        bluetoothCalibrating: false,
         rttMs: 0,
         offsetMs: 0
       };
@@ -1069,6 +1195,18 @@ export class SessionController {
   }
 
   private onMemberMessage(message: WireMessage): void {
+    if (message.type === 'SESSION_DISBANDED') {
+      const payload = message.payload as SessionDisbandedPayload;
+      if (payload === undefined || payload === null ||
+        payload.reason !== 'leader_exit' || this.remoteSessionEndReason !== undefined) {
+        return;
+      }
+      // Mark the reason before awaiting ACK so the following socket close cannot
+      // downgrade an explicit room disband into a generic connection-loss event.
+      this.remoteSessionEndReason = 'leader_exit';
+      void this.acknowledgeAndApplySessionDisband();
+      return;
+    }
     if (message.type === 'PONG') {
       const pong = message.payload as PongPayload;
       const resolver = this.pendingPings.get(pong.id);
@@ -1088,18 +1226,21 @@ export class SessionController {
       return;
     }
     if (message.type === 'TRANSPORT') {
+      this.cancelScheduledPauseState();
       this.state = 'countdown';
       AppStorage.setOrCreate('lastTransportMessage', JSON.stringify(message));
       this.notifyUi();
       return;
     }
     if (message.type === 'TRANSPORT_PAUSE') {
-      this.state = 'paused';
+      const payload = message.payload as TransportPausePayload;
       AppStorage.setOrCreate('lastTransportMessage', JSON.stringify(message));
+      this.schedulePauseState(payload);
       this.notifyUi();
       return;
     }
     if (message.type === 'TRANSPORT_RESUME') {
+      this.cancelScheduledPauseState();
       this.state = 'countdown';
       AppStorage.setOrCreate('lastTransportMessage', JSON.stringify(message));
       this.notifyUi();
@@ -1117,6 +1258,81 @@ export class SessionController {
     } catch (_e) {
       // Socket close detection remains the fallback for abrupt disconnects.
     }
+  }
+
+  private async broadcastSessionDisbanded(): Promise<void> {
+    const message = createMessage('SESSION_DISBANDED', {
+      reason: 'leader_exit'
+    } as SessionDisbandedPayload);
+    this.pendingDisbandAcks.clear();
+    const connections = this.server.getConnections();
+    for (let i = 0; i < connections.length; i++) {
+      if (this.authenticatedConnections.has(connections[i].id)) {
+        this.pendingDisbandAcks.add(connections[i].id);
+      }
+    }
+    await this.server.broadcast(async (connection: SessionPeerConnection) => {
+      if (!this.authenticatedConnections.has(connection.id)) {
+        return;
+      }
+      try {
+        await connection.send(message);
+      } catch (err) {
+        // One stale peer must not prevent the leader from notifying and closing
+        // every other member connection during room teardown.
+        console.warn(`Session disband notify failed for ${connection.id}: ${(err as Error).message}`);
+      }
+    });
+    if (this.pendingDisbandAcks.size === 0) {
+      return;
+    }
+    await new Promise<void>((resolve: () => void) => {
+      this.disbandAckResolver = resolve;
+      this.disbandAckTimer = setTimeout(() => this.finishDisbandAckWait(), SESSION_DISBAND_ACK_TIMEOUT_MS);
+    });
+    if (this.pendingDisbandAcks.size > 0) {
+      console.warn(`Session disband ACK timeout: pending=${Array.from(this.pendingDisbandAcks).join(',')}`);
+    }
+    this.pendingDisbandAcks.clear();
+  }
+
+  private async acknowledgeAndApplySessionDisband(): Promise<void> {
+    try {
+      await this.client.send(createMessage('SESSION_DISBANDED_ACK', {
+        received: true
+      } as SessionDisbandedAckPayload));
+    } catch (err) {
+      console.warn(`Session disband ACK failed: ${(err as Error).message}`);
+    }
+    this.applyRemoteSessionEnd();
+  }
+
+  private onMemberConnectionClosed(): void {
+    if (this.remoteSessionEndReason !== undefined) {
+      return;
+    }
+    // There is no reconnect protocol for an established room. Leaving a stale
+    // roster visible would imply a live team that can no longer receive control.
+    this.remoteSessionEndReason = 'connection_lost';
+    this.applyRemoteSessionEnd();
+  }
+
+  private applyRemoteSessionEnd(): void {
+    this.cancelScheduledPauseState();
+    this.stopResyncLoop();
+    this.state = 'idle';
+    AppStorage.setOrCreate('lastTransportMessage', '');
+    this.notifyUi();
+  }
+
+  private finishDisbandAckWait(): void {
+    if (this.disbandAckTimer >= 0) {
+      clearTimeout(this.disbandAckTimer);
+      this.disbandAckTimer = -1;
+    }
+    const resolve = this.disbandAckResolver;
+    this.disbandAckResolver = undefined;
+    resolve?.();
   }
 
   private applySnapshot(snapshot: SessionSnapshotPayload): void {
@@ -1303,7 +1519,7 @@ export class SessionController {
   }
 
   private removeStaleMembers(): void {
-    if (!this.isLeader) {
+    if (!this.isLeader || this.appInBackground) {
       return;
     }
     const now = MonotonicClock.nowMs();
@@ -1347,10 +1563,39 @@ export class SessionController {
       } else {
         this.clockSync.applySample(sample);
       }
+      this.consecutiveResyncFailures = 0;
       this.scheduleRandomAvatarReveals();
       this.notifyUi();
     } catch (_e) {
-      // ignore transient resync errors
+      this.consecutiveResyncFailures += 1;
+      if (this.consecutiveResyncFailures >= MEMBER_RESYNC_FAILURE_LIMIT &&
+        this.remoteSessionEndReason === undefined) {
+        // A TCP socket can remain locally "connected" after Wi-Fi P2P vanished.
+        // Repeated unanswered application pings are the authoritative fallback.
+        this.remoteSessionEndReason = 'connection_lost';
+        this.applyRemoteSessionEnd();
+      }
+    }
+  }
+
+  private schedulePauseState(payload: TransportPausePayload): void {
+    this.cancelScheduledPauseState();
+    const offsetMs = this.isLeader ? 0 : this.clockSync.getOffsetMs();
+    const localPauseAt = payload.pauseAtLeaderMonoMs - offsetMs;
+    this.transportPauseTimer = setTimeout(() => {
+      this.transportPauseTimer = -1;
+      this.state = 'paused';
+      this.notifyUi();
+      if (this.isLeader) {
+        void this.broadcastSnapshot();
+      }
+    }, Math.max(0, localPauseAt - MonotonicClock.nowMs()));
+  }
+
+  private cancelScheduledPauseState(): void {
+    if (this.transportPauseTimer >= 0) {
+      clearTimeout(this.transportPauseTimer);
+      this.transportPauseTimer = -1;
     }
   }
 

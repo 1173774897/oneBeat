@@ -4,16 +4,23 @@ import { LineCodec } from '../../protocol/codec';
 import { WireMessage } from '../../protocol/messages';
 
 export type ClientMessageHandler = (message: WireMessage) => void;
+export type ClientClosedHandler = () => void;
 
 export class SessionClient {
   private tcp: socket.TCPSocket | undefined = undefined;
   private readonly codec: LineCodec = new LineCodec();
   private handler: ClientMessageHandler = () => {
   };
+  private closeHandler: ClientClosedHandler = () => {
+  };
   private connected: boolean = false;
 
   setHandler(handler: ClientMessageHandler): void {
     this.handler = handler;
+  }
+
+  setCloseHandler(handler: ClientClosedHandler): void {
+    this.closeHandler = handler;
   }
 
   isConnected(): boolean {
@@ -31,7 +38,14 @@ export class SessionClient {
       }
     });
     tcp.on('close', () => {
+      const unexpectedlyClosed = this.tcp === tcp && this.connected;
       this.connected = false;
+      if (this.tcp === tcp) {
+        this.tcp = undefined;
+      }
+      if (unexpectedlyClosed) {
+        this.closeHandler();
+      }
     });
     const address: socket.NetAddress = {
       address: host,

@@ -8,6 +8,7 @@ const TEAM_NETWORK_USER_PERMISSIONS: Permissions[] = [
 
 const CAMERA_PERMISSION: Permissions = 'ohos.permission.CAMERA';
 const BLUETOOTH_PERMISSION: Permissions = 'ohos.permission.ACCESS_BLUETOOTH';
+const MICROPHONE_PERMISSION: Permissions = 'ohos.permission.MICROPHONE';
 
 function isGranted(status: number): boolean {
   return status === abilityAccessCtrl.GrantStatus.PERMISSION_GRANTED;
@@ -70,6 +71,14 @@ export async function verifyTeamNetworkAccess(): Promise<boolean> {
   return canIUse('SystemCapability.Communication.WiFi.P2P') && wifiManager.isWifiActive();
 }
 
+export function isTeamWifiActive(): boolean {
+  try {
+    return wifiManager.isWifiActive();
+  } catch (_e) {
+    return false;
+  }
+}
+
 export function teamNetworkAccessUnavailableHint(): string {
   if (!canIUse('SystemCapability.Communication.WiFi.P2P')) {
     return '当前设备不支持 Wi-Fi P2P，无法使用多人练习。';
@@ -107,4 +116,15 @@ export function bluetoothPermissionDeniedHint(): string {
 
 export function cameraPermissionDeniedHint(): string {
   return '扫码加入需要「相机」权限，请在系统弹窗中允许或到应用设置中开启。';
+}
+
+export async function ensureMicrophonePermission(context: common.UIAbilityContext): Promise<boolean> {
+  const atManager = abilityAccessCtrl.createAtManager();
+  const tokenId = context.applicationInfo.accessTokenId;
+  const missing = await collectMissingPermissions(atManager, tokenId, [MICROPHONE_PERMISSION]);
+  return await requestPermissions(context, missing);
+}
+
+export function microphonePermissionDeniedHint(): string {
+  return '麦克风回环测时需要「麦克风」权限，请在系统弹窗中允许或到应用设置中开启。';
 }

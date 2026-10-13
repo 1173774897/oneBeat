@@ -6,6 +6,8 @@
     "pages/MemberJoinPage",
     "pages/MainPage",
     "pages/DrumMachinePage",
+    "pages/AudioCalibrationPage",
+    "pages/MicLoopbackCalibrationPage",
     "pages/StorePage",
     "pages/PrivacyPage"
   ]

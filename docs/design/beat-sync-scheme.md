@@ -2,7 +2,7 @@
 
 > 本文档描述 OneBeat（多设备同步节拍器）如何在多台 HarmonyOS 设备之间，把节拍声对齐到**亚毫秒级**。
 >
-> 涉及模块：时钟同步（`ClockSync`）、Transport 调度（`SessionController` / `AppSession`）、音频引擎（`MetronomeEngine`）、输出设备监测（`AudioOutputMonitor`）、绝对延迟校准（对齐法，方案）。
+> 涉及模块：时钟同步（`ClockSync`）、Transport 调度（`SessionController` / `AppSession`）、音频引擎（`MetronomeEngine`）、输出设备监测（`AudioOutputMonitor`）、绝对延迟补偿（自动估算 + 手动校准）。
 
 ---
 
@@ -108,13 +108,30 @@ missedBeats = ceil((now - localStart) / interval)
 localStart += missedBeats * interval
 ```
 
-随后按 `audioDelay` 延迟启动音频流：
+首次播放时按 `audioDelay` 延迟启动物理音频流：
 
 ```text
 audioDelay = max(0, localStart - now - AUDIO_PREROLL_MS)   // AUDIO_PREROLL_MS = 650ms
 ```
 
-> 之所以留 650ms 的 preroll，是为了给「停旧渲染器 + 启动新渲染器 + 等硬件时间戳」留足余量（见 §6 和 §9.4）。
+渲染器一旦进入 `RUNNING`，播放、暂停、恢复和改 BPM 都不再调用
+`stop / flush / start`。写回调持续输出：播放时填节拍内容，暂停时填 dither floor；
+控制命令只是在持续增长的提交帧坐标中安排一个 `targetFrame`，到达该帧时切换内容时间轴。
+
+650ms 的 preroll 用于首次启动时建立硬件时间戳，也给持续流模式留下足够的网络握手和已提交缓冲余量。
+
+### 4.3 共享暂停时刻
+
+暂停也不是收到消息后立即停止。队长先重采样时钟，再广播未来的
+`pauseAtLeaderMonoMs = now + TRANSPORT_PAUSE_PREROLL_MS`。各设备将其换算为本地可闻时刻，
+并在下面的硬件帧边界把节拍内容切换为 dither floor：
+
+```text
+hardwarePauseAt = localPauseAt - outputLatencyMs
+targetFrame     = renderedFrame(now) + (hardwarePauseAt - now) * SAMPLE_RATE / 1000
+```
+
+到 `localPauseAt` 时才把逻辑 transport 状态切成 `paused`。因此设备间暂停边界与恢复/改拍一样使用共享时钟，而物理 renderer 和蓝牙流保持存活。
 
 ---
 
@@ -193,32 +210,119 @@ try {
 | `AudioLatencyType.LATENCY_TYPE_ALL` | ✅ 可用，但「硬件」只到手机蓝牙芯片，不含空中链路 |
 | `createAudioGroup`（音频工作组） | ❌ HarmonyOS NEXT 无此接口（`openharmony` / `hms` 均搜不到） |
 
-### 5.6 绝对延迟校准（对齐法，方案）
+### 5.6 绝对延迟补偿：自动估算 + 手动校准
 
-> 本节为**方案设计**，尚未落地代码。目标从「设备间相对同步」改为「每台设备补偿自己的**绝对延迟**」——因为蓝牙耳机要跟**画面**同步，而画面与外放都锁在同一个墙钟上，所以对齐蓝牙到外放/画面，就等于对齐到绝对墙钟。
+> 本节已落地代码。目标从「设备间相对同步」改为「每台设备补偿自己的**绝对延迟**」——因为蓝牙耳机要跟**画面**同步，而画面与外放都锁在同一个墙钟上，所以对齐蓝牙到外放/画面，就等于对齐到绝对墙钟。
+>
+> 补偿字段只有一个 `calibrationMs`（持久化为 `outputCompensationMs`，见 `AudioLatencyPersistence`），只在**蓝牙 A2DP 激活**时被 `readOutputLatencyOffsetMs()` 读取；外放 / 有线始终只用系统 `getLatency()`。它的来源是两种校准方法，二者**语义不同**，见下。
 
 **目标与公式**
 
 ```text
 D_i(绝对) = D_phone + D_bt_link
-D_phone   ：手机侧时延，可用 getAudioTimestampInfoSync / getLatency(LATENCY_TYPE_ALL) 已知化
+D_phone   ：手机侧时延，getLatency(LATENCY_TYPE_ALL) 已知化（含蓝牙链路估算）
 D_bt_link ：蓝牙空中链路 + 耳机 DAC，系统不可见，需校准测得
-补偿       ：把蓝牙流的调度时刻提前 D_i（audibleStart = localStart - D_i）
+补偿       ：把蓝牙流的调度时刻提前 D_i（hardwareStartAt = localAudibleStart - outputLatencyMs）
 ```
 
 参考系是墙钟 T：画面闪烁、外放都调度在 T，所以对齐后三者同时到用户。
 
-**交互设计（对齐法，一次性 ~30 秒）**
+**两种校准方法：同一个补偿字段，但测的不是同一条链路**
 
-1. 进入校准页，触发一个低频「试验节拍器」（如 40 BPM），**画面闪烁 + 蓝牙 click 同时**按同一墙钟 T 调度。
-2. 用户拖一个「偏移」滑杆（步进 1ms，范围 ±300ms），直到「看起来、听起来」同步。
-3. 重复 3 轮，取**中位数**收敛（对齐是归零任务，无反应时，精度 ±5~15ms）。
-4. 保存 `outputLatencyOffset`（绝对语义，单位 ms），按「设备型号 + 耳机型号 + 编解码器」为 key 持久化。
-5. 提供「对齐前 / 对齐后」试听预览，让用户确认效果。
+| 校准方法 | 页面 / 模块 | 测量对象 | 计算公式 | 语义是否 = 输出补偿 |
+|---|---|---|---|---|
+| 打卡机（单程输出） | `AudioCalibrationPage` | app → 耳朵 | `resultMs = max(0, mean(敲击时刻 − 计划节拍时刻))` | ✅ 是 |
+| mic 回环（往返） | `MicLoopbackCalibrationPage` / `MicLoopbackCalibrator` | Renderer 呈现目标 → 耳朵 → 麦克风 | `latencyMs = chirp到达麦克风 − chirp呈现目标时刻` | ❌ 否（含输入侧） |
+
+**打卡机（单程输出，输出补偿的正确语义）**
+
+用户跟着 120 BPM 节拍敲击，取「敲击时刻 − 计划节拍时刻」的均值并 clamp 到 ≥0：
+
+```text
+resultMs = max(0, mean(敲击时刻 − 计划节拍时刻))
+```
+
+这条路只有「app → 耳机 → 耳朵」的**输出**一段，测到的正是 `outputLatencyMs` 要补偿的那个量。
+
+**mic 回环（往返，含输入侧）**
+
+`MicLoopbackCalibrator` 只创建 `AudioCapturer`。耳机测试用的已知 chirp 由
+`MetronomeEngine.scheduleCalibrationSignal()` 注入会话的持久 Renderer，并按该 Renderer 的
+`targetFrame` 返回 chirp 首帧的 **renderer-presentation 目标时刻**。这与正式播放的帧调度基准
+一致；`writeData` 只是提前把数据填进软件队列，若以提交时刻起算，会把队列深度误计入补偿并在
+正式播放时重复提前。
+手机麦克风同时采集，再用互相关（匹配滤波）定位 chirp 到达麦克风的采样下标 `onset`：
+
+```text
+latencyMs = (captureStartMonoMs + onset / fs * 1000) − calibrationSignalScheduledAtMs
+```
+
+这条路 = 输出时延 + 声学（≈0）+ **麦克风输入采集时延**（麦克风 → ADC → 输入缓冲 → AEC/降噪 → readData 回调）。因此它天然比打卡机多出整段输入侧，数值常大几百 ms，**不能直接当输出补偿**（会过度补偿）。若要用它，需先单独测一次输入侧时延并扣除。
+
+耳机回环开始后先做最多 3 次对位探测，根据互相关峰相对相关底噪的 `corrSnrDb` 实时提示
+“还没听清 / 已经听到 / 位置很好”。正式阶段在同一个 Capturer 与持久 Renderer 上连续测 4 次：
+
+- 每次 `corrSnrDb >= 16dB` 才算成功定位；
+- 每次探测都清空局部采集片段，并以第一个新 `readData` 缓冲重新建立采集首帧时间锚点。互相关计算会
+  短暂占用 ArkTS 线程并延迟或丢弃采集回调，因此后续探测不能用整次测量的累计采样数推导时间；
+- 至少 3 次成功才产出结果，保存值取成功样本的中位数；
+- 四次全部定位但出现一次明显离群时，选择最紧的连续三次作为稳健簇；只有该三次极差不超过
+  30ms、并且与全部四次极差至少相差 15ms 时才剔除离群值，避免随意删除均匀分布的真实抖动；
+- 结果卡显示定位次数、稳健簇大小、相关置信度中位数和稳健极差。稳健极差不超过 10ms 为
+  “结果稳定”，不超过 30ms 为“结果可用”；更大的波动会如实提示，但至少三次定位成功后仍允许
+  保存中位数，因为固定位置无法消除蓝牙缓冲自身的短时波动；
+- UI 不能再用普通波形能量信噪比评价质量，因为弱漏音经 500ms chirp 的匹配滤波积分后仍可能可靠定位。
+
+输入侧校准与耳机回环都固定使用 `SOURCE_TYPE_MIC`。二者相减的前提是经过同一种系统麦克风
+处理链；不能让一侧使用 `SOURCE_TYPE_UNPROCESSED`、另一侧回退为 `SOURCE_TYPE_MIC`。
+即使音源类型一致，外放和蓝牙路由下的 AEC、降噪与缓冲仍可能不同。若耳机回环值小于已保存的
+输入侧值，说明差分的前提不成立；该负值是无效测量，不得截断为 0 后保存。界面必须保留两个原始值并
+要求重测两步。
+
+输入侧校准要求首选媒体输出明确为手机内置 `SPEAKER`；仅仅“不是蓝牙”不够，有线、USB、听筒
+同样会被拒绝。chirp 由 `AppSession.metronome` 的持久
+Renderer 播放，以同一种 renderer-presentation 帧时钟测得“外放输出 + 麦克风输入”，
+再扣除该次 Renderer 返回的 `LATENCY_TYPE_HARDWARE`。帧时钟已在“写入硬件”
+边界，软件处理段已经过去，因此不能再扣包含 SOFTWARE 的 `LATENCY_TYPE_ALL`。
+它只用来估计麦克风输入链路，
+不会把外放路由的 Renderer 队列当成耳机输出补偿。
+
+**校准 Renderer 与行进 Renderer 的同一性约束**
+
+两种耳机输出测量都必须使用 `AppSession.metronome` 持有的同一个 `AudioRenderer`：
+
+- 打卡机通过 `scheduleLatencyTapMeasurement()` 在该 Renderer 上播放 120 BPM 测量节拍；
+- 麦克风回环通过 `scheduleMicLoopbackSignal()` / `scheduleCalibrationSignal()` 把 chirp 混入该 Renderer；
+- 两种页面保存成功后都调用 `keepLatencyCalibrationRendererAlive()`，把
+  `keepRendererAliveForSession` 置为 `true`；
+- 页面退出时 `stopLatencyCalibration()` 只调用 `metronome.pause()`：停止节拍内容但继续提交
+  dither floor，不执行 `stop / flush / release`；
+- 进入行进页后，`scheduleFromLeaderStart()` 复用仍在 `RUNNING` 的 Renderer，只在持续帧坐标上
+  安排行进节拍的 `targetFrame`。
+
+因此正常路径中延续的不只是同一种 Renderer 配置，而是同一个 Renderer 实例、同一个 stream ID、
+同一条持续增长的帧时钟和同一条 A2DP 缓冲链路。蓝牙断开/重连、音频中断后的异常恢复或退出队伍
+会破坏这条同一性；其中蓝牙重连必须提示重新测量。
+
+**播放端接法（`readOutputLatencyOffsetMs()`）**
+
+```text
+蓝牙 A2DP 激活：
+  已校准 → outputLatencyMs = calibrationMs（打卡机或 mic 回环写入的值）
+  未校准 → outputLatencyMs = getLatency(LATENCY_TYPE_ALL) + estimateBluetoothLinkLatencyMs()
+外放 / 有线：
+  outputLatencyMs = getLatency(LATENCY_TYPE_ALL)   // 只用系统值，不碰校准值
+```
+
+随后 `hardwareStartAt = localAudibleStart - outputLatencyMs`（§6.2），把蓝牙流调度提前。这个「蓝牙才用校准值」的边界必须保留，否则一次耳机校准会污染之后的手机外放时序。
+
+**自动估算（未校准时的兜底）**
+
+未做手工校准时，`estimateBluetoothLinkLatencyMs()` 返回常量 `BLUETOOTH_LINK_LATENCY_DEFAULT_MS = 0`：因为 `getLatency(LATENCY_TYPE_ALL)` 对无线路由已返回「含蓝牙链路」的估算时延，实测再加固定增量会导致声音超前画面，故默认额外补偿置 0（宁可略微滞后、不要超前）。仅当某设备 getLatency 明显低估蓝牙链路时，再按需调大该常量。
 
 **音画感知不对称容差**
 
-人对音画不同步的容忍是**不对称**的，直接影响滑杆默认方向与验收容差：
+人对音画不同步的容忍是**不对称**的，直接影响默认方向与验收容差：
 
 | 方向 | 可察觉阈值 |
 |---|---|
@@ -227,88 +331,203 @@ D_bt_link ：蓝牙空中链路 + 耳机 DAC，系统不可见，需校准测得
 
 因此：默认让音频**略微滞后**（宁可 +10ms，不要 −10ms）；验收容差设 **±10~15ms**。
 
-**技术方案**
-
-1. **数据结构**：`outputLatencyOffset: number`（ms，绝对延迟），持久化。
-2. **校准算法**：滑杆值即 `D_bt_link` 的估计（画面已对齐墙钟，把蓝牙声对齐到画面 = 归零蓝牙相对画面的偏移）；多轮取中位数后写入 `outputLatencyOffset`。
-3. **播放端接法（复用现有 phase lock 时间轴）**：在 `refreshOutputLatency()` 里，当 `AudioOutputMonitor.isBluetoothA2dpActive()` 为真时，`outputLatencyMs` 不再用 `getLatency(LATENCY_TYPE_ALL)`（它不含蓝牙），改用校准值 `outputLatencyOffset`，即 `audibleStart = localStart - outputLatencyOffset`。其余（锁钟 §6、相位锁定 §7）不变——它们本就作用在「前移后的时间轴」上。
-4. **存值复用**：命中同「设备 + 耳机 + 编解码」缓存则跳过校准直接加载；未命中才引导校准。
-
 **精度与局限**
 
-- 精度 ±5~15ms（对齐法，归零任务无反应时）。
+- 打卡机：受用户反应时影响，精度约 ±30~100ms（多次敲击取均值可收敛）。
+- mic 回环：互相关定位可达亚毫秒级，但测的是**往返**，需扣除输入侧才是输出补偿。
 - 局限：蓝牙抖动 ±10~50ms **无法消除**，只能消除「恒定偏移」。
 - 缓解：引导使用 LC3 / aptX LL / 星闪（NearLink，5ms 级）等低时延耳机，同时降低偏移与抖动。
 
 ---
 
-## 6. 硬件时间戳锁钟（`lockAudioStartToPresentationClock`）
+## 6. 持续流的硬件时间戳锁钟（`lockAudioStartToPresentationClock`）
 
-这是把首拍定位到亚毫秒的关键。`renderer.start()` 会**立即触发写回调**，而写回调可能一次性灌满多个缓冲，把首拍顶跑。锁钟用硬件时间戳来精确计算「首拍内容到底该提前多少帧写入」。
+`renderer.start()` 只在首次进入行进页、手工延迟测量或异常恢复时执行。打卡机和耳机 mic 回环
+都直接使用这条会话物理流；测量成功并保存后，同一 Renderer 会穿过队伍大厅继续存活。
+首次行进后，从行进页返回大厅也只切回 dither floor，不会停止 Renderer。直到用户退出队伍或
+会话销毁时才释放物理流；取消未保存的测量只会在会话尚未取得保活所有权时停止物理流。
+mic 输入侧的手机外放校准属于一次性采集辅助步骤：仍复用会话 Renderer 取得同一种
+presentation 帧时钟，但路由切到外放后会重建帧纪元，不能延续此前的 A2DP 物理缓冲。
+启动后，写回调立即持续提交 dither floor，
+硬件时间戳负责把 renderer 的持久 `framePos` 映射为「本次物理流已呈现帧数」。
 
-### 6.1 墙钟占位（fallback lead）
+### 6.0 Renderer 完整生命周期
 
-在 `renderer.start()` 之前，先用墙钟算一个「估计 lead」，让写回调先灌这段静音占位：
+一个 `AppSession` 只拥有一个 `MetronomeEngine`，一个 `MetronomeEngine` 同一时刻最多持有一个
+会话 `AudioRenderer`。这里必须区分三件事：
 
-```text
-fallbackFirstBeatFrame = max(0, round((localStart - rendererStartRequestedAtMs) * SAMPLE_RATE / 1000))
-audioLeadSamples = fallbackFirstBeatFrame
-audioStartAnchorPending = true
+1. **Renderer 对象存在**：`this.renderer !== undefined`；
+2. **物理流正在运行**：Renderer 为 `STATE_RUNNING`，`writeData` 持续回调；
+3. **节拍内容正在播放**：`audioStreaming === true`。物理流运行但内容暂停时仍会输出 dither floor。
+
+```mermaid
+stateDiagram-v2
+  [*] --> Unallocated: AppSession 创建
+  Unallocated --> AllocatedStopped: ensureRenderer()
+  AllocatedStopped --> RunningDither: renderer.start()
+  RunningDither --> RunningContent: targetFrame 切入节拍/试听
+  RunningContent --> RunningDither: 暂停/返回大厅/校准结束
+  RunningDither --> RunningContent: 出发/恢复/改 BPM 的共享 targetFrame
+  RunningContent --> RunningContent: 改节拍/音色，只换内容时间轴
+  RunningDither --> AllocatedStopped: 未保活的预览或校准结束
+  RunningContent --> AllocatedStopped: 异常恢复先 stop
+  AllocatedStopped --> RunningContent: 异常恢复重新 start
+  AllocatedStopped --> Released: 退出队伍/会话销毁
+  RunningDither --> Released: 退出队伍/会话销毁
+  RunningContent --> Released: 退出队伍/会话销毁
+  Released --> [*]
 ```
 
-### 6.2 写回调（`fillAudioData`）
+#### 1. AppSession 创建：尚未分配 Renderer
 
-写回调每次填一个缓冲（4096 帧 ≈ 93ms）。在 `audioStartAnchorPending` 阶段，只写 `audioLeadSamples` 帧静音；写完就切到正式节拍内容。这防止写回调在锁完成前把整个大缓冲灌满静音（overshoot）。
+`AppSession.createLeader()` / `createMember()` 只创建 `MetronomeEngine`，此时
+`renderer === undefined`、没有物理流、没有音频回调。`keepRendererAliveForSession` 初始为 `false`。
 
-### 6.3 锁循环
+#### 2. 分配但未启动：`ensureRenderer()`
 
-锁循环用 `getAudioTimestampInfoSync()` 反复采样，直到拿到有效时间戳：
+`ensureRenderer()` 幂等创建 `STREAM_USAGE_GAME` 的单声道 44.1kHz Renderer，注册
+`writeData / stateChange / audioInterrupt`，并记录只读 `stream ID`。重复调用不会换实例。
+
+- 队员加入成功后会在大厅提前调用一次，用来避免共享起拍窗口被对象创建耗时吃掉；此时通常只是
+  **AllocatedStopped**，尚未建立稳定的 A2DP 播放缓冲。
+- 队长在试音、鼓机预览、任一种延迟测量或首次出发时按需创建。
+
+#### 3. 首次物理启动：建立持续帧时钟
+
+以下入口会让 Renderer 从 stopped 进入 `STATE_RUNNING`：
+
+- 正常出发、鼓机预览、打卡机：`scheduleFromLeaderStart()` → `startAudioStreamNow()`；
+- 麦克风耳机回环：`scheduleCalibrationSignal()` → `ensureSilentRendererRunning()`；
+- 确认蓝牙出口试音：先建立同一会话 Renderer，再在其时间轴播放有限节拍。
+
+启动时重置本次物理流的时间戳基准、`audioSubmittedFrames` 和队列估计。写回调随即持续运行；
+目标内容尚未到达 `targetFrame` 时只填 dither floor。第一次有效硬件时间戳把设备的原始
+`framePos` 映射到本次持续流坐标。
+
+#### 4. 校准阶段
+
+- **打卡机**在会话 Renderer 上以 `outputCompensationOverrideMs = 0` 播放测量节拍；
+- **麦克风耳机回环**把 chirp 叠加到同一 Renderer 的指定帧，`MicLoopbackCalibrator` 只持有
+  `AudioCapturer`；
+- **输入侧外放校准**仍使用同一个会话 Renderer，并临时创建 `AudioCapturer`；由于物理路由已从
+  A2DP 切到外放，首个探针必须 stop / flush、重置 timestamp/frame 映射并重新暖机。它测得的值
+  只用于扣除麦克风输入链路，不能把外放 Renderer 队列保存成耳机输出补偿。
+
+点击“保存并生效”时，两种耳机测量都会先写入补偿值，再调用
+`keepLatencyCalibrationRendererAlive()`。这个调用把 `keepRendererAliveForSession` 设为 `true`，
+并把节拍内容切回 dither floor。随后页面 `aboutToDisappear()` 调用
+`stopLatencyCalibration()` 时，只清理校准状态和内容，不停止物理流。
+
+校准失败、用户退出或取消保存时：如果当前会话从未取得保活所有权，
+`stopLatencyCalibration()` 会调用 `suspendRenderer()`，停止物理流但保留 Renderer 对象；如果
+本会话此前已经保存过校准或进入过行进页，保活标记是粘性的，仍只切回 dither floor。
+
+#### 5. 大厅保活与进入行进页
+
+保存校准后，大厅中的 Renderer 保持 `STATE_RUNNING`，`audioStreaming = false`，写回调持续提交
+dither floor。队长出发或队员收到 `TRANSPORT` 后，`scheduleFromLeaderStart()` 发现 Renderer
+健康且仍在运行，不再调用 `start / stop / flush`，只把行进内容安排到新的 `targetFrame`。
+
+因此正常路径会保留 Renderer 实例、stream ID、硬件帧坐标、提交帧坐标和 A2DP 缓冲。首次未做
+校准直接出发时，成功处理 `TRANSPORT` 后同样把 `keepRendererAliveForSession` 设为 `true`，从此
+该会话进入保活生命周期。
+
+#### 6. 行进中的暂停、恢复、改 BPM 与返回大厅
+
+- **暂停**：`schedulePauseFromLeader()` 在共享帧边界把 `audioStreaming` 切为 `false`，Renderer
+  继续运行并输出 dither floor；
+- **恢复**：在同一持续帧坐标安排新的 play transition，不重新启动物理流；
+- **改 BPM / 拍号 / 音色**：先准备新内容，再在共享 `targetFrame` 切换；不会 stop/flush/start；
+- **队长返回大厅**：`leaderReturnToLobby()` 调用 `metronome.pause()`；队员收到同步暂停后也切到
+  dither floor。`keepRendererAliveForSession` 保持为 `true`，再次出发继续复用；
+- **大厅鼓机预览**：已有保活所有权时，预览结束只回到 dither floor；尚未保活时，预览结束可
+  `suspendRenderer()`，避免无意义地长期占用物理流。
+
+#### 7. 音频路由切换与异常恢复
+
+蓝牙断开或重连时，Renderer 对象可能仍是同一个，但系统下方的实际路由和 A2DP 缓冲已经改变，
+不能再视为“产生校准值的同一条物理流”。`AudioOutputMonitor` 会立即按新路由刷新补偿；检测到已
+校准蓝牙断开时设置 `btCalibrationNeedsRemeasure`，重连后提示重新测量。外放/有线不会读取蓝牙
+手工补偿。
+
+强制音频中断恢复或 `writeData` 超过 `AUDIO_CALLBACK_STALL_MS` 无进展时，`recoverAudio()` 可以
+执行一次 `stop → start`。这是允许重建物理流的异常路径：Renderer 对象可复用，但帧时间戳基准
+和无线缓冲需要重新建立，之前校准值的稳定性不再由“同一物理流”保证。
+
+#### 8. 停止与最终释放
+
+`suspendRenderer()` 只取消 transport 并调用 `renderer.stop()`：对象、事件监听和 stream ID 字段
+仍由 `MetronomeEngine` 持有，后续启动会建立新的物理流。
+
+用户退出队伍、从大厅离开、行进页确认退出，或 Ability 销毁时会走
+`AppSession.reset()/clear()` → `shutdown()`。`shutdown()` 先调用 `SessionController.disconnect()`
+送达解散/离队事件，再由 `metronome.stopEngine()` 依次取消 transport、停止 Renderer、解绑回调并
+调用 `release()`，最后把 `this.renderer` 置空。这是正常生命周期中真正释放会话 Renderer 的位置；
+新建队伍会创建新的 `AppSession` 和新的 Renderer。
+
+队长主动退出时，`SessionController.disconnect()` 会在关闭 TCP 之前向所有已认证队员发送
+`SESSION_DISBANDED`。队员收到后立即释放本地会话资源、清空页面栈并回到组队入口；该显式消息
+用于区分主动解散与网络断开。队员先回复 `SESSION_DISBANDED_ACK`，队长收齐 ACK 或等待 800ms
+超时后才关闭 socket，避免解散帧还在本机发送缓冲时就被丢弃。单个失效连接的发送失败不得阻塞其他队员收到
+解散通知。若显式消息仍丢失，队员的 TCP `close` 回调会作为兜底：因当前协议没有断线重连能力，队员必须退出
+失效会话，不得继续显示旧名单。
+
+应用从后台返回时不能直接按单调时钟差清理成员：系统可能冻结 ArkTS 定时器，恢复后的首次
+心跳清理会把整段后台时间误判成失联。队长在 `onBackground` 暂停超时清理，并在
+`onForeground` 先为仍在 TCP 连接表中的队员
+重置心跳基准；队员同时立即执行一次 PING/PONG 重采样。P2P 状态查询在前台恢复瞬间可能短暂
+返回未连接，只要仍有已认证队员，就保留现有 P2P 组，不能重建后造成双方 roster 分叉。
+若 TCP 成为系统无法及时报告 `close` 的半开连接，队员连续 3 轮重采样失败后退出队伍。
+
+队伍会话创建后，`SessionBackgroundKeeper` 除了启动 `audioPlayback + multiDeviceConnection`
+长时任务和 AVSession，还持有 `RunningLockType.BACKGROUND` 运行锁，避免队长或队员熄屏后系统
+休眠导致 P2P/TCP 心跳中断。运行锁每次持有 10 分钟、每 5 分钟续期，并在 `shutdown()` 中释放；
+有限持有时间保证进程异常终止时系统也能自动回收。
+
+| 操作 | Renderer 对象 | 物理流 | 输出内容 | A2DP 缓冲是否延续 |
+|---|---|---|---|---|
+| 队员加入后的预热 | 保留 | 未启动 | 无 | 否 |
+| 打卡机/耳机回环测量中 | 同一个 | RUNNING | 测量音 + 底噪 | 是 |
+| 测量保存后回大厅 | 同一个 | RUNNING | 底噪 | 是 |
+| 出发/暂停/恢复/改 BPM | 同一个 | RUNNING | 节拍或底噪 | 是 |
+| 行进页返回大厅 | 同一个 | RUNNING | 底噪 | 是 |
+| 未保活的测量取消/预览结束 | 保留 | STOPPED | 无 | 否 |
+| 蓝牙断开重连 | 通常保留 | 路由重建 | 视系统状态 | 否，必须重测 |
+| 卡顿/中断异常恢复 | 保留 | stop 后重启 | 恢复节拍 | 不保证 |
+| 退出队伍/会话销毁 | 释放 | 结束 | 无 | 否 |
+
+### 6.1 持久帧坐标
+
+首次拿到有效 `getAudioTimestampInfoSync()` 样本时，用物理流启动后的墙钟经过时间估计已呈现帧数，建立基准：
 
 ```text
-framePos  + timestamp          // 硬件帧位置 + 采样时的时间戳
+playedEstimate         = min(submittedFrames, (now - rendererStartedAt) * SR / 1000)
+audioTimestampBaseFrame = info.framePos - playedEstimate
+renderedFrames          = info.framePos - audioTimestampBaseFrame
+                        + timestampAge * SR / 1000
+queueDepthFrames        = max(0, submittedFrames - renderedFrames)
 ```
 
-第一次有效采样时建立时基对齐：
+某些设备在 `stop / flush` 后仍延续 `framePos`，因此基准不能假设为 0。只有异常恢复重建物理流时才重新建立基准；正常 transport 切换始终沿用同一坐标。
+
+### 6.2 共享时刻转成目标帧
+
+先把希望的可闻时刻减去当前路由输出时延，得到硬件呈现时刻，再映射到持续流坐标：
 
 ```text
-clockOffsetMs      = timestampMs - now        // 硬件时间戳时基 → 应用单调时钟时基
-timestampInNowBase = timestampMs - clockOffsetMs
+hardwareStartAt = localAudibleStart - outputLatencyMs
+targetFrame     = renderedFrames(now) + (hardwareStartAt - now) * SR / 1000
 ```
 
-### 6.4 已播帧数（playedFramesNow）
+`fillAudioData()` 可以在一次回调的缓冲内部按 `targetFrame` 精确切段：目标帧以前继续旧内容（或暂停底噪），目标帧开始换成新 BPM/新音色/恢复后的节拍内容。这样不会因为停止并重建蓝牙缓冲而改变路由延迟。
 
-统一帧坐标系（以「流启动以来」的帧序号为基准）下：
+画面播放头还必须绑定 transport token。新 transport 跨过 `targetFrame` 前，持续 renderer 暴露的仍是上一轮帧原点，画面此时使用新共享起点的单调时钟；切换完成后才读取本轮硬件播放头，避免恢复时人物提前走动并把道路进度误推进。
 
-```text
-playedFramesNow = min(submitted,
-                      (info.framePos - audioTimestampBaseFrame)
-                    + min(250, now - timestampInNowBase) * SR/1000
-                    + max(0, now - rendererStartRequestedAtMs) * SR/1000)
-```
+### 6.3 首次启动锁与回退
 
-其中：
+物理流刚启动、硬件时间戳尚未可用时，先按 `rendererStartedAt` 的墙钟差放置临时 `targetFrame`，回调只提交 dither floor。锁循环取得有效时间戳后再修正目标帧；若超时则保留墙钟估计。开始前还会短时读取 3 次 `getLatency()` 并取中位数，减少路由刚建立时的瞬态读数。
 
-- 首样本时 `audioTimestampBaseFrame` 刚被重置为当前 `framePos`，`now ≈ timestampInNowBase`，两项都趋近 0；
-- 因此补上 `(now - rendererStartRequestedAtMs) * SR/1000`（renderer 启动以来墙钟已播帧数），避免漏算导致 lead 下溢；
-- 再用 `min(submitted, ...)` 钳制：**未提交的帧不可能已被播放**，避免 `played > submitted` 导致首拍提前。
-
-### 6.5 剩余 lead 与首拍定位
-
-```text
-queueDepthFrames = max(0, submitted - playedFramesNow)
-audioLeadSamples = max(0, round((localStart - now) * SR/1000 - queueDepthFrames))
-```
-
-等价于 `fallbackFirstBeatFrame - submitted`，即「还剩多少静音要写」。之后：
-
-```text
-actualFirstBeatMs = now + (submitted + lead - playedFramesNow) * 1000 / SR
-dev               = actualFirstBeatMs - localStart
-```
-
-`dev` 即首拍定位误差（帧位置层面）。目标 `dev ≈ 0`，此时「可闻节拍」正好落在 `localStart`。
-
-### 6.6 锁循环参数
+### 6.4 锁循环参数
 
 | 常量 | 值 | 含义 |
 |---|---|---|
@@ -316,7 +535,7 @@ dev               = actualFirstBeatMs - localStart
 | `AUDIO_CLOCK_LOCK_TIMEOUT_MS` | 300ms | 锁的总超时 |
 | `AUDIO_CLOCK_LOCK_MIN_REMAINING_MS` | 80ms | 距 localStart 的最小剩余时间 |
 
-锁的 deadline 取 `min(rendererStart + TIMEOUT, localStart - MIN_REMAINING)`。硬件时间戳拿不到时走 **fallback** 路径（用纯墙钟 `fallbackFirstBeatFrame` 定位）。
+锁的 deadline 取 `min(rendererStart + TIMEOUT, localStart - MIN_REMAINING)`。硬件时间戳拿不到时走纯墙钟目标帧回退。
 
 ---
 
@@ -367,6 +586,7 @@ expected   = nowMs - transportStartLocalMs                        // 理想播�
 |---|---|---|
 | `TRANSPORT_PREROLL_MS` | 650 | 首次播放/恢复预留 |
 | `TRANSPORT_RESTART_PREROLL_MS` | 650 | 行进中改拍预留 |
+| `TRANSPORT_PAUSE_PREROLL_MS` | 650 | 共享暂停边界预留 |
 | `PING_SAMPLES` | 11 | 起拍前时钟采样次数 |
 | `RESYNC_INTERVAL_MS` | 5000 | 行进中重采样间隔 |
 | `COUNT_IN_BARS` | 1 | 准备拍小节数 |
@@ -378,9 +598,10 @@ expected   = nowMs - transportStartLocalMs                        // 理想播�
 | 日志 | 关键字段 | 说明 |
 |---|---|---|
 | `schedule` | `offsetMs / startAtLeader / localStart / now / audioDelay / countIn / beat / bpm` | 调度决策 |
-| `audio` | `localStart / audibleStart / acousticDelay` | 时延补偿结果 |
-| `lockClock[hw]` | `expected / actual / dev / framePos / played / submitted / queue / lead / latency` | 硬件时间戳锁钟 |
-| `lockClock[fallback]` | 同上 + `rendererStart / fallbackFrame / targetFrame` | 纯墙钟回退 |
+| `transition[continuous]` | `audible / hardware / targetFrame / submitted / latency` | 持续流内安排内容切换 |
+| `transition[play/pause]` | `frame / submitted / latency` | 写回调实际跨过切换帧 |
+| `lockClock[hw]` | `expected / actual / dev / played / submitted / queue / target / latency` | 首次物理启动的硬件时间戳锁钟 |
+| `lockClock[fallback]` | `expected / rendererStart / submitted / target / latency` | 首次启动的纯墙钟回退 |
 | `restart[leader]` | `restartAt / beat / beatsPerBar` | 队长重启 |
 
 **验收标准**：`dev` 稳定在 `±0.01ms` 量级，`acousticDelay = 45`，`audibleStart = localStart - 45`。
@@ -398,16 +619,17 @@ expected   = nowMs - transportStartLocalMs                        // 理想播�
 | 3 | 偶发 `dev=-12~-26ms` 提前 | `playedFramesNow > submitted`（写回调未触发时 submitted=0） | `playedFramesNow` 钳制到 `submitted` |
 | 4 | 偶发 `dev=+27ms` 迟到 | `haltRendererNow` 耗时吃掉 preroll，fallback lead 小于写回调 burst（185ms） | `AUDIO_PREROLL_MS` 450 → 650 |
 | 5 | 设备间数百 ms 偏差 | 低功耗通路的大缓冲不被 `getLatency` 上报 | 改用 `STREAM_USAGE_GAME` |
+| 6 | 播放、暂停或改 BPM 后蓝牙延迟重新波动 | 每次 transport 都执行 `stop / flush / start`，重新建立了蓝牙缓冲 | renderer 与蓝牙流常驻，只在共享目标帧切换内容；离开会话或异常恢复时才停止 |
 
 ---
 
 ## 12. 附：首拍定位时间线
 
 ```text
-t0   schedule 到达，算 localStart / audioDelay
-t1   startAudioStream：refreshOutputLatency → audibleStart = localStart - latency
-t2   startAudioStreamNow：halt 旧渲染器 → 设 fallback lead → renderer.start()
-t3   写回调触发：按 fallback lead 灌静音占位
-t4   锁循环：getAudioTimestampInfo 采样 → 算 played / lead → 修正首拍位置
-t5   首拍内容写入，dev ≈ 0；之后进入相位锁定闭环
+t0   首次 schedule 或手工测量到达，算 localAudibleStart；提前启动 renderer
+t1   写回调持续提交 dither floor，并累加 submittedFrames
+t2   锁循环取得 getAudioTimestampInfo → 建立 renderedFrames 持久坐标
+t3   localAudibleStart - latency 映射为 targetFrame
+t4   写回调在 targetFrame 切入首拍内容；之后进入相位锁定闭环
+t5   测量后大厅保活、行进返回大厅、暂停/恢复/改 BPM 都复用同一 renderer，只安排新的 targetFrame
 ```

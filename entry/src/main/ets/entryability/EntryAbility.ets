@@ -8,12 +8,20 @@ import { SessionBackgroundKeeper } from '../session/SessionBackgroundKeeper';
 import { initializeEntitlementCache, isSceneAccessible } from '../store/EntitlementStore';
 import { startStoreColdStartBootstrap } from '../store/StoreBootstrapSync';
 import { bindStoreSessionPersistenceContext } from '../store/StoreSessionPersistence';
+import { bindAudioLatencyPersistenceContext, restoreCalibrationMs, restoreInputLatencyMs } from '../store/AudioLatencyPersistence';
 
 export default class EntryAbility extends UIAbility {
   onCreate(_want: Want, _launchParam: AbilityConstant.LaunchParam): void {
     hilog.info(DOMAIN, TAG, 'EntryAbility onCreate');
     SessionBackgroundKeeper.initialize(this.context);
     bindStoreSessionPersistenceContext(this.context);
+    bindAudioLatencyPersistenceContext(this.context);
+    void restoreCalibrationMs().catch((error: Object) => {
+      hilog.warn(DOMAIN, TAG, `Restore audio latency calibration failed: ${JSON.stringify(error)}`);
+    });
+    void restoreInputLatencyMs().catch((error: Object) => {
+      hilog.warn(DOMAIN, TAG, `Restore audio input latency calibration failed: ${JSON.stringify(error)}`);
+    });
     DrumSampleBank.initialize(this.context.resourceManager);
     AppStorage.setOrCreate('sessionEpoch', 0);
     AppStorage.setOrCreate('lastTransportMessage', '');
@@ -36,6 +44,16 @@ export default class EntryAbility extends UIAbility {
   onDestroy(): void {
     hilog.info(DOMAIN, TAG, 'EntryAbility onDestroy');
     AppSession.clear();
+  }
+
+  onForeground(): void {
+    hilog.info(DOMAIN, TAG, 'EntryAbility onForeground');
+    AppSession.handleAppForeground();
+  }
+
+  onBackground(): void {
+    hilog.info(DOMAIN, TAG, 'EntryAbility onBackground');
+    AppSession.handleAppBackground();
   }
 
   onWindowStageCreate(windowStage: window.WindowStage): void {

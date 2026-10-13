@@ -50,6 +50,7 @@ import {
 } from '../store/EntitlementStore';
 import { refreshStoreEntitlementsNow } from '../store/StoreBootstrapSync';
 import { SESSION_MAX_MEMBER_COUNT } from '../common/Constants';
+import { getCalibrationMs } from '../store/AudioLatencyPersistence';
 
 interface LobbySceneOption {
   key: string;
@@ -90,13 +91,19 @@ const CHARACTER_BADGE_ICON_PADDING: number = 3;
 const CHARACTER_FREE_BADGE_WIDTH: number = 28;
 const CHARACTER_FREE_BADGE_HEIGHT: number = 17;
 const ROSTER_AVATAR_SIZE: number = 43;
-const ROSTER_READY_BADGE_WIDTH: number = 50;
-const ROSTER_READY_BADGE_HEIGHT: number = 16;
-const ROSTER_READY_BADGE_POINTER_SIZE: number = 6;
-/** 给头像上方的准备气泡预留空间；增大则整排头像下移。 */
-const ROSTER_ROW_TOP_PADDING: number = 15;
-/** 相对头像顶边的位置；减小会把准备气泡继续上移。 */
-const ROSTER_READY_BADGE_TOP: number = -13;
+const ROSTER_STATUS_RAIL_HEIGHT: number = 13;
+const ROSTER_STATUS_ICON_SIZE: number = 9;
+const ROSTER_STATUS_DOT_SIZE: number = 2;
+const ROSTER_STATUS_ANIMATION_INTERVAL_MS: number = 220;
+/** 头像顶部已无浮层，只留漫画阴影和选中描边需要的呼吸空间。 */
+const ROSTER_ROW_TOP_PADDING: number = 2;
+const CALIBRATION_DOT_INDICES: number[] = [0, 1, 2];
+const CALIBRATION_CARD_HEIGHT: number = 58;
+const CALIBRATION_CARD_ICON_SIZE: number = 36;
+const CALIBRATION_CARD_HEADPHONE_SIZE: number = 32;
+const CALIBRATION_ENTRY_VERTICAL_MARGIN: number = 10;
+const BLUETOOTH_ROUTE_CONFIRM_WIDTH: number = 318;
+const BLUETOOTH_ROUTE_PROBE_BUTTON_HEIGHT: number = 48;
 
 @Entry
 @Component
@@ -105,6 +112,9 @@ struct LeaderLobbyPage {
   @StorageLink('safeAreaTop') topSafeInset: number = 0;
   @StorageLink('safeAreaBottom') bottomSafeInset: number = 0;
   @StorageLink('selectedSceneKey') selectedSceneKey: string = 'sunset_coast';
+  @StorageLink('btAudioActive') @Watch('onBluetoothAudioRouteChanged') btAudioActive: boolean = false;
+  @StorageLink('btCalibrationTracksConnection') btCalibrationTracksConnection: boolean = false;
+  @StorageLink('btCalibrationNeedsRemeasure') btCalibrationNeedsRemeasure: boolean = false;
   @StorageLink('storeEntitlementEpoch') @Watch('onStoreEntitlementsChanged') storeEntitlementEpoch: number = 0;
   @State members: SessionMember[] = [];
   @State editingMemberId: string = 'leader';
@@ -132,19 +142,247 @@ struct LeaderLobbyPage {
   @State randomPreviewCancelRequest: number = 0;
   @State randomPreviewPendingMemberId: string = '';
   @State randomPreviewPageVisible: boolean = true;
+  @State latencyCalibrationMs: number = -1;
+  @State calibrationDotPhase: number = 0;
+  @State bluetoothRouteConfirmVisible: boolean = false;
+  @State bluetoothRouteProbePlaying: boolean = false;
+  @State bluetoothRouteProbePlayed: boolean = false;
   private rhythms: string[] = ['均匀节拍', '双分节拍', '仅小节重音'];
   private enteringStage: boolean = false;
   private refreshingConnectivity: boolean = false;
   private readonly rosterScroller: Scroller = new Scroller();
   private randomSelectionToken: number = 0;
   private randomPreviewPreviousDrawId: number = 0;
+  private rosterStatusAnimationTimer: number = -1;
   // Retain dismissal even if the authoritative result arrives after active changes.
   private readonly interruptedRandomPreviews: Map<string, number> = new Map();
   private readonly bluetoothStateListener = (_state: access.BluetoothState): void => {
     void this.refreshLeaderConnectivity();
   };
 
+  private onBluetoothAudioRouteChanged(): void {
+    // A2DP disappearance immediately removes the whole manual-calibration
+    // surface; speaker and wired routes use platform latency only.
+    if (!this.btAudioActive) {
+      if (this.bluetoothRouteConfirmVisible) {
+        this.dismissBluetoothRouteConfirmation();
+      }
+    }
+  }
+
+  private requestBluetoothCalibration(): void {
+    if (!this.btAudioActive) {
+      promptAction.showToast({ message: '当前没有检测到蓝牙耳机输出' });
+      return;
+    }
+    this.bluetoothRouteProbePlayed = false;
+    this.bluetoothRouteProbePlaying = false;
+    this.bluetoothRouteConfirmVisible = true;
+  }
+
+  private async playBluetoothRouteProbe(): Promise<void> {
+    if (this.bluetoothRouteProbePlaying) {
+      return;
+    }
+    if (!this.btAudioActive) {
+      promptAction.showToast({ message: '当前没有检测到蓝牙耳机输出' });
+      return;
+    }
+    this.bluetoothRouteProbePlaying = true;
+    this.bluetoothRouteProbePlayed = false;
+    try {
+      const played = await AppSession.get()?.playBluetoothRouteProbe() ?? false;
+      if (played && this.bluetoothRouteConfirmVisible && this.btAudioActive) {
+        this.bluetoothRouteProbePlayed = true;
+      }
+    } catch (err) {
+      promptAction.showToast({ message: `试音失败：${(err as Error).message}` });
+    } finally {
+      this.bluetoothRouteProbePlaying = false;
+    }
+  }
+
+  private async confirmBluetoothCalibration(): Promise<void> {
+    if (!this.bluetoothRouteProbePlayed || !this.btAudioActive) {
+      return;
+    }
+    this.bluetoothRouteConfirmVisible = false;
+    this.bluetoothRouteProbePlayed = false;
+    // The tap game intentionally inherits the renderer warmed by the route probe.
+    void router.pushUrl({ url: 'pages/AudioCalibrationPage' });
+  }
+
+  private dismissBluetoothRouteConfirmation(): void {
+    this.bluetoothRouteConfirmVisible = false;
+    this.bluetoothRouteProbePlayed = false;
+    this.bluetoothRouteProbePlaying = false;
+    void AppSession.get()?.stopLatencyCalibration();
+  }
+
+  private rejectBluetoothRouteConfirmation(): void {
+    this.dismissBluetoothRouteConfirmation();
+    promptAction.showToast({ message: '未进入校准，请先把媒体声音切到蓝牙耳机' });
+  }
+
+  private hasBluetoothCalibration(): boolean {
+    return this.latencyCalibrationMs >= 0 && this.btCalibrationTracksConnection;
+  }
+
+  private calibrationCardTitle(): string {
+    if (this.btCalibrationNeedsRemeasure && this.hasBluetoothCalibration()) {
+      return '耳机已重新连接';
+    }
+    return this.hasBluetoothCalibration() ? '耳机已校准' : '蓝牙耳机延迟';
+  }
+
+  private calibrationCardSubtitle(): string {
+    if (!this.hasBluetoothCalibration()) {
+      return '测一次，让队伍听到同一拍';
+    }
+    if (this.btCalibrationNeedsRemeasure) {
+      return `原补偿 ${this.latencyCalibrationMs} ms · 建议适配新连接`;
+    }
+    return `补偿 ${this.latencyCalibrationMs} ms · 保持当前耳机连接`;
+  }
+
+  private calibrationCardActionLabel(): string {
+    if (!this.hasBluetoothCalibration()) {
+      return '开始校准 ›';
+    }
+    return this.btCalibrationNeedsRemeasure ? '推荐重测 ›' : '重测 ›';
+  }
+
+  private calibrationCardFill(): string {
+    if (!this.hasBluetoothCalibration()) {
+      return '#FFF0B8';
+    }
+    return this.btCalibrationNeedsRemeasure ? '#FFE4DE' : '#E4F7F2';
+  }
+
+  private calibrationCardIconFill(): string {
+    if (!this.hasBluetoothCalibration()) {
+      return BLUE;
+    }
+    return this.btCalibrationNeedsRemeasure ? CORAL : TEAL;
+  }
+
+  @Builder
+  private latencyCalibrationEntry() {
+    Row({ space: 10 }) {
+      Stack({ alignContent: Alignment.Center }) {
+        Circle()
+          .width(CALIBRATION_CARD_ICON_SIZE).height(CALIBRATION_CARD_ICON_SIZE)
+          .fill(this.calibrationCardIconFill()).stroke(INK).strokeWidth(1.5)
+        if (!this.hasBluetoothCalibration()) {
+          Image($rawfile('calibration/lobby/bluetooth-calibration-default.png'))
+            .width(CALIBRATION_CARD_HEADPHONE_SIZE).height(CALIBRATION_CARD_HEADPHONE_SIZE)
+            .objectFit(ImageFit.Contain)
+        } else if (this.btCalibrationNeedsRemeasure) {
+          Image($rawfile('calibration/lobby/bluetooth-calibration-reconnected.png'))
+            .width(CALIBRATION_CARD_HEADPHONE_SIZE).height(CALIBRATION_CARD_HEADPHONE_SIZE)
+            .objectFit(ImageFit.Contain)
+        } else {
+          Image($rawfile('calibration/lobby/bluetooth-calibration-calibrated.png'))
+            .width(CALIBRATION_CARD_HEADPHONE_SIZE).height(CALIBRATION_CARD_HEADPHONE_SIZE)
+            .objectFit(ImageFit.Contain)
+        }
+      }.width(CALIBRATION_CARD_ICON_SIZE).height(CALIBRATION_CARD_ICON_SIZE)
+
+      Column({ space: 2 }) {
+        Text(this.calibrationCardTitle())
+          .fontSize(15).fontWeight(900).fontColor(INK).width('100%').maxLines(1)
+        Text(this.calibrationCardSubtitle())
+          .fontSize(10).fontWeight(700).fontColor('#625B53').width('100%').maxLines(1)
+      }
+      .layoutWeight(1)
+      .alignItems(HorizontalAlign.Start)
+
+      Text(this.calibrationCardActionLabel())
+        .fontSize(13).fontWeight(900).fontColor(CORAL)
+    }
+    .width('100%')
+    .height(CALIBRATION_CARD_HEIGHT)
+    .padding({ left: 12, right: 12 })
+    .alignItems(VerticalAlign.Center)
+    .backgroundColor(this.calibrationCardFill())
+    .border({ width: 1.5, color: INK })
+    .borderRadius(8)
+    .shadow(CONTROL_SHADOW)
+    .margin({ top: CALIBRATION_ENTRY_VERTICAL_MARGIN, bottom: CALIBRATION_ENTRY_VERTICAL_MARGIN })
+    .onClick(() => this.requestBluetoothCalibration())
+  }
+
+  @Builder
+  private bluetoothRouteConfirmationOverlay() {
+    Stack({ alignContent: Alignment.Center }) {
+      Column()
+        .width('100%')
+        .height('100%')
+        .backgroundColor('#99171B1F')
+        .onClick(() => this.dismissBluetoothRouteConfirmation())
+
+      Column({ space: 14 }) {
+        Row({ space: 11 }) {
+          Stack() {
+            Image($rawfile('calibration/lobby/bluetooth-calibration-default.png'))
+              .width(56).height(56).objectFit(ImageFit.Contain)
+          }.width(58).height(58)
+          Column({ space: 2 }) {
+            Text('确认蓝牙声音出口').fontSize(20).fontWeight(900).fontStyle(FontStyle.Italic).fontColor(INK)
+            Text('确认后再开始延迟测量').fontSize(10).fontWeight(800).fontColor('#625B53')
+          }.layoutWeight(1).alignItems(HorizontalAlign.Start)
+          Text('×').fontSize(26).fontWeight(900).fontColor(INK).width(28).textAlign(TextAlign.Center)
+            .onClick(() => this.dismissBluetoothRouteConfirmation())
+        }.width('100%').alignItems(VerticalAlign.Center)
+
+        Text('系统检测到了蓝牙音频。播放“嘀嗒”两声试音，确认声音确实从蓝牙耳机里传出。')
+          .width('100%').fontSize(13).lineHeight(20).fontWeight(700).fontColor('#4F4943')
+
+        Button(this.bluetoothRouteProbePlaying ? '正在播放…' :
+          this.bluetoothRouteProbePlayed ? '再播放一次试音 ♪' : '播放试音 ♪', { type: ButtonType.Normal })
+          .width('100%').height(BLUETOOTH_ROUTE_PROBE_BUTTON_HEIGHT)
+          .fontSize(15).fontWeight(900).fontColor(INK)
+          .backgroundColor(this.bluetoothRouteProbePlaying ? '#D9D4CC' : LILAC)
+          .border({ width: 1.5, color: INK }).borderRadius(7).shadow(CONTROL_SHADOW)
+          .enabled(!this.bluetoothRouteProbePlaying)
+          .onClick(() => { void this.playBluetoothRouteProbe(); })
+
+        if (this.bluetoothRouteProbePlayed) {
+          Row({ space: 6 }) {
+            Text('✓').fontSize(13).fontWeight(900).fontColor(TEAL)
+            Text('试音已播放，现在请选择实际听到的位置')
+              .fontSize(10).fontWeight(800).fontColor('#625B53')
+          }.width('100%')
+
+          Button('声音在蓝牙耳机里', { type: ButtonType.Normal })
+            .width('100%').height(50).fontSize(16).fontWeight(900).fontColor(INK)
+            .backgroundColor(TEAL)
+            .border({ width: 1.5, color: INK }).borderRadius(7)
+            .shadow(CONTROL_SHADOW)
+            .enabled(this.btAudioActive && !this.bluetoothRouteProbePlaying)
+            .onClick(() => { void this.confirmBluetoothCalibration(); })
+
+          Button('声音在手机 / 其他设备', { type: ButtonType.Normal })
+            .width('100%').height(44).fontSize(13).fontWeight(900).fontColor(CORAL)
+            .backgroundColor(WHITE).border({ width: 1.5, color: INK }).borderRadius(7)
+            .onClick(() => this.rejectBluetoothRouteConfirmation())
+        }
+      }
+      .width(BLUETOOTH_ROUTE_CONFIRM_WIDTH)
+      .padding(18)
+      .backgroundColor(PAPER)
+      .border({ width: 2, color: INK })
+      .borderRadius(10)
+      .shadow({ radius: INK_SHADOW_RADIUS, offsetX: 5, offsetY: 6, color: INK })
+    }
+    .width('100%')
+    .height('100%')
+    .zIndex(120)
+  }
+
   aboutToAppear(): void {
+    this.latencyCalibrationMs = getCalibrationMs();
+    this.startRosterStatusAnimation();
     try {
       access.on('stateChange', this.bluetoothStateListener);
     } catch (_e) {
@@ -156,12 +394,20 @@ struct LeaderLobbyPage {
     this.randomPreviewPageVisible = false;
     this.randomPreviewPendingMemberId = '';
     this.interruptedRandomPreviews.clear();
+    this.stopRosterStatusAnimation();
+    if (this.bluetoothRouteConfirmVisible) {
+      this.dismissBluetoothRouteConfirmation();
+    }
     try {
       access.off('stateChange', this.bluetoothStateListener);
     } catch (_e) {
     }
   }
   onBackPress(): boolean {
+    if (this.bluetoothRouteConfirmVisible) {
+      this.dismissBluetoothRouteConfirmation();
+      return true;
+    }
     if (this.meterEditorVisible) {
       this.meterEditorVisible = false;
       return true;
@@ -171,13 +417,32 @@ struct LeaderLobbyPage {
   }
   onPageShow(): void {
     this.randomPreviewPageVisible = true;
+    this.startRosterStatusAnimation();
     this.enteringStage = false;
+    this.latencyCalibrationMs = getCalibrationMs();
     void this.refreshLeaderConnectivity();
   }
   onPageHide(): void {
     this.randomSelectionToken += 1;
     this.randomPreviewPageVisible = false;
     this.randomPreviewPendingMemberId = '';
+    this.stopRosterStatusAnimation();
+  }
+
+  private startRosterStatusAnimation(): void {
+    if (this.rosterStatusAnimationTimer >= 0) {
+      return;
+    }
+    this.rosterStatusAnimationTimer = setInterval(() => {
+      this.calibrationDotPhase = (this.calibrationDotPhase + 1) % CALIBRATION_DOT_INDICES.length;
+    }, ROSTER_STATUS_ANIMATION_INTERVAL_MS);
+  }
+
+  private stopRosterStatusAnimation(): void {
+    if (this.rosterStatusAnimationTimer >= 0) {
+      clearInterval(this.rosterStatusAnimationTimer);
+      this.rosterStatusAnimationTimer = -1;
+    }
   }
 
   private async refreshLeaderConnectivity(): Promise<void> {
@@ -763,41 +1028,61 @@ struct LeaderLobbyPage {
   }
 
   @Builder
-  private rosterReadyBadge() {
-    Stack({ alignContent: Alignment.TopStart }) {
-      Row() {
-        Text('✓ 已准备')
-          .fontSize(9)
-          .fontWeight(900)
-          .fontColor(INK)
-      }
-      .width(ROSTER_READY_BADGE_WIDTH)
-      .height(ROSTER_READY_BADGE_HEIGHT)
-      .justifyContent(FlexAlign.Center)
-      .backgroundColor(TEAL)
-      .border({ width: 1, color: INK })
-      .borderRadius(8)
-      .shadow({ radius: 1, offsetX: 1, offsetY: 1, color: INK })
-      .zIndex(2)
-      Row()
-        .width(ROSTER_READY_BADGE_POINTER_SIZE)
-        .height(ROSTER_READY_BADGE_POINTER_SIZE)
-        .backgroundColor(TEAL)
-        .border({ width: 1, color: INK })
-        .rotate({ angle: 45 })
-        .position({
-          x: (ROSTER_READY_BADGE_WIDTH - ROSTER_READY_BADGE_POINTER_SIZE) / 2,
-          y: ROSTER_READY_BADGE_HEIGHT - ROSTER_READY_BADGE_POINTER_SIZE / 2
-        })
-        .zIndex(1)
+  private rosterReadyStatusSegment(member: SessionMember) {
+    Row() {
+      Text('✓')
+        .fontSize(10)
+        .fontWeight(900)
+        .fontColor(WHITE)
     }
-    .width(ROSTER_READY_BADGE_WIDTH)
-    .height(ROSTER_READY_BADGE_HEIGHT + ROSTER_READY_BADGE_POINTER_SIZE)
-    .position({
-      x: (ROSTER_AVATAR_SIZE - ROSTER_READY_BADGE_WIDTH) / 2,
-      y: ROSTER_READY_BADGE_TOP
-    })
-    .clip(false)
+    .width(member.bluetoothCalibrating === true ? ROSTER_AVATAR_SIZE / 2 : ROSTER_AVATAR_SIZE)
+    .height('100%')
+    .justifyContent(FlexAlign.Center)
+    .backgroundColor(TEAL)
+  }
+
+  @Builder
+  private rosterCalibrationStatusSegment(member: SessionMember) {
+    Row({ space: 1 }) {
+      Image($rawfile('comic/icons/headphones-status.svg'))
+        .width(ROSTER_STATUS_ICON_SIZE)
+        .height(ROSTER_STATUS_ICON_SIZE)
+        .objectFit(ImageFit.Contain)
+      Row({ space: 1 }) {
+        ForEach(CALIBRATION_DOT_INDICES, (dotIndex: number) => {
+          Circle()
+            .width(ROSTER_STATUS_DOT_SIZE)
+            .height(ROSTER_STATUS_DOT_SIZE)
+            .fill(WHITE)
+            .opacity(dotIndex === this.calibrationDotPhase ? 1 : 0.38)
+            .translate({ y: dotIndex === this.calibrationDotPhase ? -1 : 0 })
+        })
+      }
+    }
+    .width(member.lobbyReady === true ? ROSTER_AVATAR_SIZE / 2 : ROSTER_AVATAR_SIZE)
+    .height('100%')
+    .justifyContent(FlexAlign.Center)
+    .backgroundColor(CORAL)
+    .border({ width: { left: member.lobbyReady === true ? 1 : 0 }, color: INK })
+  }
+
+  @Builder
+  private rosterStatusRail(member: SessionMember) {
+    Row({ space: 0 }) {
+      if (member.lobbyReady === true) {
+        this.rosterReadyStatusSegment(member)
+      }
+      if (member.bluetoothCalibrating === true) {
+        this.rosterCalibrationStatusSegment(member)
+      }
+    }
+    .width(ROSTER_AVATAR_SIZE)
+    .height(ROSTER_STATUS_RAIL_HEIGHT)
+    .border({ width: 1, color: INK })
+    .borderRadius({ bottomLeft: 4, bottomRight: 4 })
+    .position({ x: 0, y: ROSTER_AVATAR_SIZE - ROSTER_STATUS_RAIL_HEIGHT })
+    .clip(true)
+    .zIndex(3)
     .hitTestBehavior(HitTestMode.None)
   }
 
@@ -818,8 +1103,8 @@ struct LeaderLobbyPage {
           .clip(true)
           .opacity(this.canEditMember(member.id) ? 1 : 0.88)
           .onClick(() => { this.selectEditingMember(member.id); })
-        if (member.lobbyReady === true) {
-          this.rosterReadyBadge()
+        if (member.lobbyReady === true || member.bluetoothCalibrating === true) {
+          this.rosterStatusRail(member)
         }
         if (this.soloTeam && this.leader && SessionController.isSoloBotMemberId(member.id)) {
           Text('×')
@@ -1139,7 +1424,8 @@ struct LeaderLobbyPage {
               ForEach(this.members, (m: SessionMember) => {
                 this.rosterMemberSlot(m)
               }, (m: SessionMember) => `${m.id}-${m.avatarKey}-${m.randomDrawId ?? 0}-` +
-                `${this.revealedMemberMysteryAvatar(m)}-${m.lobbyReady === true ? 1 : 0}`)
+                `${this.revealedMemberMysteryAvatar(m)}-${m.lobbyReady === true ? 1 : 0}-` +
+                `${m.bluetoothCalibrating === true ? 1 : 0}`)
               if (this.soloTeam && this.leader) {
                 this.rosterAddSlot()
               }
@@ -1377,6 +1663,9 @@ struct LeaderLobbyPage {
               void openWirelessSettings(ctx);
             }
           })
+        if (this.btAudioActive) {
+          this.latencyCalibrationEntry()
+        }
         ComicButton({
           label: this.primaryLobbyLabel(),
           fill: this.primaryLobbyFill(),
@@ -1400,6 +1689,9 @@ struct LeaderLobbyPage {
           onChange: (beats: number, unit: number): void => { void this.applyMeter(beats, unit); },
           onDismiss: (): void => { this.meterEditorVisible = false; }
         })
+      }
+      if (this.bluetoothRouteConfirmVisible) {
+        this.bluetoothRouteConfirmationOverlay()
       }
     }.height('100%').width('100%').backgroundColor(PAPER)
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
