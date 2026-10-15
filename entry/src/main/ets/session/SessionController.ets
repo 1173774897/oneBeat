@@ -883,6 +883,18 @@ export class SessionController {
     // 发送前先强制队员重采样时钟偏移，避免重启时刻 offset 陈旧导致即使有充足 preroll 仍偏。
     const generation = ++this.transportRequestGeneration;
     this.cancelScheduledPauseState();
+    // Publish the configuration before the preparation round, not right before
+    // TRANSPORT. Applying a snapshot renders the new PCM synchronously on the JS
+    // thread (a 60 BPM bar plus count-in is ~350k samples), which stalls writeData
+    // and drains the native queue. The legacy playhead estimate is capped at the
+    // submitted frame, so a queue that is still drained when the start target is
+    // chosen makes that device play early by about the stall (~130ms observed).
+    // The preparation round gives every device time to refill before the start.
+    // The engine keeps looping the old sequence until the shared boundary.
+    await this.broadcastSnapshot();
+    if (generation !== this.transportRequestGeneration) {
+      return;
+    }
     await this.prepareConnectedMembersForTransport();
     if (generation !== this.transportRequestGeneration) {
       return;

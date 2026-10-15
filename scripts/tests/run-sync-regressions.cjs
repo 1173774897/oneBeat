@@ -8,6 +8,7 @@ const suites = [
   'clock-sync-fit.cjs',
   'transport-start-readiness.cjs',
   'transport-start-diagnostics.cjs',
+  'transport-restart-configuration-order.cjs',
   'metronome-count-in-realtime.cjs',
   'metronome-start-timing.cjs',
   'metronome-configuration.cjs',

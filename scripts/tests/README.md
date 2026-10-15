@@ -12,12 +12,12 @@
 node /path/to/oneBeat/scripts/tests/run-sync-regressions.cjs /path/to/typescript/lib/typescript.js
 ```
 
-入口依次运行 14 个测试脚本，任何脚本失败、超过 60 秒，或未完成断言就退出，整个命令返回非零。优先使用已安装的 TypeScript，其次查找 DevEco 自带版本，不联网或安装依赖。播放基线测试需要本地 Git 中保留 `56c9e55`；缺少时直接报错，不跳过。
+入口依次运行 15 个测试脚本，任何脚本失败、超过 60 秒，或未完成断言就退出，整个命令返回非零。优先使用已安装的 TypeScript，其次查找 DevEco 自带版本，不联网或安装依赖。播放基线测试需要本地 Git 中保留 `56c9e55`；缺少时直接报错，不跳过。
 
 | 保护点 | 主要测试 |
 |---|---|
 | 写音频回调不能生成整段倒数或重建主序列；预热后重复配置、开始和恢复不重新生成；音色异步乱序；准备失效时静音并可恢复 | `metronome-count-in-realtime.cjs`、`metronome-configuration.cjs` |
-| 全员时钟准备成功后才发布共享开始；失败、超时、离开、旧回包与挂起发送不能误启动或破坏已排暂停 | `transport-start-readiness.cjs`、`transport-start-diagnostics.cjs` |
+| 全员时钟准备成功后才发布共享开始；失败、超时、离开、旧回包与挂起发送不能误启动或破坏已排暂停；播放中改配置须先下发配置再准备，不能紧贴 TRANSPORT | `transport-start-readiness.cjs`、`transport-start-diagnostics.cjs`、`transport-restart-configuration-order.cjs` |
 | 慢 ping 不能污染拟合；可靠新样本纠正失效历史；原始 ping 不提前进入 Session 的时钟估计 | `clock-sync-fit.cjs` |
 | 保存补偿、共享目标、真实 PCM 首拍、预备拍强弱与衔接保持；日志不能改动播放或增加原生查询 | `metronome-start-timing.cjs`、`metronome-start-buffer-diagnostics.cjs`、`production-clock-diagnostics.cjs`、`metronome-playback-baseline.cjs` |
 | 暂停恢复和长期播放保留流生命周期；蓝牙/外放双向切换重排但保留共享时间线；外放不套蓝牙保存值 | `metronome-audio-lifecycle.cjs`、`metronome-route-transition.cjs`、`latency-calibration-routing.cjs` |
