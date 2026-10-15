@@ -15,7 +15,10 @@ const mocks = {
     StreamUsage: { STREAM_USAGE_MUSIC: 1 }, createAudioRenderer: async () => nextRenderer } },
   '@kit.BasicServicesKit': {},
   '../common/MonotonicClock': { MonotonicClock: { nowMs: () => now } },
-  './DrumMachineCatalog': {}, './DrumSampleBank': {}
+  './AudioOutputMonitor': { AudioOutputMonitor: { isBluetoothA2dpActive: () => false } },
+  '../store/AudioLatencyPersistence': { getCalibrationMs: () => -1,
+    getEffectiveCalibrationMs: () => -1, getInputLatencyMs: () => 0 },
+  './DrumMachineCatalog': {}, './DrumSampleBank': {}, BuildProfile: { DEBUG: false }
 };
 function load(name) {
   const context = { exports: {}, require: key => mocks[key], console, ArrayBuffer, Map, Int16Array, DataView, setTimeout, clearTimeout };
@@ -24,6 +27,11 @@ function load(name) {
   return context.exports;
 }
 mocks['./ClickSound'] = load('ClickSound');
+const meterContext = { exports: {}, Math, Number };
+vm.runInNewContext(ts.transpileModule(fs.readFileSync('entry/src/main/ets/common/MeterModel.ets', 'utf8'), {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021 }
+}).outputText, meterContext);
+mocks['../common/MeterModel'] = meterContext.exports;
 mocks['./RhythmTimeline'] = load('RhythmTimeline');
 const { MetronomeEngine } = load('MetronomeEngine');
 function engine() { const e = new MetronomeEngine(); e.configure(0, 0); return e; }
@@ -59,14 +67,23 @@ function renderer() {
   assert.equal(e.audioTimelineLeadFrames, 0);
   assert.equal(e.transportStartLocalMs, 1000);
 
-  // If the user pauses during flush, stale work must not restart playback.
-  let completeFlush;
+  // Native start cannot be recalled; a pause while it is pending must prevent
+  // its late completion from restoring the logical transport or transition.
+  let completeStart;
   e.renderer.stop = async () => { e.renderer.state = state.STATE_STOPPED; };
-  e.renderer.flush = () => new Promise(resolve => { completeFlush = resolve; });
+  e.renderer.start = () => new Promise(resolve => {
+    starts++;
+    completeStart = () => { e.renderer.state = state.STATE_RUNNING; resolve(); };
+  });
+  e.lastWriteProgressMs = -10000;
   const cancelledStart = e.startAudioStream(1500, 1, 0, 1);
   await new Promise(resolve => setImmediate(resolve));
-  e.pause(); completeFlush(); await cancelledStart; await e.rendererOperation;
-  assert.equal(starts, 1);
+  assert.equal(typeof completeStart, 'function');
+  e.pause(); completeStart(); await cancelledStart; await e.rendererOperation;
+  assert.equal(starts, 2);
+  assert.equal(e.running, false);
+  assert.equal(e.rendererStarted, false);
+  assert.equal(e.pendingAudioTransition, undefined);
 
   const recovered = engine(); recovered.renderer = renderer(); recovered.running = true;
   recovered.runToken = 7; recovered.transportRevision = 3;
@@ -77,9 +94,14 @@ function renderer() {
   assert.equal(recovered.runToken, 7);
   assert.equal(recovered.transportRevision, 3);
   assert.equal(recovered.transportStartLocalMs, 1000);
+  const recoveryTransition = recovered.pendingAudioTransition;
+  assert.equal(recoveryTransition.beatIndex, 4);
+  assert.equal(recoveryTransition.countInBeats, 0, 'Recovery must not replay the rehearsal bar');
+  assert.equal(recoveryTransition.token, 7);
+  recovered.fillAudioData(new ArrayBuffer((recoveryTransition.targetFrame + 1) * 2));
   assert.equal(recovered.activeLoopStartIndex, 0);
-  assert.equal(recovered.audioTimelineLeadFrames, -70560);
-  assert.equal(recovered.readAudioPlayheadMs(now), 1600);
+  assert.equal(recovered.audioTimelineToken, 7, 'The recovered PCM must stay on the existing transport');
+  assert.equal(recovered.pendingAudioTransition, undefined);
 
   const monitored = engine(); monitored.renderer = renderer(); monitored.audioStreaming = true;
   monitored.lastWriteProgressMs = 1000;
@@ -101,5 +123,5 @@ function renderer() {
   assert.equal(recoveries.length, 1);
   nextRenderer.handlers.audioInterrupt({ hintType: hint.INTERRUPT_HINT_RESUME, forceType: 1 });
   assert.equal(recoveries.length, 2);
-  console.log('PASS: 300 metronome bars, serialized stop/start, pause during flush, stall detection, focus resume');
+  console.log('PASS: 300 metronome bars, serialized stop/start, pause during native start, stall detection, focus resume');
 })().catch(error => { console.error(error); process.exitCode = 1; });

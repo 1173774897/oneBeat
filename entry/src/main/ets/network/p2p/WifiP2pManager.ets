@@ -7,8 +7,11 @@ const CONNECTION_TIMEOUT_MS: number = 25000;
 const DISCOVERY_TIMEOUT_MS: number = 30000;
 const DISCOVERY_REFRESH_WAIT_MS: number = 3000;
 const MEMBER_GROUP_RELEASE_TIMEOUT_MS: number = 3000;
+const CONNECTION_STATE_POLL_MS: number = 350;
 const GROUP_OWNER_CAPABILITY: number = 1;
+const FOREIGN_P2P_MESSAGE: string = '设备正在使用其他 P2P 连接，请先结束投屏、互传或附近共享后重试';
 const JOIN_REJECTED_MESSAGE: string = '队长已拒绝本次加入请求，请和队长确认后再试一次';
+const JOIN_CANCELLED_MESSAGE: string = '本次加入已取消';
 const JOIN_CONFIRM_TIMEOUT_MESSAGE: string =
   '系统未完成本次 P2P 确认；请确认队长已收到连接弹窗后再试一次';
 
@@ -31,9 +34,14 @@ function p2pError(err: Error, fallback: string): Error {
 }
 
 export class WifiP2pManager {
+  private static groupReleaseOperation: Promise<void> | undefined = undefined;
   private ownsGroup: boolean = false;
+  private ownedGroupName: string = '';
+  private groupRemovalOperation: Promise<void> | undefined = undefined;
   private discovering: boolean = false;
   private lastMemberAttemptGroupName: string = '';
+  private cancelMemberGroupWait: (() => void) | undefined = undefined;
+  private memberAttemptGeneration: number = 0;
 
   isWifiEnabled(): boolean {
     try {
@@ -50,10 +58,25 @@ export class WifiP2pManager {
     if (!this.isWifiEnabled()) {
       throw new Error('请先打开 Wi-Fi，点此可前往系统设置');
     }
+    // removeGroup() only submits the system request. A new manager must wait
+    // for the old owner's confirmed release before classifying a live group.
+    let releasing = WifiP2pManager.groupReleaseOperation;
+    while (releasing !== undefined) {
+      await releasing;
+      releasing = WifiP2pManager.groupReleaseOperation;
+    }
     try {
-      const linked = await wifiManager.getP2pLinkedInfo();
+      let linked = await wifiManager.getP2pLinkedInfo();
+      // Exit may register its release while this SDK query is in flight (for
+      // example after stopping discovery). Do not classify that stale snapshot.
+      releasing = WifiP2pManager.groupReleaseOperation;
+      while (releasing !== undefined) {
+        await releasing;
+        linked = await wifiManager.getP2pLinkedInfo();
+        releasing = WifiP2pManager.groupReleaseOperation;
+      }
       if (linked.connectState === wifiManager.P2pConnectState.CONNECTED && !this.ownsGroup) {
-        throw new Error('设备正在使用其他 P2P 连接，请先结束投屏、互传或附近共享后重试');
+        throw new Error(FOREIGN_P2P_MESSAGE);
       }
     } catch (err) {
       const error = err as Error;
@@ -91,6 +114,7 @@ export class WifiP2pManager {
         throw new Error('P2P 组创建后本机不是队长，请重试');
       }
       this.ownsGroup = true;
+      this.ownedGroupName = group.groupName;
       return group;
     } catch (err) {
       throw p2pError(err as Error, '创建临时 P2P 组失败');
@@ -170,7 +194,7 @@ export class WifiP2pManager {
   async connectToLeader(invitation: P2pRoomInvitation, rejectionSignal?: Promise<Error>): Promise<string> {
     validateP2pRoomInvitation(invitation);
     const leaderDeviceName = invitation.leaderDeviceName?.trim() ?? '';
-    await this.resetPreviousMemberAttempt(invitation);
+    await this.resetPreviousMemberAttempt();
     // 不在此处 stopDiscovery：若已预热（discovering 为 true），prepareMemberDiscovery
     // 会直接复用现有发现结果，从而省去一次冷启动等待。
     await this.prepareMemberDiscovery(leaderDeviceName);
@@ -216,9 +240,15 @@ export class WifiP2pManager {
           } catch (err) {
             const connectionError = err as Error;
             lastError = connectionError.message ?? 'P2P 连接失败';
-            if (lastError === JOIN_REJECTED_MESSAGE || lastError === JOIN_CONFIRM_TIMEOUT_MESSAGE) {
+            if (lastError === JOIN_REJECTED_MESSAGE || lastError === JOIN_CONFIRM_TIMEOUT_MESSAGE ||
+              lastError === FOREIGN_P2P_MESSAGE || lastError === JOIN_CANCELLED_MESSAGE ||
+              (this.ownsGroup && this.ownedGroupName === invitation.groupName)) {
+              // Once this attempt has joined the expected group, discovery is
+              // no longer a useful retry. Preserve its readiness error; the
+              // caller's abort releases the verified group before another join.
               throw connectionError;
             }
+            await this.resetPreviousMemberAttempt();
             await this.prepareMemberDiscovery(leaderDeviceName);
           }
         }
@@ -238,6 +268,8 @@ export class WifiP2pManager {
     invitation: P2pRoomInvitation,
     rejectionSignal?: Promise<Error>
   ): Promise<string> {
+    this.cancelMemberGroupWait?.();
+    const generation = ++this.memberAttemptGeneration;
     const config: wifiManager.WifiP2PConfig = {
       deviceAddress: peer.deviceAddress,
       deviceAddressType: peer.deviceAddressType ?? wifiManager.DeviceAddressType.RANDOM_DEVICE_ADDRESS,
@@ -254,21 +286,22 @@ export class WifiP2pManager {
         // random address remains valid for the system confirmation flow.
         this.discovering = false;
       }, rejectionSignal);
-      const group = await this.waitForCurrentGroup(4000);
-      if (group.groupName !== invitation.groupName) {
-        this.ownsGroup = true;
-        await this.removeOwnedGroup();
-        throw new Error('连接到了其他 P2P 组，已安全退出并继续查找');
+      // Abort may run after CONNECTED resolves but before the group waiter is
+      // installed. The generation also closes that asynchronous handoff gap.
+      if (generation !== this.memberAttemptGeneration) {
+        throw new Error(JOIN_CANCELLED_MESSAGE);
       }
-      if (group.goIpAddress.length === 0) {
-        throw new Error('已连接 P2P，但系统未返回队长地址');
+      const group = await this.waitForMemberGroup(invitation.groupName, 4000, generation);
+      if (generation !== this.memberAttemptGeneration) {
+        throw new Error(JOIN_CANCELLED_MESSAGE);
       }
-      this.ownsGroup = true;
       this.lastMemberAttemptGroupName = '';
       return group.goIpAddress;
     } catch (err) {
       const connectionError = err as Error;
-      await this.cancelPendingMemberConnect();
+      if (generation === this.memberAttemptGeneration) {
+        await this.cancelPendingMemberConnect();
+      }
       throw connectionError;
     }
   }
@@ -281,6 +314,7 @@ export class WifiP2pManager {
     rejectionSignal?: Promise<Error>
   ): Promise<wifiManager.WifiP2pLinkedInfo> {
     return new Promise((resolve, reject) => {
+      const startedAt = Date.now();
       let settled = false;
       let requestStarted = false;
       let requestObserved = initialDeviceStatus === wifiManager.P2pDeviceStatus.INVITED;
@@ -302,13 +336,14 @@ export class WifiP2pManager {
         cleanup();
         reject(error);
       };
-      const connectionCallback = (info: wifiManager.WifiP2pLinkedInfo): void => {
+      const connectionCallback = (info: wifiManager.WifiP2pLinkedInfo, source: string = 'event'): void => {
         if (settled) {
           return;
         }
         if (info.connectState === wifiManager.P2pConnectState.CONNECTED) {
           settled = true;
           cleanup();
+          console.info(`[JoinDiag] stage=p2p-connected source=${source} elapsedMs=${Date.now() - startedAt}`);
           resolve(info);
         } else if (requestStarted &&
           info.connectState === wifiManager.P2pConnectState.DISCONNECTED) {
@@ -336,7 +371,25 @@ export class WifiP2pManager {
           lastDeviceStatus = status;
         }
       };
-      const pollPeerStatus = async (): Promise<void> => {
+      const pollConnectionStatus = async (): Promise<void> => {
+        if (settled) {
+          return;
+        }
+        try {
+          const current = await wifiManager.getP2pLinkedInfo();
+          if (settled) {
+            return;
+          }
+          // Some builds delay or omit CONNECTED events. Querying the current
+          // state lets a ready link proceed; initial DISCONNECTED is normal
+          // during negotiation and must not be treated as a rejected request.
+          if (current.connectState === wifiManager.P2pConnectState.CONNECTED) {
+            connectionCallback(current, 'poll');
+            return;
+          }
+        } catch (_e) {
+          // Temporary query failure does not invalidate the event-driven path.
+        }
         if (settled) {
           return;
         }
@@ -347,8 +400,8 @@ export class WifiP2pManager {
         }
         if (!settled) {
           peerPollTimer = setTimeout(() => {
-            void pollPeerStatus();
-          }, 350);
+            void pollConnectionStatus();
+          }, CONNECTION_STATE_POLL_MS);
         }
       };
       const timer = setTimeout(() => {
@@ -370,21 +423,11 @@ export class WifiP2pManager {
           rejectOnce(error);
         });
       }
-      void pollPeerStatus();
-      void (async () => {
-        try {
-          const current = await wifiManager.getP2pLinkedInfo();
-          if (current.connectState === wifiManager.P2pConnectState.CONNECTED) {
-            connectionCallback(current);
-          }
-        } catch (_e) {
-          // The connection event remains authoritative while setup is in progress.
-        }
-      })();
+      void pollConnectionStatus();
     });
   }
 
-  private async resetPreviousMemberAttempt(invitation: P2pRoomInvitation): Promise<void> {
+  private async resetPreviousMemberAttempt(): Promise<void> {
     if (this.lastMemberAttemptGroupName.length === 0) {
       return;
     }
@@ -398,14 +441,20 @@ export class WifiP2pManager {
     try {
       const linked = await wifiManager.getP2pLinkedInfo();
       if (linked.connectState === wifiManager.P2pConnectState.CONNECTED) {
-        const group = await wifiManager.getCurrentGroup();
-        if (group.groupName !== previousGroupName && group.groupName !== invitation.groupName) {
-          throw new Error('设备正在使用其他 P2P 连接，请先结束投屏、互传或附近共享后重试');
+        const group = await this.waitForCurrentGroup(MEMBER_GROUP_RELEASE_TIMEOUT_MS);
+        // A new invitation cannot grant ownership of an existing system group.
+        // Only the group requested by the previous attempt may be released.
+        if (group.groupName !== previousGroupName) {
+          throw new Error(FOREIGN_P2P_MESSAGE);
         }
-        wifiManager.removeGroup();
+        this.ownsGroup = true;
+        this.ownedGroupName = group.groupName;
+        await this.removeOwnedGroup();
+      } else if (linked.connectState !== wifiManager.P2pConnectState.DISCONNECTED) {
         await this.waitForDisconnected(MEMBER_GROUP_RELEASE_TIMEOUT_MS);
       }
       this.ownsGroup = false;
+      this.ownedGroupName = '';
       this.lastMemberAttemptGroupName = '';
     } catch (err) {
       const error = err as Error;
@@ -434,23 +483,125 @@ export class WifiP2pManager {
   }
 
   private async waitForDisconnected(timeoutMs: number): Promise<void> {
-    const startedAt = Date.now();
-    while (Date.now() - startedAt < timeoutMs) {
-      const linked = await wifiManager.getP2pLinkedInfo();
-      if (linked.connectState === wifiManager.P2pConnectState.DISCONNECTED) {
-        return;
-      }
-      await sleep(150);
-    }
-    throw new Error('上次 P2P 连接释放超时');
+    await new Promise<void>((resolve, reject) => {
+      let settled = false;
+      let pollTimer: number = -1;
+      const timer = setTimeout(() => {
+        settled = true;
+        if (pollTimer >= 0) {
+          clearTimeout(pollTimer);
+        }
+        reject(new Error('上次 P2P 连接释放超时，请稍后重试退出队伍'));
+      }, timeoutMs);
+      const poll = async (): Promise<void> => {
+        try {
+          const linked = await wifiManager.getP2pLinkedInfo();
+          if (settled) {
+            return;
+          }
+          if (linked.connectState === wifiManager.P2pConnectState.DISCONNECTED) {
+            settled = true;
+            clearTimeout(timer);
+            resolve();
+            return;
+          }
+        } catch (_e) {
+          // A transient SDK query is not proof of release. The deadline also
+          // bounds a query whose native Promise never returns.
+        }
+        if (!settled) {
+          pollTimer = setTimeout(() => { void poll(); }, 150);
+        }
+      };
+      void poll();
+    });
   }
 
   async abortMemberJoin(): Promise<void> {
+    this.memberAttemptGeneration++;
+    this.cancelMemberGroupWait?.();
     await this.stopDiscovery();
     if (this.lastMemberAttemptGroupName.length > 0) {
       await this.cancelPendingMemberConnect();
     }
     await this.removeOwnedGroup();
+  }
+
+  private waitForMemberGroup(expectedGroupName: string,
+    timeoutMs: number, generation: number): Promise<wifiManager.WifiP2pGroupInfo> {
+    return new Promise((resolve, reject) => {
+      const startedAt = Date.now();
+      let settled = false;
+      let matchedGroup = false;
+      let lastError = '';
+      let pollTimer: number = -1;
+      const cleanup = (): void => {
+        clearTimeout(timer);
+        if (pollTimer >= 0) {
+          clearTimeout(pollTimer);
+        }
+        if (this.cancelMemberGroupWait === cancel) {
+          this.cancelMemberGroupWait = undefined;
+        }
+      };
+      const rejectOnce = (error: Error): void => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        cleanup();
+        reject(error);
+      };
+      const cancel = (): void => { rejectOnce(new Error(JOIN_CANCELLED_MESSAGE)); };
+      const timer = setTimeout(() => {
+        console.info(`[JoinDiag] stage=p2p-group state=timeout elapsedMs=${Date.now() - startedAt}`);
+        rejectOnce(new Error(matchedGroup ? '已连接 P2P，但系统未返回队长地址' :
+          (lastError.length > 0 ? lastError : '系统未返回当前 P2P 组信息')));
+      }, timeoutMs);
+      const poll = async (): Promise<void> => {
+        try {
+          const group = await wifiManager.getCurrentGroup();
+          if (settled) {
+            return;
+          }
+          if (generation !== this.memberAttemptGeneration) {
+            cancel();
+            return;
+          }
+          if (group.groupName.length > 0) {
+            if (group.groupName !== expectedGroupName) {
+              rejectOnce(new Error(FOREIGN_P2P_MESSAGE));
+              return;
+            }
+            // CONNECTED can precede the GO address. Record the verified group
+            // before waiting for it, so abort/timeout can release our own link.
+            this.ownsGroup = true;
+            this.ownedGroupName = group.groupName;
+            if (group.goIpAddress.length > 0) {
+              settled = true;
+              cleanup();
+              console.info(`[JoinDiag] stage=p2p-group state=ready elapsedMs=${Date.now() - startedAt}`);
+              resolve(group);
+              return;
+            }
+            if (!matchedGroup) {
+              console.info(`[JoinDiag] stage=p2p-group state=waiting-address elapsedMs=${Date.now() - startedAt}`);
+            }
+            matchedGroup = true;
+          }
+        } catch (err) {
+          if (settled) {
+            return;
+          }
+          lastError = (err as Error).message ?? '';
+        }
+        if (!settled) {
+          pollTimer = setTimeout(() => { void poll(); }, 250);
+        }
+      };
+      this.cancelMemberGroupWait = cancel;
+      void poll();
+    });
   }
 
   private async waitForCurrentGroup(timeoutMs: number): Promise<wifiManager.WifiP2pGroupInfo> {
@@ -484,16 +635,64 @@ export class WifiP2pManager {
   }
 
   private async removeOwnedGroup(): Promise<void> {
+    if (this.groupRemovalOperation !== undefined) {
+      await this.groupRemovalOperation;
+      return;
+    }
     if (!this.ownsGroup) {
       return;
     }
+    const preceding = WifiP2pManager.groupReleaseOperation;
+    const removal = this.removeOwnedGroupExclusive(preceding);
+    this.groupRemovalOperation = removal;
+    WifiP2pManager.groupReleaseOperation = removal;
     try {
-      wifiManager.removeGroup();
-    } catch (err) {
-      const e = err as BusinessError;
-      console.warn(`WifiP2pManager removeGroup: ${e.message}`);
+      await removal;
+    } finally {
+      if (this.groupRemovalOperation === removal) {
+        this.groupRemovalOperation = undefined;
+      }
+      if (WifiP2pManager.groupReleaseOperation === removal) {
+        WifiP2pManager.groupReleaseOperation = undefined;
+      }
     }
-    this.ownsGroup = false;
+  }
+
+  private async removeOwnedGroupExclusive(preceding?: Promise<void>): Promise<void> {
+    if (preceding !== undefined) {
+      await preceding;
+    }
+    const startedAt = Date.now();
+    try {
+      const linked = await wifiManager.getP2pLinkedInfo();
+      if (linked.connectState === wifiManager.P2pConnectState.CONNECTED) {
+        const group = await wifiManager.getCurrentGroup();
+        if (group.groupName.length === 0) {
+          throw new Error('系统尚未返回上次 P2P 组信息，请稍后重试');
+        }
+        // Ownership comes from the group this instance actually created/joined,
+        // never from a prefix or a newly supplied invitation. A replaced group
+        // may belong to casting/sharing, and must survive our old session exit.
+        if (group.groupName !== this.ownedGroupName) {
+          this.ownsGroup = false;
+          this.ownedGroupName = '';
+          console.info('[JoinDiag] stage=p2p-release state=ownership-changed');
+          return;
+        }
+        wifiManager.removeGroup();
+        await this.waitForDisconnected(MEMBER_GROUP_RELEASE_TIMEOUT_MS);
+      } else if (linked.connectState !== wifiManager.P2pConnectState.DISCONNECTED) {
+        await this.waitForDisconnected(MEMBER_GROUP_RELEASE_TIMEOUT_MS);
+      }
+      this.ownsGroup = false;
+      this.ownedGroupName = '';
+      console.info(`[JoinDiag] stage=p2p-release state=disconnected elapsedMs=${Date.now() - startedAt}`);
+    } catch (err) {
+      // Keep the owner available for retry: forgetting it here would make the
+      // still-live app connection indistinguishable from a foreign connection.
+      console.warn(`[JoinDiag] stage=p2p-release state=failed elapsedMs=${Date.now() - startedAt}`);
+      throw p2pError(err as Error, '上次 P2P 连接尚未释放，请稍后重试');
+    }
   }
 
   async teardown(): Promise<void> {

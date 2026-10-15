@@ -1,6 +1,7 @@
 import { audio } from '@kit.AudioKit';
+import { systemDateTime } from '@kit.BasicServicesKit';
 import { MonotonicClock } from '../common/MonotonicClock';
-import { CalibrationSignalTiming } from './MetronomeEngine';
+import { CalibrationPlaybackReference, CalibrationSignalTiming } from './MetronomeEngine';
 
 const SAMPLE_RATE_HZ: number = 44100;
 const CHIRP_DURATION_MS: number = 500;
@@ -29,6 +30,9 @@ const MIN_VALID_INPUT_RUNS: number = 2;
 const INPUT_CLUSTER_MAX_SPREAD_MS: number = 30;
 const MIN_INPUT_LATENCY_MS: number = 1;
 const MAX_INPUT_LATENCY_MS: number = 1000;
+// Speaker loopback must exceed renderer HARDWARE leg plus mic/air path; smaller
+// values usually mean correlation locked onto an old chirp at the causal edge.
+const MIN_INPUT_ROUND_TRIP_MS: number = 60;
 
 export interface MicLoopbackResult {
   latencyMs: number;
@@ -39,6 +43,9 @@ export interface MicLoopbackResult {
   detectedRuns: number;
   spreadMs: number;
   hardwareLatencyMs: number;
+  // Raw round trips can be pooled across probes, but playback retains only
+  // the last probe's renderer epoch. Its mapping must never be median-pooled.
+  playbackReference?: CalibrationPlaybackReference;
 }
 
 export interface MicInputLatencyResult {
@@ -54,6 +61,9 @@ export type CalibrationSignalPlayer =
   // Resolves to the chirp first frame's renderer-presentation target, not the
   // earlier writeData/submit callback time.
   (signal: Int16Array, targetAtLocalMonoMs: number) => Promise<CalibrationSignalTiming>;
+
+/** Realigns renderer frame epoch between mic calibration probes on the same route. */
+export type MicCalibrationProbeBoundaryHook = () => Promise<void>;
 
 /**
  * 生成线性扫频 chirp（800→4000Hz）。起始相位用 cos 保证首采样即满幅（尖锐起跳沿），
@@ -97,6 +107,16 @@ const DOWNSAMPLE_FACTOR: number = 4;
 // 粗搜索每隔 4 个降采样点计算一次，再在峰值附近逐点细搜。保持约 0.09ms 精度，
 // 同时让“预检测 + 4 次正式测量”不会长时间占用 UI 线程。
 const CORR_COARSE_STRIDE: number = 4;
+// Diagnostic peaks closer than this are the same chirp main lobe in practice.
+// Keeping them out of top-K exposes a possible later acoustic peak instead of
+// printing three adjacent samples from an earlier AEC/electrical-reference peak.
+const CORR_DIAG_PEAK_GUARD_MS: number = 50;
+
+interface CaptureClockAnchor {
+  framePos: number;
+  timestampMonoMs: number;
+  queryMonoMs: number;
+}
 
 /**
  * 互相关（matched filter）定位 chirp 到达时刻。
@@ -179,9 +199,12 @@ async function findOnsetByCrossCorrelation(captured: number[], chirp: Int16Array
   // 稳定副峰（电串扰/早反射被锁定），从而解释「蓝牙回环缺 mic 时延」的 onset 偏早。
   {
     const TOPK = 3;
-    const GUARD = 8; // 粗域 index 邻域屏蔽，跳过主峰旁瓣，不遮蔽 ~232ms 外的副峰。
+    const guardIndexes = Math.max(8, Math.round(
+      CORR_DIAG_PEAK_GUARD_MS * SAMPLE_RATE_HZ /
+      (1000 * CORR_COARSE_STRIDE * ds)));
     const corrCopy = Array.from(corr);
     const peaks: string[] = [];
+    const bestLagMs = bestLag * ds / SAMPLE_RATE_HZ * 1000;
     for (let k = 0; k < TOPK; k++) {
       let maxIdx = -1;
       let maxVal = -1;
@@ -196,8 +219,12 @@ async function findOnsetByCrossCorrelation(captured: number[], chirp: Int16Array
       }
       const lagMs = (firstCorrIndex + maxIdx) * CORR_COARSE_STRIDE * ds /
         SAMPLE_RATE_HZ * 1000;
-      peaks.push(`#${k + 1} lag=${Math.round(lagMs)}ms`);
-      for (let i = Math.max(0, maxIdx - GUARD); i <= Math.min(corrCopy.length - 1, maxIdx + GUARD); i++) {
+      const relativeMs = Math.round(lagMs - bestLagMs);
+      const relativeDb = 20 * Math.log10(Math.max(maxVal, 1e-12) / Math.max(bestVal, 1e-12));
+      peaks.push(`#${k + 1} lag=${Math.round(lagMs)}ms rel=${relativeMs >= 0 ? '+' : ''}${relativeMs}ms ` +
+        `level=${relativeDb.toFixed(1)}dB`);
+      for (let i = Math.max(0, maxIdx - guardIndexes);
+        i <= Math.min(corrCopy.length - 1, maxIdx + guardIndexes); i++) {
         corrCopy[i] = -1;
       }
     }
@@ -255,13 +282,17 @@ function yieldToEventLoop(): Promise<void> {
 /**
  * 麦克风回环自动测时延：渲染一个已知 chirp 到耳机，同时用麦克风采集，互相关（匹配滤波）定位
  * chirp 在采集流中的到达帧。耳机测量从 chirp 目标帧的 renderer-presentation 时刻起算，
- * 与正式播放使用同一帧时钟；writeData 只是提前填充队列，不能算进需要补偿的输出时延。
+ * 先保留物理往返；正式播放的 legacy 帧坐标另按最终 renderer epoch 转换。
+ * writeData 只是提前填充队列，不能直接算进物理输出时延。
  */
 export class MicLoopbackCalibrator {
   private capturer: audio.AudioCapturer | undefined = undefined;
   private captured: number[] = [];
   private chirp: Int16Array = buildChirp(CHIRP_DURATION_MS);
   private captureStartMonoMs: number = -1;
+  private captureDeliveredFrames: number = 0;
+  private captureStage: string = 'unknown';
+  private lastPlaybackReference: CalibrationPlaybackReference | undefined = undefined;
   // A boolean cancel flag can be cleared by a quick retry while the previous
   // async run is still unwinding. A monotonically increasing generation makes
   // cancellation permanent for that run and keeps old capturer callbacks from
@@ -272,17 +303,79 @@ export class MicLoopbackCalibrator {
     return generation === this.measurementGeneration;
   }
 
-  private appendCapturedBuffer(buffer: ArrayBuffer, generation: number): void {
+  private readCaptureClockAnchor(capturer: audio.AudioCapturer): CaptureClockAnchor | undefined {
+    try {
+      const startupBeforeMs = systemDateTime.getUptime(systemDateTime.TimeType.STARTUP, true) / 1000000;
+      const activeBeforeMs = systemDateTime.getUptime(systemDateTime.TimeType.ACTIVE, true) / 1000000;
+      const info = capturer.getAudioTimestampInfoSync();
+      const activeAfterMs = systemDateTime.getUptime(systemDateTime.TimeType.ACTIVE, true) / 1000000;
+      const startupAfterMs = systemDateTime.getUptime(systemDateTime.TimeType.STARTUP, true) / 1000000;
+      if (info.framePos < 0 || info.timestamp <= 0) {
+        return undefined;
+      }
+      const queryMonoMs = (startupBeforeMs + startupAfterMs) / 2;
+      const activeAtQueryMs = (activeBeforeMs + activeAfterMs) / 2;
+      const timestampMonoMs = info.timestamp / 1000000 + queryMonoMs - activeAtQueryMs;
+      if (!Number.isFinite(timestampMonoMs)) {
+        return undefined;
+      }
+      return { framePos: info.framePos, timestampMonoMs, queryMonoMs };
+    } catch (_e) {
+      return undefined;
+    }
+  }
+
+  private describeInputDevices(capturer: audio.AudioCapturer): string {
+    try {
+      const devices = capturer.getCurrentInputDevices();
+      const parts: string[] = [];
+      for (let i = 0; i < devices.length; i++) {
+        parts.push(`${devices[i].deviceType}:${devices[i].id}`);
+      }
+      return parts.length > 0 ? parts.join(',') : 'none';
+    } catch (_e) {
+      return 'unavailable';
+    }
+  }
+
+  private readAudioScene(): number {
+    try {
+      return audio.getAudioManager().getAudioSceneSync();
+    } catch (_e) {
+      return -1;
+    }
+  }
+
+  private appendCapturedBuffer(buffer: ArrayBuffer, generation: number,
+    capturer: audio.AudioCapturer): void {
     if (!this.isMeasurementActive(generation)) {
       return;
     }
     const n = Math.floor(buffer.byteLength / 2);
+    const bufferStartFrame = this.captureDeliveredFrames;
+    this.captureDeliveredFrames += n;
     if (this.captureStartMonoMs < 0) {
-      // 采集流第 0 帧的真实时刻 = 首个 readData 回调时刻 − 一个缓冲时长。
+      // 回调时刻减一个缓冲时长只是交付时间估计；输入处理和积压仍计入两阶段的输入项。
       const bufferMs = n / SAMPLE_RATE_HZ * 1000;
       const nowMs = MonotonicClock.nowMs();
       this.captureStartMonoMs = nowMs - bufferMs;
-      console.info(`[CaptureAnchorDiag] firstReadData nowMs=${nowMs.toFixed(1)} bufferMs=${bufferMs.toFixed(1)} n=${n} captureStartMonoMs=${this.captureStartMonoMs.toFixed(1)}`);
+      const clock = this.readCaptureClockAnchor(capturer);
+      let clockFields = 'clock=unavailable';
+      if (clock !== undefined) {
+        // bufferStartFrame is the first delivered sample in the current probe,
+        // while framePos is the newest hardware-captured frame. Their difference
+        // reveals delivery backlog that the callback-time heuristic cannot see.
+        const clockStartMonoMs = clock.timestampMonoMs -
+          (clock.framePos - bufferStartFrame) * 1000 / SAMPLE_RATE_HZ;
+        clockFields = `clockFrame=${clock.framePos} bufferStartFrame=${bufferStartFrame} ` +
+          `clockAgeMs=${(clock.queryMonoMs - clock.timestampMonoMs).toFixed(1)} ` +
+          `clockStart=${clockStartMonoMs.toFixed(1)} ` +
+          `clockMinusHeuristicMs=${(clockStartMonoMs - this.captureStartMonoMs).toFixed(1)}`;
+      }
+      console.info(`[CaptureAnchorDiag] stage=${this.captureStage} firstReadData=${nowMs.toFixed(1)} ` +
+        `bufferMs=${bufferMs.toFixed(1)} n=${n} heuristicStart=${this.captureStartMonoMs.toFixed(1)} ` +
+        `${clockFields} inputDevices=[${this.describeInputDevices(capturer)}] ` +
+        `audioScene=${this.readAudioScene()}`);
     }
     const view = new DataView(buffer);
     for (let i = 0; i < n; i++) {
@@ -306,6 +399,7 @@ export class MicLoopbackCalibrator {
   /** Both calibration stages must use the same MIC processing chain so their subtraction remains valid. */
   private async createStartedCapturer(streamInfo: audio.AudioStreamInfo,
     generation: number): Promise<audio.AudioCapturer> {
+    this.captureDeliveredFrames = 0;
     const capturer = await audio.createAudioCapturer({
       streamInfo: streamInfo,
       capturerInfo: {
@@ -314,9 +408,11 @@ export class MicLoopbackCalibrator {
       }
     });
     capturer.on('readData', (buffer: ArrayBuffer): void => {
-      this.appendCapturedBuffer(buffer, generation);
+      this.appendCapturedBuffer(buffer, generation, capturer);
     });
     await capturer.start();
+    console.info(`[MicRouteDiag] phase=capturer-start stage=${this.captureStage} ` +
+      `inputDevices=[${this.describeInputDevices(capturer)}] audioScene=${this.readAudioScene()}`);
     return capturer;
   }
 
@@ -355,13 +451,17 @@ export class MicLoopbackCalibrator {
     }
     const probeCaptureStartMonoMs = this.captureStartMonoMs;
     const targetAtLocalMonoMs = MonotonicClock.nowMs() + PERSISTENT_RENDERER_SIGNAL_LEAD_MS;
-    // Production also places beats on the renderer-presentation frame clock.
-    // Starting at writeData would add the mutable software queue to the result
-    // and make playback compensate that queue twice.
+    // Keep the physical round trip and causal search on the raw presentation
+    // clock. The page later converts the result to production's legacy frame
+    // mapping; using that mapping here would also move the correlation window.
     const timing = await playSignal(this.chirp, targetAtLocalMonoMs);
     if (!this.isMeasurementActive(generation)) {
       return this.emptyResult();
     }
+    // A later probe replaces the output renderer even if its correlation is
+    // rejected. The retained epoch, rather than the accepted acoustic cluster,
+    // determines which mapping is usable after the capturer is released.
+    this.lastPlaybackReference = timing.playbackReference;
     // A fixed 1300ms window can end before a queued 500ms chirp is complete.
     // Anchor the deadline to the verified presentation time so correlation
     // always receives the whole current chirp, even with a deep real queue.
@@ -381,20 +481,24 @@ export class MicLoopbackCalibrator {
       return this.emptyResult();
     }
     analyzed.hardwareLatencyMs = timing.hardwareLatencyMs;
+    analyzed.playbackReference = timing.playbackReference;
     return analyzed;
   }
 
   /**
    * Capture chirps emitted by the session's persistent renderer. Positioning probes give the
-   * user actionable feedback at normal listening volume; four formal probes then share the
-   * same running input/output streams and use their median so one scheduling outlier cannot
-   * become the saved Bluetooth compensation.
+   * user actionable feedback at normal listening volume. Formal probes reuse the input stream
+   * and take a robust median of raw round trips; their boundary hook may replace the output
+   * renderer, so the result separately retains the actual final renderer's mapping.
    */
   async measureWithPersistentRenderer(
     playSignal: CalibrationSignalPlayer,
-    onStatus?: (msg: string) => void
+    onStatus?: (msg: string) => void,
+    probeBoundary?: MicCalibrationProbeBoundaryHook
   ): Promise<MicLoopbackResult> {
     const generation = ++this.measurementGeneration;
+    this.captureStage = 'headphone';
+    this.lastPlaybackReference = undefined;
     this.captured = [];
     this.captureStartMonoMs = -1;
 
@@ -412,7 +516,14 @@ export class MicLoopbackCalibrator {
       }
       this.capturer = capturer;
 
+      const realignRendererEpoch = async (): Promise<void> => {
+        if (probeBoundary !== undefined) {
+          await probeBoundary();
+        }
+      };
+
       let positioningBest = this.emptyResult();
+      await realignRendererEpoch();
       for (let i = 0; i < POSITIONING_MAX_PROBES; i++) {
         onStatus?.(i === 0
           ? '正在听耳机声音，请把出声孔对准手机底部麦克风…'
@@ -439,11 +550,16 @@ export class MicLoopbackCalibrator {
         if (!await this.waitWhileActive(generation, 650)) {
           return this.emptyResult();
         }
+        if (i + 1 < POSITIONING_MAX_PROBES) {
+          await realignRendererEpoch();
+        }
       }
 
       if (!positioningBest.detected) {
         return positioningBest;
       }
+
+      await realignRendererEpoch();
 
       const valid: MicLoopbackResult[] = [];
       let capturedPeak = positioningBest.capturedPeak;
@@ -464,10 +580,11 @@ export class MicLoopbackCalibrator {
           valid.push(probe);
           runs++;
         }
-        if (runs < HEADPHONE_MEASUREMENT_RUNS) {
+        if (runs < HEADPHONE_MEASUREMENT_RUNS && attempts < maxAttempts) {
           if (!await this.waitWhileActive(generation, 250)) {
             return this.emptyResult();
           }
+          await realignRendererEpoch();
         }
       }
       await capturer.stop();
@@ -500,6 +617,16 @@ export class MicLoopbackCalibrator {
       const maxLatency = Math.max(...latencies);
       console.info(`[MicLoopback] detected=${sorted.map((probe: MicLoopbackResult) => probe.latencyMs).join(',')}ms ` +
         `selected=${latencies.join(',')}ms spread=${(maxLatency - minLatency).toFixed(1)}ms`);
+      if (maxLatency - minLatency > OUTLIER_CLUSTER_MAX_SPREAD_MS) {
+        // A high correlation SNR identifies a chirp, not a stable latency.
+        // Saving a broad cluster would conceal route/input scheduling changes.
+        const rejected = this.emptyResult(capturedPeak,
+          Math.round(medianOf(confidences) * 10) / 10, selected.length);
+        rejected.detectedRuns = valid.length;
+        rejected.spreadMs = Math.round((maxLatency - minLatency) * 10) / 10;
+        rejected.playbackReference = this.lastPlaybackReference;
+        return rejected;
+      }
       return {
         latencyMs: Math.round(medianOf(latencies) * 10) / 10,
         snrDb: Math.round(medianOf(confidences) * 10) / 10,
@@ -508,7 +635,8 @@ export class MicLoopbackCalibrator {
         validRuns: selected.length,
         detectedRuns: valid.length,
         spreadMs: Math.round((maxLatency - minLatency) * 10) / 10,
-        hardwareLatencyMs: medianOf(selected.map((probe: MicLoopbackResult) => probe.hardwareLatencyMs))
+        hardwareLatencyMs: medianOf(selected.map((probe: MicLoopbackResult) => probe.hardwareLatencyMs)),
+        playbackReference: this.lastPlaybackReference
       };
     } catch (err) {
       throw new Error((err as Error).message ?? '麦克风回环测量失败');
@@ -518,13 +646,19 @@ export class MicLoopbackCalibrator {
       } catch (_e) {
         // Stop can race page exit; release still has to run.
       }
+      let releaseFailed = false;
       try {
         await capturer?.release();
       } catch (_e) {
-        // ignore
+        // A result is only usable with the recording route gone. A cancelled
+        // generation may finish best-effort cleanup without affecting its retry.
+        releaseFailed = this.isMeasurementActive(generation);
       }
       if (this.capturer === capturer) {
         this.capturer = undefined;
+      }
+      if (releaseFailed) {
+        throw new Error('麦克风录音流未能关闭，请退出校准后重试');
       }
     }
   }
@@ -540,10 +674,14 @@ export class MicLoopbackCalibrator {
    * 连测 INPUT_CALIBRATION_RUNS 次取中位数，抵消单次启动/调度抖动。
    */
   async measureInputLatency(playSignal: CalibrationSignalPlayer,
-    onStatus?: (msg: string) => void): Promise<MicInputLatencyResult> {
+    onStatus?: (msg: string) => void,
+    afterEachProbe?: MicCalibrationProbeBoundaryHook): Promise<MicInputLatencyResult> {
     const generation = ++this.measurementGeneration;
+    this.captureStage = 'input';
+    this.lastPlaybackReference = undefined;
     const samples: number[] = [];
     const validProbes: MicLoopbackResult[] = [];
+    let detectedProbeCount = 0;
     let last = this.emptyResult();
     const streamInfo: audio.AudioStreamInfo = {
       samplingRate: audio.AudioSamplingRate.SAMPLE_RATE_44100,
@@ -565,6 +703,9 @@ export class MicLoopbackCalibrator {
         };
       }
       this.capturer = capturer;
+      if (afterEachProbe !== undefined) {
+        await afterEachProbe();
+      }
       for (let i = 0; i < INPUT_CALIBRATION_RUNS; i++) {
         if (!this.isMeasurementActive(generation)) {
           break;
@@ -574,21 +715,32 @@ export class MicLoopbackCalibrator {
         if (!this.isMeasurementActive(generation)) {
           break;
         }
+        if (last.detected) {
+          detectedProbeCount++;
+        }
         if (last.detected && last.hardwareLatencyMs >= 0) {
-          const inputLatencyMs = last.latencyMs - last.hardwareLatencyMs;
-          if (Number.isFinite(inputLatencyMs) && inputLatencyMs >= MIN_INPUT_LATENCY_MS &&
-            inputLatencyMs <= MAX_INPUT_LATENCY_MS) {
-            samples.push(inputLatencyMs);
-            validProbes.push(last);
+          if (last.latencyMs < MIN_INPUT_ROUND_TRIP_MS) {
+            console.warn(`[MicInputCalibration] reject roundTripMs=${last.latencyMs.toFixed(1)} ` +
+              `< ${MIN_INPUT_ROUND_TRIP_MS} (likely wrong chirp in correlation)`);
           } else {
-            // A non-positive input pipeline is physically invalid. Persisting a
-            // clamped zero would fold the entire mic leg into output compensation.
-            console.warn(`[MicInputCalibration] reject inputLatencyMs=${inputLatencyMs.toFixed(1)} ` +
-              `roundTripMs=${last.latencyMs} hardwareLatencyMs=${last.hardwareLatencyMs}`);
+            const inputLatencyMs = last.latencyMs - last.hardwareLatencyMs;
+            if (Number.isFinite(inputLatencyMs) && inputLatencyMs >= MIN_INPUT_LATENCY_MS &&
+              inputLatencyMs <= MAX_INPUT_LATENCY_MS) {
+              samples.push(inputLatencyMs);
+              validProbes.push(last);
+            } else {
+              // A non-positive input pipeline is physically invalid. Persisting a
+              // clamped zero would fold the entire mic leg into output compensation.
+              console.warn(`[MicInputCalibration] reject inputLatencyMs=${inputLatencyMs.toFixed(1)} ` +
+                `roundTripMs=${last.latencyMs} hardwareLatencyMs=${last.hardwareLatencyMs}`);
+            }
           }
         }
         if (i + 1 < INPUT_CALIBRATION_RUNS) {
-          if (!await this.waitWhileActive(generation, 250)) {
+          if (afterEachProbe !== undefined) {
+            await afterEachProbe();
+          }
+          if (!await this.waitWhileActive(generation, 350)) {
             break;
           }
         }
@@ -600,13 +752,17 @@ export class MicLoopbackCalibrator {
       } catch (_e) {
         // Stop may race page exit; release must still run.
       }
+      let releaseFailed = false;
       try {
         await capturer?.release();
       } catch (_e) {
-        // ignore
+        releaseFailed = this.isMeasurementActive(generation);
       }
       if (this.capturer === capturer) {
         this.capturer = undefined;
+      }
+      if (releaseFailed) {
+        throw new Error('麦克风录音流未能关闭，请退出校准后重试');
       }
     }
     const sortedSamples = samples.slice().sort((a: number, b: number) => a - b);
@@ -626,6 +782,11 @@ export class MicLoopbackCalibrator {
     console.info(`[MicInputCalibration] samples=${sortedSamples.join(',')}ms ` +
       `selected=${stableSamples.join(',')}ms`);
     if (stableSamples.length < MIN_VALID_INPUT_RUNS) {
+      console.warn(`[MicInputCalibration] failed: need ${MIN_VALID_INPUT_RUNS} stable samples, ` +
+        `got ${stableSamples.length} accepted=${samples.length} ` +
+        `correlationDetected=${detectedProbeCount}/${INPUT_CALIBRATION_RUNS} ` +
+        `lastRoundTripMs=${last.latencyMs} lastHardwareMs=${last.hardwareLatencyMs} ` +
+        `lastSnrDb=${last.snrDb} lastPeak=${last.capturedPeak}`);
       return {
         inputLatencyMs: -1,
         roundTripMs: last.latencyMs,

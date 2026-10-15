@@ -1,8 +1,13 @@
 import { SessionController } from '../session/SessionController';
-import { CalibrationSignalTiming, MetronomeEngine } from '../audio/MetronomeEngine';
+import {
+  CalibrationPlaybackReference,
+  CalibrationSignalTiming,
+  MetronomeEngine,
+  MicPlaybackClockPendingError
+} from '../audio/MetronomeEngine';
 import { AudioOutputMonitor } from '../audio/AudioOutputMonitor';
 import { WifiP2pManager } from '../network/p2p/WifiP2pManager';
-import { BleRoomDiscovery } from '../network/p2p/BleRoomDiscovery';
+import { BleMemberJoinFeedbackAttempt, BleRoomDiscovery } from '../network/p2p/BleRoomDiscovery';
 import {
   createP2pRoomInvitation,
   invitationWithGroupCredentials,
@@ -19,8 +24,21 @@ import {
   TransportResumePayload,
   WireMessage
 } from '../protocol/messages';
+
+const MIC_PLAYBACK_REFERENCE_MAX_SPREAD_MS: number = 30;
+const MIC_PLAYBACK_REFERENCE_RECOVERY_TIMEOUT_MS: number = 4000;
+const MIC_PLAYBACK_REFERENCE_SAMPLE_INTERVAL_MS: number = 250;
+// The retained mic renderer is fixed at 44.1kHz. A 500ms window outruns its
+// 20ms frame quantum without making the calibration depend on UI rendering.
+const MIC_PLAYBACK_REFERENCE_RATE_HZ: number = 44100;
+
+/** Informational join stages; session readiness still requires authentication and clock sync. */
+export type MemberJoinStage = 'connecting' | 'joining' | 'preparing';
+
 export class AppSession {
   private static instance: AppSession | undefined = undefined;
+  private static retiringSession: AppSession | undefined = undefined;
+  private static resetOperation: Promise<void> | undefined = undefined;
   readonly controller: SessionController;
   readonly metronome: MetronomeEngine = new MetronomeEngine();
   readonly p2p: WifiP2pManager = new WifiP2pManager();
@@ -30,8 +48,14 @@ export class AppSession {
   private countInStartBeatIndex: number = -1;
   private countInEndBeatIndex: number = -1;
   private latencyCalibrationActive: boolean = false;
+  // Tap tests and previews share the transport guard, but only active mic
+  // probes may rebuild the renderer when the physical output route changes.
+  private micCalibrationActive: boolean = false;
   private latencyRouteProbeToken: number = 0;
+  private latencyRouteProbeOwner: number = -1;
   private teamJoinedForWarmup: boolean = false;
+  private memberJoinFeedbackAttempt: BleMemberJoinFeedbackAttempt | undefined = undefined;
+  private shutdownOperation: Promise<void> | undefined = undefined;
   // Once calibration is saved or walking starts, the physical stream belongs
   // to the team session. Lobby/walk transitions must keep it running so the
   // Bluetooth buffer and renderer frame clock survive until session shutdown.
@@ -40,6 +64,7 @@ export class AppSession {
   private previousBluetoothAudioActive: boolean = false;
   private previousAudioOutputRouteSignature: string = '';
   private handlingRemoteDisband: boolean = false;
+  private micPostCaptureDiagGeneration: number = 0;
 
   private constructor(controller: SessionController) {
     AppStorage.setOrCreate('lastTransportMessage', '');
@@ -48,9 +73,19 @@ export class AppSession {
     AppStorage.setOrCreate('btCalibrationNeedsRemeasure', false);
     AppStorage.setOrCreate('audioOutputRouteEpoch', 0);
     AudioOutputMonitor.start((active: boolean, routeSignature: string) => {
+      const previousRouteSignature = this.previousAudioOutputRouteSignature;
       const routeChanged = this.bluetoothRouteStateInitialized &&
-        this.previousAudioOutputRouteSignature !== routeSignature;
+        previousRouteSignature !== routeSignature;
       const tracksConnection = AppStorage.get<boolean>('btCalibrationTracksConnection') ?? false;
+      const routeProbeActive = this.latencyRouteProbeOwner >= 0;
+      const productionRunning = !this.latencyCalibrationActive &&
+        (controller.state === 'playing' || controller.state === 'countdown') && this.metronome.isRunning();
+      if (routeProbeActive && (routeChanged || !active)) {
+        // A different physical output invalidates this pair. Ordinary warmup
+        // must not restart its stream and silently discard the second click.
+        this.latencyRouteProbeToken++;
+        this.metronome.pause();
+      }
       if (this.bluetoothRouteStateInitialized && this.previousBluetoothAudioActive && !active &&
         tracksConnection) {
         // Reconnection creates a new wireless buffering state. Keep this sticky
@@ -64,12 +99,41 @@ export class AppSession {
         const routeEpoch = AppStorage.get<number>('audioOutputRouteEpoch') ?? 0;
         AppStorage.setOrCreate('audioOutputRouteEpoch', routeEpoch + 1);
       }
+      const routeEpoch = AppStorage.get<number>('audioOutputRouteEpoch') ?? 0;
+      const routeAction = routeProbeActive ? (routeChanged || !active ? 'probe-cancel' : 'probe-playing') :
+        productionRunning ? (routeChanged ? 'playback-rephase' : 'playback-running') :
+        routeChanged && this.micCalibrationActive
+        ? 'calibration-boundary'
+        : (active && !this.micCalibrationActive ? 'playback-warmup' : 'none');
+      console.info(`[AudioRouteDiag] old=${previousRouteSignature || 'none'} new=${routeSignature} ` +
+        `changed=${routeChanged} wireless=${active} calibrationActive=${this.latencyCalibrationActive} ` +
+        `micCalibrationActive=${this.micCalibrationActive} ` +
+        `routeEpoch=${routeEpoch} action=${routeAction}`);
       AppStorage.setOrCreate('btAudioActive', active);
       // The same renderer can survive a route switch, so immediately drop or
       // restore the Bluetooth-only manual compensation for the new route.
       this.metronome.refreshOutputCalibration(routeChanged);
-      if (active) {
-        void this.maybeWarmUpRendererForPlayback();
+      // Do not leave routeReset on a surviving renderer while mic calibration is
+      // running; the next scheduleCalibrationSignal would flush-only and break
+      // framePos alignment on Huawei builds.
+      if (routeChanged && this.micCalibrationActive) {
+        void this.flushMicCalibrationProbeBoundary();
+      } else if (routeChanged && productionRunning) {
+        // Route repair is local to this device. Do not publish a TRANSPORT or
+        // change the leader's clock: all members keep the same beat timeline.
+        void this.metronome.rescheduleForOutputRouteChange().catch((err: Error) => {
+          console.warn(`[RouteRephaseDiag] stage=failed reason=${err.message}`);
+          if (AppSession.instance === this &&
+            AppStorage.get<number>('audioOutputRouteEpoch') === routeEpoch && this.metronome.isRunning()) {
+            promptAction.showToast({ message: err.message });
+          }
+        });
+      } else if (active && !this.micCalibrationActive && !routeProbeActive) {
+        // Mic probes own renderer creation even for duplicate route callbacks.
+        // Other playback keeps its normal warm-up behavior, including tap tests.
+        if (!productionRunning) {
+          void this.maybeWarmUpRendererForPlayback();
+        }
       }
     });
     this.controller = controller;
@@ -134,6 +198,7 @@ export class AppSession {
   }
 
   static createLeader(displayName: string): AppSession {
+    AppSession.assertPreviousSessionReleased();
     const id = `sess-${Date.now()}`;
     const session = new AppSession(new SessionController(id, true, displayName));
     AppSession.instance = session;
@@ -141,6 +206,7 @@ export class AppSession {
   }
 
   static createMember(displayName: string): AppSession {
+    AppSession.assertPreviousSessionReleased();
     const id = `sess-member-${Date.now()}`;
     const session = new AppSession(new SessionController(id, false, displayName));
     AppSession.instance = session;
@@ -148,15 +214,58 @@ export class AppSession {
   }
 
   static clear(): void {
-    void AppSession.instance?.shutdown();
-    AppSession.instance = undefined;
+    void AppSession.reset().catch((err: Error) => {
+      console.warn(`Session cleanup incomplete: ${err.message}`);
+    });
   }
 
   static async reset(): Promise<void> {
-    const previous = AppSession.instance;
+    const pending = AppSession.resetOperation;
+    if (pending !== undefined) {
+      await pending;
+      return;
+    }
+    const previous = AppSession.instance ?? AppSession.retiringSession;
     AppSession.instance = undefined;
-    if (previous !== undefined) { await previous.shutdown(); }
+    // Losing the old instance before removeGroup actually finishes also loses
+    // the proof that this is our group. Retain it after failure for a safe retry.
+    AppSession.retiringSession = previous;
+    const operation = AppSession.releasePreviousSession(previous);
+    AppSession.resetOperation = operation;
+    try {
+      await operation;
+    } finally {
+      if (AppSession.resetOperation === operation) {
+        AppSession.resetOperation = undefined;
+      }
+    }
+  }
+
+  private static async releasePreviousSession(previous?: AppSession): Promise<void> {
+    if (previous !== undefined) {
+      await previous.shutdown();
+    }
+    if (AppSession.retiringSession === previous) {
+      AppSession.retiringSession = undefined;
+    }
     AppStorage.setOrCreate('lastTransportMessage', '');
+  }
+
+  /** Wait only for old-session cleanup, without delaying join on discovery prewarm. */
+  static async prepareMember(displayName: string): Promise<AppSession> {
+    while (AppSession.resetOperation !== undefined) {
+      await AppSession.resetOperation;
+    }
+    if (AppSession.retiringSession !== undefined) {
+      await AppSession.reset();
+    }
+    return AppSession.instance ?? AppSession.createMember(displayName);
+  }
+
+  private static assertPreviousSessionReleased(): void {
+    if (AppSession.resetOperation !== undefined || AppSession.retiringSession !== undefined) {
+      throw new Error('上次队伍连接尚未释放，请稍后重试');
+    }
   }
 
   static handleAppForeground(): void {
@@ -168,34 +277,75 @@ export class AppSession {
   }
 
   async shutdown(): Promise<void> {
+    if (this.shutdownOperation !== undefined) {
+      await this.shutdownOperation;
+      return;
+    }
+    const operation = this.shutdownExclusive();
+    this.shutdownOperation = operation;
+    let completed = false;
+    try {
+      await operation;
+      completed = true;
+    } finally {
+      // A retired session can still receive a late socket callback. Successful
+      // shutdown remains idempotent so it cannot stop the new global monitors.
+      if (!completed && this.shutdownOperation === operation) {
+        this.shutdownOperation = undefined;
+      }
+    }
+  }
+
+  private async shutdownExclusive(): Promise<void> {
+    this.latencyRouteProbeToken++;
+    this.latencyRouteProbeOwner = -1;
+    this.memberJoinFeedbackAttempt?.cancel();
+    this.memberJoinFeedbackAttempt = undefined;
     this.latencyCalibrationActive = false;
+    this.micCalibrationActive = false;
     this.keepRendererAliveForSession = false;
     this.teamJoinedForWarmup = false;
     try {
       // Disband the room before fallible audio/BLE cleanup so a local teardown
       // error cannot leave followers displaying a leader that has already gone.
       await this.controller.disconnect();
-      await this.metronome.stopEngine();
-      await this.bleDiscovery.stopLeaderAdvertising();
-      await this.p2p.teardown();
     } finally {
-      AudioOutputMonitor.stop();
-      await SessionBackgroundKeeper.stop();
+      // A failed audio/BLE stop must not strand the app-owned P2P connection.
+      // The shared reset barrier stays active through every cleanup attempt.
+      try {
+        await this.metronome.stopEngine();
+      } finally {
+        try {
+          await this.bleDiscovery.stopLeaderAdvertising();
+        } finally {
+          try {
+            await this.p2p.teardown();
+          } finally {
+            try {
+              AudioOutputMonitor.stop();
+            } finally {
+              await SessionBackgroundKeeper.stop();
+            }
+          }
+        }
+      }
     }
   }
 
   private async handleRemoteDisband(): Promise<void> {
-    if (this.handlingRemoteDisband) {
+    if (this.handlingRemoteDisband || AppSession.instance !== this) {
       return;
     }
     this.handlingRemoteDisband = true;
-    if (AppSession.instance === this) {
-      AppSession.instance = undefined;
-    }
     try {
-      await this.shutdown();
+      await AppSession.reset();
     } catch (err) {
       console.warn(`Remote disband cleanup incomplete: ${(err as Error).message}`);
+    }
+    // A different room may have been prepared while cleanup was completing.
+    // The old room's callback must not clear its transport or replace its page.
+    if (AppSession.instance !== undefined && AppSession.instance !== this) {
+      return;
     }
     AppStorage.setOrCreate('lastTransportMessage', '');
     router.clear();
@@ -262,10 +412,12 @@ export class AppSession {
    * Bluetooth buffer, rather than only the residual after getLatency().
    */
   async scheduleLatencyTapMeasurement(startAtLocalMonoMs: number, countInBeats: number): Promise<void> {
+    this.micCalibrationActive = false;
     if (!AudioOutputMonitor.isBluetoothA2dpActive()) {
       throw new Error('当前声音没有通过蓝牙耳机输出');
     }
     this.latencyRouteProbeToken++;
+    this.latencyRouteProbeOwner = -1;
     this.latencyCalibrationActive = true;
     this.metronome.setOffsetMs(this.controller.getOffsetMs());
     this.metronome.setBpm(120, 4);
@@ -279,8 +431,9 @@ export class AppSession {
 
   /**
    * Play the microphone-loopback chirp through the persistent walking renderer.
-   * The returned time is the signal frame's presentation target. Keeping this
-   * renderer alive after save preserves the measured physical A2DP route.
+   * The raw presentation target measures the acoustic leg; its playback
+   * reference binds the result to the renderer coordinate reused after save.
+   * Stream continuity alone cannot prove capture teardown leaves A2DP unchanged.
    */
   async scheduleMicLoopbackSignal(signal: Int16Array,
     targetAtLocalMonoMs: number): Promise<CalibrationSignalTiming> {
@@ -288,8 +441,105 @@ export class AppSession {
       throw new Error('当前声音没有通过蓝牙耳机输出');
     }
     this.latencyRouteProbeToken++;
+    this.latencyRouteProbeOwner = -1;
     this.latencyCalibrationActive = true;
-    return await this.metronome.scheduleCalibrationSignal(signal, targetAtLocalMonoMs);
+    this.micCalibrationActive = true;
+    const timing = await this.metronome.scheduleCalibrationSignal(signal, targetAtLocalMonoMs);
+    const expectedReference = timing.playbackReference;
+    if (expectedReference === undefined) {
+      throw new Error('本次回环测量未取得正式播放基准，请重新测量');
+    }
+    timing.playbackReference = this.readMicCalibrationPlaybackReference(expectedReference);
+    return timing;
+  }
+
+  /** Reject a candidate whose retained renderer or production frame mapping has changed. */
+  readMicCalibrationPlaybackReference(expected?: CalibrationPlaybackReference): CalibrationPlaybackReference {
+    if (!AudioOutputMonitor.isBluetoothA2dpActive()) {
+      throw new Error('蓝牙耳机已断开，请重新测量');
+    }
+    const current = this.metronome.readMicCalibrationPlaybackReference(expected);
+    if (expected !== undefined &&
+      (current.rendererEpoch !== expected.rendererEpoch || current.streamId !== expected.streamId ||
+        Math.abs(current.frameMappingOffsetMs - expected.frameMappingOffsetMs) >
+          MIC_PLAYBACK_REFERENCE_MAX_SPREAD_MS)) {
+      throw new Error('测量后的正式播放基准发生变化，请重新测量');
+    }
+    return current;
+  }
+
+  /** Wait for fresh, advancing samples after capture teardown, without rebasing or rebuilding playback. */
+  async verifyMicCalibrationPlaybackReference(expected: CalibrationPlaybackReference):
+    Promise<CalibrationPlaybackReference> {
+    const deadline = MonotonicClock.nowMs() + MIC_PLAYBACK_REFERENCE_RECOVERY_TIMEOUT_MS;
+    let stable: CalibrationPlaybackReference[] = [];
+    while (MonotonicClock.nowMs() <= deadline) {
+      let current: CalibrationPlaybackReference | undefined = undefined;
+      try {
+        current = this.readMicCalibrationPlaybackReference(expected);
+      } catch (err) {
+        if (!(err instanceof MicPlaybackClockPendingError)) {
+          throw new Error((err as Error).message ?? '正式播放基准校验失败，请重新测量');
+        }
+        // Never average the frozen interval into a healthy recovered clock.
+        stable = [];
+        console.info(`[MicPlaybackBridge] stage=verify state=waiting reason=${err.reason}`);
+      }
+      if (current !== undefined) {
+        const previous = stable.length > 0 ? stable[stable.length - 1] : undefined;
+        if (previous !== undefined &&
+          (current.framePos < previous.framePos - MIC_PLAYBACK_REFERENCE_RATE_HZ * 0.02 ||
+            current.timestampMonoMs < previous.timestampMonoMs - 1)) {
+          throw new Error('录音结束后的播放时钟发生回退，请重新测量');
+        }
+        stable.push(current);
+        if (stable.length >= 3) {
+          const first = stable[0];
+          const last = stable[stable.length - 1];
+          const frameDelta = last.framePos - first.framePos;
+          const timestampDeltaMs = last.timestampMonoMs - first.timestampMonoMs;
+          if (frameDelta < -MIC_PLAYBACK_REFERENCE_RATE_HZ * 0.02 || timestampDeltaMs < -1) {
+            throw new Error('录音结束后的播放时钟发生回退，请重新测量');
+          }
+          const offsets = stable.map((sample: CalibrationPlaybackReference) => sample.frameMappingOffsetMs);
+          offsets.sort((a: number, b: number) => a - b);
+          if (offsets[offsets.length - 1] - offsets[0] > MIC_PLAYBACK_REFERENCE_MAX_SPREAD_MS) {
+            throw new Error('录音结束后的播放基准不稳定，请重新测量');
+          }
+          if (last.sampledAtMonoMs - first.sampledAtMonoMs >= 500) {
+            const rateHz = timestampDeltaMs > 0 ? frameDelta * 1000 / timestampDeltaMs : 0;
+            const advancing = timestampDeltaMs >= 400 &&
+              frameDelta >= MIC_PLAYBACK_REFERENCE_RATE_HZ * 0.3 &&
+              Math.abs(rateHz - MIC_PLAYBACK_REFERENCE_RATE_HZ) / MIC_PLAYBACK_REFERENCE_RATE_HZ <= 0.08 &&
+              last.submittedFrames > first.submittedFrames;
+            if (advancing) {
+              console.info(`[MicPlaybackBridge] stage=verify state=stable ` +
+                `rendererEpoch=${last.rendererEpoch} streamId=${last.streamId} rateHz=${rateHz.toFixed(1)}`);
+              return {
+                rendererEpoch: last.rendererEpoch,
+                streamId: last.streamId,
+                frameMappingOffsetMs: offsets[Math.floor(offsets.length / 2)],
+                sampledAtMonoMs: last.sampledAtMonoMs,
+                framePos: last.framePos,
+                timestampMonoMs: last.timestampMonoMs,
+                submittedFrames: last.submittedFrames
+              };
+            }
+            console.info(`[MicPlaybackBridge] stage=verify state=waiting reason=clock-not-advancing ` +
+              `rateHz=${rateHz.toFixed(1)} frameDelta=${frameDelta} timestampDeltaMs=${timestampDeltaMs.toFixed(1)} ` +
+              `submittedDelta=${last.submittedFrames - first.submittedFrames}`);
+            stable = [last];
+          }
+        }
+      }
+      const remainingMs = deadline - MonotonicClock.nowMs();
+      if (remainingMs <= 0) {
+        break;
+      }
+      await new Promise<void>((resolve) =>
+        setTimeout(() => resolve(), Math.min(MIC_PLAYBACK_REFERENCE_SAMPLE_INTERVAL_MS, remainingMs)));
+    }
+    throw new Error('录音结束后的播放时钟未在 4 秒内恢复，请保持耳机连接后重试');
   }
 
   /** Play the input-reference chirp through the phone speaker on the same frame clock. */
@@ -299,8 +549,37 @@ export class AppSession {
       throw new Error('输入侧校准需要把媒体输出切到手机扬声器');
     }
     this.latencyRouteProbeToken++;
+    this.latencyRouteProbeOwner = -1;
     this.latencyCalibrationActive = true;
+    this.micCalibrationActive = true;
     return await this.metronome.scheduleCalibrationSignal(signal, targetAtLocalMonoMs);
+  }
+
+  /** Enter mic measurement before its first chirp, then realign the probe frame epoch. */
+  async flushMicCalibrationProbeBoundary(): Promise<void> {
+    this.latencyRouteProbeToken++;
+    this.latencyRouteProbeOwner = -1;
+    this.latencyCalibrationActive = true;
+    this.micCalibrationActive = true;
+    await this.metronome.flushCalibrationStreamBetweenProbes();
+  }
+
+  /** Compare the same renderer immediately before production settles after capture teardown. */
+  scheduleMicPostCaptureDiagnostics(stage: string): void {
+    this.micCalibrationActive = false;
+    const generation = ++this.micPostCaptureDiagGeneration;
+    const logAfter = (delayMs: number): void => {
+      setTimeout((): void => {
+        if (generation !== this.micPostCaptureDiagGeneration) {
+          return;
+        }
+        this.metronome.logMicCalibrationAudioState(
+          `${stage}-capturer-released+${delayMs}ms`);
+      }, delayMs);
+    };
+    this.metronome.logMicCalibrationAudioState(`${stage}-capturer-released+0ms`);
+    logAfter(500);
+    logAfter(2000);
   }
 
   /**
@@ -309,9 +588,12 @@ export class AppSession {
    * the freshly measured app-to-ear compensation without saving it first.
    */
   async scheduleLatencyPreview(startAtLocalMonoMs: number, compensationMs: number): Promise<void> {
+    this.micCalibrationActive = false;
     if (!AudioOutputMonitor.isBluetoothA2dpActive()) {
       throw new Error('当前声音没有通过蓝牙耳机输出');
     }
+    this.latencyRouteProbeToken++;
+    this.latencyRouteProbeOwner = -1;
     this.latencyCalibrationActive = true;
     this.metronome.setOffsetMs(this.controller.getOffsetMs());
     this.metronome.setBpm(120, 4);
@@ -324,40 +606,40 @@ export class AppSession {
 
   /** Play a finite “accent + weak” pair so the user can confirm the physical route. */
   async playBluetoothRouteProbe(): Promise<boolean> {
+    this.micCalibrationActive = false;
     if (!AudioOutputMonitor.isBluetoothA2dpActive()) {
       throw new Error('未检测到蓝牙耳机输出');
     }
     const probeToken = ++this.latencyRouteProbeToken;
+    this.latencyRouteProbeOwner = probeToken;
     this.latencyCalibrationActive = true;
-    // Establish the renderer before choosing the first-beat deadline. Otherwise
-    // a cold renderer can make scheduleFromLeaderStart skip the initial accent.
-    await this.metronome.ensureRenderer();
-    if (probeToken !== this.latencyRouteProbeToken) {
-      return false;
+    try {
+      const played = await this.metronome.playRouteProbeClickPair(() =>
+        probeToken !== this.latencyRouteProbeToken || !AudioOutputMonitor.isBluetoothA2dpActive());
+      if (probeToken !== this.latencyRouteProbeToken) {
+        return false;
+      }
+      this.pauseLatencyCalibration();
+      if (!AudioOutputMonitor.isBluetoothA2dpActive()) {
+        throw new Error('试音期间蓝牙耳机已断开');
+      }
+      return played;
+    } catch (err) {
+      if (probeToken === this.latencyRouteProbeToken) {
+        this.pauseLatencyCalibration();
+      }
+      throw new Error((err as Error).message ?? '蓝牙试音失败，请重试');
+    } finally {
+      if (this.latencyRouteProbeOwner === probeToken) {
+        this.latencyRouteProbeOwner = -1;
+      }
     }
-    const audibleAtMs = MonotonicClock.nowMs() + 900;
-    this.metronome.setOffsetMs(this.controller.getOffsetMs());
-    this.metronome.configureRouteProbeClickPair();
-    const audioStartLeaderMonoMs = audibleAtMs + this.controller.getOffsetMs();
-    await this.metronome.scheduleFromLeaderStart(audioStartLeaderMonoMs, 0, 0, 0);
-    // At 120 BPM the second click starts at +500 ms; keep the one-shot alive
-    // through its full two-beat render before revealing the route choices.
-    const stopDelayMs = Math.max(0, audibleAtMs + 1050 - MonotonicClock.nowMs());
-    await new Promise<void>((resolve) => {
-      setTimeout(() => resolve(), stopDelayMs);
-    });
-    if (probeToken !== this.latencyRouteProbeToken) {
-      return false;
-    }
-    this.pauseLatencyCalibration();
-    if (!AudioOutputMonitor.isBluetoothA2dpActive()) {
-      throw new Error('试音期间蓝牙耳机已断开');
-    }
-    return true;
   }
 
   async stopLatencyCalibration(): Promise<void> {
-    this.latencyRouteProbeToken++;
+    const stopToken = ++this.latencyRouteProbeToken;
+    this.latencyRouteProbeOwner = -1;
+    this.micCalibrationActive = false;
     if (!this.latencyCalibrationActive) {
       return;
     }
@@ -367,11 +649,16 @@ export class AppSession {
     } else {
       await this.metronome.suspendRenderer();
     }
-    this.syncEngineFromSession();
+    // A delayed stop can finish after a new pair or measurement starts. Do not
+    // replace that newer finite sequence with the team's looping configuration.
+    if (stopToken === this.latencyRouteProbeToken && !this.latencyCalibrationActive) {
+      this.syncEngineFromSession();
+    }
   }
 
   /** Preserve the exact physical output stream that produced the saved result. */
   keepLatencyCalibrationRendererAlive(): void {
+    this.micCalibrationActive = false;
     if (!this.latencyCalibrationActive) {
       return;
     }
@@ -391,6 +678,7 @@ export class AppSession {
 
   /** Stop click content after a run while retaining the warmed renderer for retry. */
   pauseLatencyCalibration(): void {
+    this.micCalibrationActive = false;
     if (this.latencyCalibrationActive) {
       this.metronome.pause();
     }
@@ -480,11 +768,28 @@ export class AppSession {
     return await this.leaderBootstrap(displayName);
   }
 
-  async memberJoinWithInvitation(invitation: P2pRoomInvitation): Promise<void> {
+  async memberJoinWithInvitation(
+    invitation: P2pRoomInvitation,
+    onProgress?: (stage: MemberJoinStage) => void
+  ): Promise<void> {
+    const startedAt = MonotonicClock.nowMs();
+    let previousStageAt = startedAt;
+    const reportStage = (stage: string, progress?: MemberJoinStage): void => {
+      const now = MonotonicClock.nowMs();
+      console.info(`[JoinDiag] stage=${stage} elapsedMs=${(now - startedAt).toFixed(1)} ` +
+        `stageMs=${(now - previousStageAt).toFixed(1)}`);
+      previousStageAt = now;
+      if (progress !== undefined) {
+        onProgress?.(progress);
+      }
+    };
     // BLE 反馈通道只负责把队长的“拒绝”信号快速传回队员，属于尽力而为；
     // 若在 P2P 连接前串行等待，会明显拖慢队长确认弹窗的出现。
     // 这里并行发起 P2P 连接，同时后台建立 BLE 反馈通道。
-    const feedbackPromise = this.bleDiscovery.startMemberJoinFeedback(invitation)
+    const feedbackAttempt = new BleMemberJoinFeedbackAttempt();
+    this.memberJoinFeedbackAttempt?.cancel();
+    this.memberJoinFeedbackAttempt = feedbackAttempt;
+    const feedbackPromise = this.bleDiscovery.startMemberJoinFeedback(invitation, feedbackAttempt)
       .catch(() => undefined);
     const rejectionSignal: Promise<Error> = feedbackPromise.then((channel) => {
       if (channel !== undefined) {
@@ -494,8 +799,11 @@ export class AppSession {
       return new Promise<Error>(() => {});
     });
     try {
+      reportStage('p2p-start', 'connecting');
       const goIp = await this.p2p.connectToLeader(invitation, rejectionSignal);
+      reportStage('p2p-ready', 'joining');
       await this.controller.connectMember(goIp, invitation.port, invitation);
+      reportStage('clock-ready', 'preparing');
       this.syncEngineFromSession();
       try {
         // Members prepare their renderer while still in the lobby; otherwise a
@@ -504,23 +812,39 @@ export class AppSession {
       } catch (err) {
         console.warn(`MetronomeEngine member prewarm failed: ${(err as Error).message}`);
       }
+      reportStage('renderer-ready');
       this.handleTransportFromStorage();
       await SessionBackgroundKeeper.start(false); // 队员：隐藏媒体卡片
+      reportStage('background-ready');
       this.teamJoinedForWarmup = true;
       void this.maybeWarmUpRendererForPlayback();
+      reportStage('lobby-ready');
     } catch (err) {
       const joinError = err as Error;
+      reportStage('join-failed');
       await this.p2p.abortMemberJoin();
       throw joinError;
     } finally {
-      const channel = await feedbackPromise;
-      if (channel !== undefined) {
-        await channel.close();
+      // BLE only reports rejection; room authentication uses the TCP hello.
+      // Cancel pending registration before allowing a retry, and release any
+      // late channel without holding up a successfully joined lobby or its error.
+      feedbackAttempt.cancel();
+      if (this.memberJoinFeedbackAttempt === feedbackAttempt) {
+        this.memberJoinFeedbackAttempt = undefined;
       }
+      void feedbackPromise.then(async (channel) => {
+        if (channel !== undefined) {
+          await channel.close();
+        }
+      }).catch(() => { console.warn('[JoinDiag] feedback cleanup failed'); });
     }
   }
 
-  async memberJoinByCode(code: string, onRoomFound?: () => void): Promise<void> {
+  async memberJoinByCode(
+    code: string,
+    onRoomFound?: () => void,
+    onProgress?: (stage: MemberJoinStage) => void
+  ): Promise<void> {
     const trimmed = code.trim();
     // 预热 P2P 设备发现，与 BLE 扫描并行，避免连接阶段冷启动等待
     const discoveryWarmup = this.p2p.prepareMemberDiscovery().catch(() => {});
@@ -529,7 +853,7 @@ export class AppSession {
       onRoomFound();
     }
     await discoveryWarmup;
-    await this.memberJoinWithInvitation(invitation);
+    await this.memberJoinWithInvitation(invitation, onProgress);
   }
 
   /**

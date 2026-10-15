@@ -102,6 +102,8 @@ const CALIBRATION_CARD_HEIGHT: number = 58;
 const CALIBRATION_CARD_ICON_SIZE: number = 36;
 const CALIBRATION_CARD_HEADPHONE_SIZE: number = 32;
 const CALIBRATION_ENTRY_VERTICAL_MARGIN: number = 10;
+const SOLO_CALIBRATION_FONT_SIZE: number = 12;
+const SOLO_CALIBRATION_VERTICAL_PADDING: number = 6;
 const BLUETOOTH_ROUTE_CONFIRM_WIDTH: number = 318;
 const BLUETOOTH_ROUTE_PROBE_BUTTON_HEIGHT: number = 48;
 
@@ -147,6 +149,9 @@ struct LeaderLobbyPage {
   @State bluetoothRouteConfirmVisible: boolean = false;
   @State bluetoothRouteProbePlaying: boolean = false;
   @State bluetoothRouteProbePlayed: boolean = false;
+  // Closing and reopening the dialog can overlap two asynchronous probes. A
+  // completion belongs only to the request that still owns the visible dialog.
+  private bluetoothRouteProbeRequestToken: number = 0;
   private rhythms: string[] = ['均匀节拍', '双分节拍', '仅小节重音'];
   private enteringStage: boolean = false;
   private refreshingConnectivity: boolean = false;
@@ -175,44 +180,55 @@ struct LeaderLobbyPage {
       promptAction.showToast({ message: '当前没有检测到蓝牙耳机输出' });
       return;
     }
+    this.bluetoothRouteProbeRequestToken++;
     this.bluetoothRouteProbePlayed = false;
     this.bluetoothRouteProbePlaying = false;
     this.bluetoothRouteConfirmVisible = true;
   }
 
   private async playBluetoothRouteProbe(): Promise<void> {
-    if (this.bluetoothRouteProbePlaying) {
+    if (!this.bluetoothRouteConfirmVisible || this.bluetoothRouteProbePlaying) {
       return;
     }
     if (!this.btAudioActive) {
       promptAction.showToast({ message: '当前没有检测到蓝牙耳机输出' });
       return;
     }
+    const requestToken = ++this.bluetoothRouteProbeRequestToken;
     this.bluetoothRouteProbePlaying = true;
     this.bluetoothRouteProbePlayed = false;
     try {
       const played = await AppSession.get()?.playBluetoothRouteProbe() ?? false;
-      if (played && this.bluetoothRouteConfirmVisible && this.btAudioActive) {
+      if (requestToken === this.bluetoothRouteProbeRequestToken && played &&
+        this.bluetoothRouteConfirmVisible && this.btAudioActive) {
         this.bluetoothRouteProbePlayed = true;
       }
     } catch (err) {
-      promptAction.showToast({ message: `试音失败：${(err as Error).message}` });
+      if (requestToken === this.bluetoothRouteProbeRequestToken &&
+        this.bluetoothRouteConfirmVisible && this.btAudioActive) {
+        promptAction.showToast({ message: `试音失败：${(err as Error).message}` });
+      }
     } finally {
-      this.bluetoothRouteProbePlaying = false;
+      if (requestToken === this.bluetoothRouteProbeRequestToken && this.bluetoothRouteConfirmVisible) {
+        this.bluetoothRouteProbePlaying = false;
+      }
     }
   }
 
   private async confirmBluetoothCalibration(): Promise<void> {
-    if (!this.bluetoothRouteProbePlayed || !this.btAudioActive) {
+    if (!this.bluetoothRouteConfirmVisible || this.bluetoothRouteProbePlaying ||
+      !this.bluetoothRouteProbePlayed || !this.btAudioActive) {
       return;
     }
+    this.bluetoothRouteProbeRequestToken++;
     this.bluetoothRouteConfirmVisible = false;
     this.bluetoothRouteProbePlayed = false;
     // The tap game intentionally inherits the renderer warmed by the route probe.
-    void router.pushUrl({ url: 'pages/AudioCalibrationPage' });
+    void router.pushUrl({ url: 'pages/TimeCardCalibrationPage' });
   }
 
   private dismissBluetoothRouteConfirmation(): void {
+    this.bluetoothRouteProbeRequestToken++;
     this.bluetoothRouteConfirmVisible = false;
     this.bluetoothRouteProbePlayed = false;
     this.bluetoothRouteProbePlaying = false;
@@ -264,6 +280,23 @@ struct LeaderLobbyPage {
       return BLUE;
     }
     return this.btCalibrationNeedsRemeasure ? CORAL : TEAL;
+  }
+
+  private soloCalibrationEntryLabel(): string {
+    if (this.hasBluetoothCalibration()) {
+      return this.btCalibrationNeedsRemeasure ? '耳机已重连 · 延迟校准 ›' :
+        `耳机补偿 ${this.latencyCalibrationMs} ms · 重测 ›`;
+    }
+    return '蓝牙耳机延迟校准（可选）›';
+  }
+
+  @Builder
+  private soloLatencyCalibrationEntry() {
+    Text(this.soloCalibrationEntryLabel())
+      .fontSize(SOLO_CALIBRATION_FONT_SIZE).fontWeight(500).fontColor('#625B53')
+      .width('100%').textAlign(TextAlign.Center)
+      .padding({ top: SOLO_CALIBRATION_VERTICAL_PADDING, bottom: SOLO_CALIBRATION_VERTICAL_PADDING })
+      .onClick(() => this.requestBluetoothCalibration())
   }
 
   @Builder
@@ -390,6 +423,7 @@ struct LeaderLobbyPage {
     void this.initialize();
   }
   aboutToDisappear(): void {
+    this.bluetoothRouteProbeRequestToken++;
     this.randomSelectionToken += 1;
     this.randomPreviewPageVisible = false;
     this.randomPreviewPendingMemberId = '';
@@ -423,6 +457,10 @@ struct LeaderLobbyPage {
     void this.refreshLeaderConnectivity();
   }
   onPageHide(): void {
+    this.bluetoothRouteProbeRequestToken++;
+    if (this.bluetoothRouteConfirmVisible) {
+      this.dismissBluetoothRouteConfirmation();
+    }
     this.randomSelectionToken += 1;
     this.randomPreviewPageVisible = false;
     this.randomPreviewPendingMemberId = '';
@@ -518,6 +556,10 @@ struct LeaderLobbyPage {
   private async leaveLobby(): Promise<void> {
     if (this.leavingLobby || this.enteringStage) {
       return;
+    }
+    this.bluetoothRouteProbeRequestToken++;
+    if (this.bluetoothRouteConfirmVisible) {
+      this.dismissBluetoothRouteConfirmation();
     }
     this.leavingLobby = true;
     this.status = '正在退出队伍…';
@@ -1664,7 +1706,11 @@ struct LeaderLobbyPage {
             }
           })
         if (this.btAudioActive) {
-          this.latencyCalibrationEntry()
+          if (this.soloTeam) {
+            this.soloLatencyCalibrationEntry()
+          } else {
+            this.latencyCalibrationEntry()
+          }
         }
         ComicButton({
           label: this.primaryLobbyLabel(),

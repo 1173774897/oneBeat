@@ -27,10 +27,6 @@
     {
       "name": "perm_camera_reason",
       "value": "扫码加入队伍需要使用相机"
-    },
-    {
-      "name": "perm_microphone_reason",
-      "value": "麦克风回环测耳机的播放延迟需要使用麦克风"
     }
   ]
 }

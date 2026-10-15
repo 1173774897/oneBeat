@@ -26,7 +26,7 @@ assert.match(engine, /waitForCalibrationFrameCrossing/,
   'Calibration must confirm presentation after the hardware playhead crosses the signal');
 assert.match(engine, /current\.framePos\s*>=\s*targetFrame/,
   'Calibration crossing must use the raw timestamped frame position');
-assert.match(engine, /current\.timestampMonoMs\s*-\s*[\s\S]*current\.framePos\s*-\s*targetFrame/,
+assert.match(engine, /timestampMonoMs\s*-\s*[\s\S]*framePos\s*-\s*targetFrame/,
   'Actual presentation must be back-interpolated from a post-crossing timestamp');
 assert.doesNotMatch(engine, /presentationMonoMs\s*=\s*now\s*\+\s*\(targetFrame\s*-\s*playedFrames\)/,
   'Calibration must not turn renderer query time into a presentation timestamp');
@@ -58,8 +58,14 @@ assert.match(calibrator, /INPUT_CLUSTER_MAX_SPREAD_MS:\s*number\s*=\s*30/,
   'Input calibration must reject mutually inconsistent probe values');
 assert.match(calibrator, /measurementGeneration/,
   'A retry must permanently invalidate the previous asynchronous mic run');
-assert.match(calibrator, /appendCapturedBuffer\(buffer,\s*generation\)/,
+assert.match(calibrator, /appendCapturedBuffer\(buffer,\s*generation,\s*capturer\)/,
   'Capturer callbacks must be bound to the measurement generation that created them');
+assert.match(calibrator, /getCurrentInputDevices\(\)/,
+  'Mic diagnostics must reveal which physical input device the system selected');
+assert.match(calibrator, /getAudioTimestampInfoSync\(\)[\s\S]*clockMinusHeuristicMs=/,
+  'Mic diagnostics must compare the capture hardware clock with the callback heuristic');
+assert.match(calibrator, /CORR_DIAG_PEAK_GUARD_MS:\s*number\s*=\s*50[\s\S]*rel=\$\{relativeMs/,
+  'Correlation diagnostics must expose independent peaks and their offsets from the selected peak');
 assert.match(calibrator, /await capturer\?\.release\(\)/,
   'A retry must not begin while the old capturer release is still pending');
 assert.match(calibrator, /CORRELATION_CAUSAL_SLACK_MS[\s\S]*findOnsetByCrossCorrelation\(captured,\s*this\.chirp/,
@@ -78,12 +84,40 @@ assert.match(persistence, /Number\.isFinite\(value\)[\s\S]*value\s*>\s*0/,
   'Restoring input calibration must reject zero and non-finite values too');
 assert.match(session, /refreshOutputCalibration\(routeChanged\)/,
   'The output-route observer must invalidate the mic calibration epoch');
+assert.match(session,
+  /if \(routeChanged && this\.micCalibrationActive\)[\s\S]*flushMicCalibrationProbeBoundary\(\);\s*\}\s*else if \(active && !this\.micCalibrationActive\)/,
+  'Only mic calibration may rebuild a probe boundary, without racing generic playback warm-up');
+assert.match(session,
+  /scheduleMicPostCaptureDiagnostics[\s\S]*capturer-released\+\$\{delayMs\}ms[\s\S]*logAfter\(500\)/,
+  'Mic diagnostics must observe the retained renderer after the capturer is released');
 assert.match(outputMonitor, /identities\.push\(`\$\{type\}:\$\{devices\[i\]\.id\}`\)/,
   'Route identity must distinguish two wireless devices of the same type');
-assert.match(session, /previousAudioOutputRouteSignature\s*!==\s*routeSignature/,
+assert.match(session, /previousRouteSignature\s*!==\s*routeSignature/,
   'Mic frame epochs must reset on physical route identity changes, not only wireless booleans');
 assert.match(session, /isBuiltInSpeakerActive\(\)/,
   'Input-side calibration must reject wired, USB, and earpiece output routes');
+assert.match(engine, /flushCalibrationStreamBetweenProbes/,
+  'Input-side probes must reset the renderer queue between runs on the same route');
+assert.match(engine,
+  /EXPERIMENTAL_EXACT_PLAYBACK_FRAME_MAP:\s*boolean\s*=\s*false/,
+  'Mic experiments must not silently change the user-verified playback frame mapping');
+assert.match(engine,
+  /if \(EXPERIMENTAL_EXACT_PLAYBACK_FRAME_MAP && this\.calibrationFrameOriginExact[\s\S]*readCalibrationClockSample\(renderer\)[\s\S]*timestampedFrame = sample\.framePos/,
+  'An explicitly enabled playback experiment may retain the mic hardware-frame coordinate');
+assert.match(engine,
+  /calibrationFrameOriginExact[\s\S]*!this\.calibrationRouteResetPending[\s\S]*!this\.micCalibrationRendererRebuildPending/,
+  'Exact playback mapping must be abandoned when the physical route epoch becomes dirty');
+assert.match(engine,
+  /\[OutputPathDiag\][\s\S]*latencyAll=[\s\S]*latencySoftware=[\s\S]*latencyHardware=/,
+  'Mic diagnostics must compare all renderer latency components across capture teardown');
+assert.match(engine, /rendererEpoch=\$\{this\.rendererEpoch\}[\s\S]*streamId=\$\{this\.rendererStreamId\}/,
+  'Output diagnostics must identify whether calibration and production reuse the same renderer epoch');
+assert.match(engine, /const playedEstimate = Math\.min\(this\.audioSubmittedFrames, elapsedFrames\)/,
+  'Non-mic renderers must retain the elapsed-time mapping fallback');
+assert.match(session, /flushMicCalibrationProbeBoundary/,
+  'The session must expose the mic calibration probe boundary flush to the calibration page');
+assert.match(calibrator, /measureWithPersistentRenderer[\s\S]*probeBoundary/,
+  'Headphone loopback must realign the renderer epoch between probes');
 assert.match(page, /audioOutputRouteEpoch[\s\S]*onAudioOutputRouteChanged/,
   'An unsaved mic result must be invalidated by any physical output-route change');
 assert.match(page, /inputMeasurementToken\s*!==\s*this\.measurementToken/,

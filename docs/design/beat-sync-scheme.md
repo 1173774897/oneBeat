@@ -214,7 +214,7 @@ try {
 
 > 本节已落地代码。目标从「设备间相对同步」改为「每台设备补偿自己的**绝对延迟**」——因为蓝牙耳机要跟**画面**同步，而画面与外放都锁在同一个墙钟上，所以对齐蓝牙到外放/画面，就等于对齐到绝对墙钟。
 >
-> 补偿字段只有一个 `calibrationMs`（持久化为 `outputCompensationMs`，见 `AudioLatencyPersistence`），只在**蓝牙 A2DP 激活**时被 `readOutputLatencyOffsetMs()` 读取；外放 / 有线始终只用系统 `getLatency()`。它的来源是两种校准方法，二者**语义不同**，见下。
+> 补偿字段只有一个 `calibrationMs`（持久化为 `outputCompensationMs`，见 `AudioLatencyPersistence`），只在**蓝牙 A2DP 激活**时被 `readOutputLatencyOffsetMs()` 读取；外放 / 有线始终只用系统 `getLatency()`。**当前产品只提供打卡机校准。mic 回环于 2026-10-14 因真实声学验收未通过撤下入口、页面路由和麦克风权限，调查结论见 `bt-latency-calibration-debug.md` §9.13。** 下面的 mic 计算与实现记录仅用于保留调查证据。旧补偿没有来源标记，不批量删除；曾保存 mic 结果的设备应重新打卡测量并覆盖。
 
 **目标与公式**
 
@@ -227,12 +227,15 @@ D_bt_link ：蓝牙空中链路 + 耳机 DAC，系统不可见，需校准测得
 
 参考系是墙钟 T：画面闪烁、外放都调度在 T，所以对齐后三者同时到用户。
 
-**两种校准方法：同一个补偿字段，但测的不是同一条链路**
+**打卡机校准与已停用的 mic 研究：同一字段的不同测量语义**
+
+命名时刻（`presentationMonoMs`、`submitMonoMs`、`scheduledBeatAt` 等）的 ASCII / Mermaid 总图见
+[`bt-latency-calibration-debug.md` §2.4](./bt-latency-calibration-debug.md#24-时间点总表与示意图)。
 
 | 校准方法 | 页面 / 模块 | 测量对象 | 计算公式 | 语义是否 = 输出补偿 |
 |---|---|---|---|---|
-| 打卡机（单程输出） | `AudioCalibrationPage` | app → 耳朵 | `resultMs = max(0, mean(敲击时刻 − 计划节拍时刻))` | ✅ 是 |
-| mic 回环（往返） | `MicLoopbackCalibrationPage` / `MicLoopbackCalibrator` | Renderer 呈现目标 → 耳朵 → 麦克风 | `latencyMs = chirp到达麦克风 − chirp呈现目标时刻` | ❌ 否（含输入侧） |
+| 打卡机（单程输出） | `TimeCardCalibrationPage`（漫画整卡；旧`AudioCalibrationPage`源保留） | app → 耳朵 | `resultMs = max(0, mean(敲击时刻 − 计划节拍时刻))` | ✅ 是 |
+| mic 回环（已停用，历史研究） | `MicLoopbackCalibrationPage` / `MicLoopbackCalibrator` | Renderer 呈现目标 → 耳朵 → 麦克风 | `latencyMs = chirp到达麦克风 − chirp呈现目标时刻` | ❌ 否（含输入侧） |
 
 **打卡机（单程输出，输出补偿的正确语义）**
 
@@ -244,7 +247,7 @@ resultMs = max(0, mean(敲击时刻 − 计划节拍时刻))
 
 这条路只有「app → 耳机 → 耳朵」的**输出**一段，测到的正是 `outputLatencyMs` 要补偿的那个量。
 
-**mic 回环（往返，含输入侧）**
+**mic 回环（已停用的研究记录，往返含输入侧）**
 
 `MicLoopbackCalibrator` 只创建 `AudioCapturer`。耳机测试用的已知 chirp 由
 `MetronomeEngine.scheduleCalibrationSignal()` 注入会话的持久 Renderer，并按该 Renderer 的
@@ -289,11 +292,11 @@ Renderer 播放，以同一种 renderer-presentation 帧时钟测得“外放输
 
 **校准 Renderer 与行进 Renderer 的同一性约束**
 
-两种耳机输出测量都必须使用 `AppSession.metronome` 持有的同一个 `AudioRenderer`：
+当前打卡机必须使用 `AppSession.metronome` 持有的同一个 `AudioRenderer`；停用的 mic 研究也曾使用这个约束：
 
 - 打卡机通过 `scheduleLatencyTapMeasurement()` 在该 Renderer 上播放 120 BPM 测量节拍；
 - 麦克风回环通过 `scheduleMicLoopbackSignal()` / `scheduleCalibrationSignal()` 把 chirp 混入该 Renderer；
-- 两种页面保存成功后都调用 `keepLatencyCalibrationRendererAlive()`，把
+- 打卡机保存成功后调用 `keepLatencyCalibrationRendererAlive()`，把
   `keepRendererAliveForSession` 置为 `true`；
 - 页面退出时 `stopLatencyCalibration()` 只调用 `metronome.pause()`：停止节拍内容但继续提交
   dither floor，不执行 `stop / flush / release`；
@@ -308,7 +311,7 @@ Renderer 播放，以同一种 renderer-presentation 帧时钟测得“外放输
 
 ```text
 蓝牙 A2DP 激活：
-  已校准 → outputLatencyMs = calibrationMs（打卡机或 mic 回环写入的值）
+  已校准 → outputLatencyMs = calibrationMs（打卡机写入；旧 mic 值应重新打卡覆盖）
   未校准 → outputLatencyMs = getLatency(LATENCY_TYPE_ALL) + estimateBluetoothLinkLatencyMs()
 外放 / 有线：
   outputLatencyMs = getLatency(LATENCY_TYPE_ALL)   // 只用系统值，不碰校准值
@@ -334,7 +337,7 @@ Renderer 播放，以同一种 renderer-presentation 帧时钟测得“外放输
 **精度与局限**
 
 - 打卡机：受用户反应时影响，精度约 ±30~100ms（多次敲击取均值可收敛）。
-- mic 回环：互相关定位可达亚毫秒级，但测的是**往返**，需扣除输入侧才是输出补偿。
+- 已停用的 mic 研究：互相关定位的数值精度不证明生产声学输出准确；扣除输入侧并桥接参考后，真机仍出现约 200ms 的相对误差。
 - 局限：蓝牙抖动 ±10~50ms **无法消除**，只能消除「恒定偏移」。
 - 缓解：引导使用 LC3 / aptX LL / 星闪（NearLink，5ms 级）等低时延耳机，同时降低偏移与抖动。
 
@@ -397,7 +400,7 @@ stateDiagram-v2
 以下入口会让 Renderer 从 stopped 进入 `STATE_RUNNING`：
 
 - 正常出发、鼓机预览、打卡机：`scheduleFromLeaderStart()` → `startAudioStreamNow()`；
-- 麦克风耳机回环：`scheduleCalibrationSignal()` → `ensureSilentRendererRunning()`；
+- 已停用的麦克风研究：`scheduleCalibrationSignal()` → `ensureSilentRendererRunning()`，当前没有产品调用入口；
 - 确认蓝牙出口试音：先建立同一会话 Renderer，再在其时间轴播放有限节拍。
 
 启动时重置本次物理流的时间戳基准、`audioSubmittedFrames` 和队列估计。写回调随即持续运行；
@@ -406,6 +409,8 @@ stateDiagram-v2
 
 #### 4. 校准阶段
 
+当前只有打卡机为产品功能；下述 mic 和输入侧流程保留为停用研究的实现记录。
+
 - **打卡机**在会话 Renderer 上以 `outputCompensationOverrideMs = 0` 播放测量节拍；
 - **麦克风耳机回环**把 chirp 叠加到同一 Renderer 的指定帧，`MicLoopbackCalibrator` 只持有
   `AudioCapturer`；
@@ -413,7 +418,7 @@ stateDiagram-v2
   A2DP 切到外放，首个探针必须 stop / flush、重置 timestamp/frame 映射并重新暖机。它测得的值
   只用于扣除麦克风输入链路，不能把外放 Renderer 队列保存成耳机输出补偿。
 
-点击“保存并生效”时，两种耳机测量都会先写入补偿值，再调用
+当前打卡机点击“保存并生效”时，会先写入补偿值，再调用
 `keepLatencyCalibrationRendererAlive()`。这个调用把 `keepRendererAliveForSession` 设为 `true`，
 并把节拍内容切回 dither floor。随后页面 `aboutToDisappear()` 调用
 `stopLatencyCalibration()` 时，只清理校准状态和内容，不停止物理流。

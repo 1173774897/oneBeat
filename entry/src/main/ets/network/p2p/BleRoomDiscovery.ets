@@ -18,6 +18,8 @@ const P2P_CONFIRM_DIALOG_TYPE: number = 4;
 const BLE_LOOKUP_TIMEOUT_MS: number = 15000;
 const GATT_CONNECT_TIMEOUT_MS: number = 8000;
 const GATT_FEEDBACK_CONNECT_TIMEOUT_MS: number = 3000;
+const GATT_FEEDBACK_OPERATION_TIMEOUT_MS: number = 3000;
+const GATT_FEEDBACK_CLOSE_TIMEOUT_MS: number = 250;
 const MAX_GATT_READ_ATTEMPTS: number = 2;
 const JOIN_FEEDBACK_POLL_MS: number = 250;
 const JOIN_ATTEMPT_TTL_MS: number = 45000;
@@ -60,6 +62,105 @@ interface LeaderJoinAttempt {
   createdAt: number;
 }
 
+/** Owns one optional BLE feedback attempt; cancelling must never await the BLE stack. */
+export class BleMemberJoinFeedbackAttempt {
+  private cancelled: boolean = false;
+  private readonly cancelListeners: Set<() => void> = new Set();
+
+  isCancelled(): boolean {
+    return this.cancelled;
+  }
+
+  /** Registers synchronous cleanup, or runs it now if cancelled; returns an unsubscribe callback. */
+  onCancel(listener: () => void): () => void {
+    if (this.cancelled) {
+      listener();
+      return (): void => {};
+    }
+    this.cancelListeners.add(listener);
+    return (): void => { this.cancelListeners.delete(listener); };
+  }
+
+  cancel(): void {
+    if (this.cancelled) {
+      return;
+    }
+    this.cancelled = true;
+    const listeners = Array.from(this.cancelListeners);
+    this.cancelListeners.clear();
+    for (let i = 0; i < listeners.length; i++) {
+      try {
+        listeners[i]();
+      } catch (_e) {
+        // One unavailable GATT cleanup must not prevent the other waiters from cancelling.
+      }
+    }
+  }
+}
+
+function closeFeedbackClient(client: ble.GattClientDevice): void {
+  try {
+    client.disconnect();
+  } catch (_e) {
+  }
+  try {
+    client.close();
+  } catch (_e) {
+  }
+}
+
+function feedbackStep<T>(work: Promise<T>, timeoutMs: number,
+  attempt?: BleMemberJoinFeedbackAttempt): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    let settled = false;
+    let removeCancel: () => void = (): void => {};
+    const timer = setTimeout(() => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      removeCancel();
+      reject(new Error('BLE join feedback operation timeout'));
+    }, timeoutMs);
+    const fail = (error: Error): void => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timer);
+      removeCancel();
+      reject(error);
+    };
+    // Always consume late completion/rejection from a timed-out system promise.
+    work.then((value: T) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timer);
+      removeCancel();
+      resolve(value);
+    }, (error: Error) => fail(error));
+    if (attempt !== undefined) {
+      removeCancel = attempt.onCancel(() => fail(new Error('BLE join feedback cancelled')));
+    }
+  });
+}
+
+function feedbackRetryDelay(attempt: BleMemberJoinFeedbackAttempt): Promise<void> {
+  return new Promise<void>((resolve) => {
+    let removeCancel: () => void = (): void => {};
+    const timer = setTimeout(() => {
+      removeCancel();
+      resolve();
+    }, JOIN_FEEDBACK_POLL_MS);
+    removeCancel = attempt.onCancel(() => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
+}
+
 export class BleJoinFeedbackChannel {
   readonly rejection: Promise<Error>;
   private readonly client: ble.GattClientDevice;
@@ -69,11 +170,13 @@ export class BleJoinFeedbackChannel {
   private closed: boolean = false;
   private rejectionDelivered: boolean = false;
   private pollTimer: number = -1;
+  private removeCancel: () => void = (): void => {};
 
   constructor(
     client: ble.GattClientDevice,
     characteristic: ble.BLECharacteristic,
-    attemptId: string
+    attemptId: string,
+    attempt?: BleMemberJoinFeedbackAttempt
   ) {
     this.client = client;
     this.characteristic = characteristic;
@@ -81,6 +184,9 @@ export class BleJoinFeedbackChannel {
     this.rejection = new Promise<Error>((resolve) => {
       this.resolveRejection = resolve;
     });
+    if (attempt !== undefined) {
+      this.removeCancel = attempt.onCancel(() => { void this.close(); });
+    }
     this.schedulePoll(0);
   }
 
@@ -99,6 +205,9 @@ export class BleJoinFeedbackChannel {
     }
     try {
       const result = await this.client.readCharacteristicValue(this.characteristic);
+      if (this.closed) {
+        return;
+      }
       const status = decoder.decodeToString(new Uint8Array(result.characteristicValue));
       if (status === `R:${this.attemptId}`) {
         this.rejectionDelivered = true;
@@ -117,6 +226,7 @@ export class BleJoinFeedbackChannel {
       return;
     }
     this.closed = true;
+    this.removeCancel();
     if (this.pollTimer >= 0) {
       clearTimeout(this.pollTimer);
     }
@@ -127,15 +237,16 @@ export class BleJoinFeedbackChannel {
         characteristicValue: encodeText(`C:${this.attemptId}`),
         descriptors: this.characteristic.descriptors
       };
-      await this.client.writeCharacteristicValue(cancelCharacteristic, ble.GattWriteType.WRITE);
+      // C only removes this attemptId on the leader; late cleanup cannot erase
+      // a newer join. P2P may interrupt BLE, so cancellation cannot hold a GATT
+      // handle or the joining page indefinitely.
+      await feedbackStep(this.client.writeCharacteristicValue(cancelCharacteristic, ble.GattWriteType.WRITE),
+        GATT_FEEDBACK_CLOSE_TIMEOUT_MS);
     } catch (_e) {
       // The P2P transition can briefly interrupt BLE. Server entries also expire.
+    } finally {
+      closeFeedbackClient(this.client);
     }
-    try {
-      this.client.disconnect();
-    } catch (_e) {
-    }
-    this.client.close();
   }
 }
 
@@ -379,32 +490,68 @@ export class BleRoomDiscovery {
     });
   }
 
-  async startMemberJoinFeedback(invitation: P2pRoomInvitation): Promise<BleJoinFeedbackChannel | undefined> {
-    if (this.lastResolvedDeviceId.length === 0 || this.lastResolvedRoomId !== invitation.roomId) {
+  async startMemberJoinFeedback(invitation: P2pRoomInvitation,
+    feedbackAttempt: BleMemberJoinFeedbackAttempt = new BleMemberJoinFeedbackAttempt()):
+    Promise<BleJoinFeedbackChannel | undefined> {
+    if (feedbackAttempt.isCancelled() || this.lastResolvedDeviceId.length === 0 ||
+      this.lastResolvedRoomId !== invitation.roomId) {
       return undefined;
     }
     const deviceId = this.lastResolvedDeviceId;
     for (let attempt = 0; attempt < 2; attempt++) {
-      const channel = await this.openMemberJoinFeedback(deviceId);
+      if (feedbackAttempt.isCancelled()) {
+        return undefined;
+      }
+      const channel = await this.openMemberJoinFeedback(deviceId, feedbackAttempt);
+      if (feedbackAttempt.isCancelled()) {
+        if (channel !== undefined) {
+          void channel.close();
+        }
+        return undefined;
+      }
       if (channel !== undefined) {
         return channel;
       }
-      await sleep(250);
+      if (attempt + 1 < 2) {
+        await feedbackRetryDelay(feedbackAttempt);
+      }
     }
     console.warn('BLE join feedback unavailable after retry');
     return undefined;
   }
 
-  private async openMemberJoinFeedback(deviceId: string): Promise<BleJoinFeedbackChannel | undefined> {
+  private async openMemberJoinFeedback(deviceId: string, feedbackAttempt: BleMemberJoinFeedbackAttempt):
+    Promise<BleJoinFeedbackChannel | undefined> {
+    if (feedbackAttempt.isCancelled()) {
+      return undefined;
+    }
     const client = ble.createGattClientDevice(deviceId);
+    let handedOff = false;
+    let clientClosed = false;
+    const releaseClient = (): void => {
+      if (!clientClosed) {
+        clientClosed = true;
+        closeFeedbackClient(client);
+      }
+    };
+    // Cancelling during an unresolved system operation releases the local GATT
+    // handle synchronously. Continuations check cancellation before submitting
+    // a new P:; packets already submitted remain subject to native delivery.
+    const removeCancel = feedbackAttempt.onCancel(releaseClient);
     try {
-      await this.connectGattClient(client, deviceId, GATT_FEEDBACK_CONNECT_TIMEOUT_MS);
+      await this.connectGattClient(client, deviceId, GATT_FEEDBACK_CONNECT_TIMEOUT_MS, feedbackAttempt);
+      if (feedbackAttempt.isCancelled()) {
+        return undefined;
+      }
       try {
         client.setBLEMtuSize(128);
       } catch (_e) {
         // The compact request also fits devices that retain their default MTU.
       }
-      const services = await client.getServices();
+      const services = await feedbackStep(client.getServices(), GATT_FEEDBACK_OPERATION_TIMEOUT_MS, feedbackAttempt);
+      if (feedbackAttempt.isCancelled()) {
+        return undefined;
+      }
       const target = this.findCharacteristic(services, JOIN_FEEDBACK_CHARACTERISTIC_UUID);
       if (target === undefined) {
         throw new Error('队长版本不支持即时连接结果回执');
@@ -416,53 +563,78 @@ export class BleRoomDiscovery {
         characteristicValue: encodeText(`P:${attemptId}`),
         descriptors: target.descriptors
       };
-      await client.writeCharacteristicValue(requestCharacteristic, ble.GattWriteType.WRITE);
-      console.info(`BLE join feedback opened: ${attemptId}`);
-      return new BleJoinFeedbackChannel(client, target, attemptId);
-    } catch (err) {
-      console.warn(`BLE join feedback retry: ${(err as Error).message}`);
-      try {
-        client.disconnect();
-      } catch (_e) {
+      await feedbackStep(client.writeCharacteristicValue(requestCharacteristic, ble.GattWriteType.WRITE),
+        GATT_FEEDBACK_OPERATION_TIMEOUT_MS, feedbackAttempt);
+      if (feedbackAttempt.isCancelled()) {
+        return undefined;
       }
-      client.close();
+      console.info(`BLE join feedback opened: ${attemptId}`);
+      const channel = new BleJoinFeedbackChannel(client, target, attemptId, feedbackAttempt);
+      handedOff = true;
+      return channel;
+    } catch (err) {
+      if (!feedbackAttempt.isCancelled()) {
+        console.warn(`BLE join feedback retry: ${(err as Error).message}`);
+      }
       return undefined;
+    } finally {
+      removeCancel();
+      if (!handedOff) {
+        releaseClient();
+      }
     }
   }
 
   private connectGattClient(
     client: ble.GattClientDevice,
     deviceId: string,
-    timeoutMs: number = GATT_CONNECT_TIMEOUT_MS
+    timeoutMs: number = GATT_CONNECT_TIMEOUT_MS,
+    feedbackAttempt?: BleMemberJoinFeedbackAttempt
   ): Promise<void> {
     return new Promise((resolve, reject) => {
       let settled = false;
+      let removeCancel: () => void = (): void => {};
+      const finish = (error?: Error): void => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        clearTimeout(timer);
+        try {
+          client.off('BLEConnectionStateChange', callback);
+        } catch (_e) {
+        }
+        removeCancel();
+        if (error !== undefined) {
+          reject(error);
+        } else {
+          resolve();
+        }
+      };
       const callback = (state: ble.BLEConnectionChangeState): void => {
         if (settled || state.deviceId !== deviceId) {
           return;
         }
         if (state.state === constant.ProfileConnectionState.STATE_CONNECTED) {
-          settled = true;
-          clearTimeout(timer);
-          client.off('BLEConnectionStateChange', callback);
-          resolve();
+          finish();
         } else if (state.state === constant.ProfileConnectionState.STATE_DISCONNECTED) {
-          settled = true;
-          clearTimeout(timer);
-          client.off('BLEConnectionStateChange', callback);
-          reject(new Error('蓝牙连接已断开'));
+          finish(new Error('蓝牙连接已断开'));
         }
       };
       const timer = setTimeout(() => {
-        if (settled) {
-          return;
-        }
-        settled = true;
-        client.off('BLEConnectionStateChange', callback);
-        reject(new Error('蓝牙连接超时'));
+        finish(new Error('蓝牙连接超时'));
       }, timeoutMs);
       client.on('BLEConnectionStateChange', callback);
-      client.connect();
+      if (feedbackAttempt !== undefined) {
+        removeCancel = feedbackAttempt.onCancel(() => finish(new Error('BLE join feedback cancelled')));
+      }
+      if (!settled) {
+        try {
+          client.connect();
+        } catch (err) {
+          finish(err as Error);
+        }
+      }
     });
   }
 

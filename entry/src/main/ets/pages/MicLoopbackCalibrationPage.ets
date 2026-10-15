@@ -1,6 +1,7 @@
 import { common } from '@kit.AbilityKit';
 import { router, promptAction } from '@kit.ArkUI';
 import { MicLoopbackCalibrator } from '../audio/MicLoopbackCalibrator';
+import { CalibrationPlaybackReference } from '../audio/MetronomeEngine';
 import { AudioOutputMonitor } from '../audio/AudioOutputMonitor';
 import { AppSession } from '../app/AppSession';
 import { ensureMicrophonePermission, microphonePermissionDeniedHint } from '../network/join/TeamNetworkPermissions';
@@ -22,7 +23,8 @@ import {
   WHITE
 } from '../components/ComicKit';
 
-@Entry
+// Retired after acoustic validation failed. Keep the investigation component
+// for reproducible tests; it has no product route or microphone permission.
 @Component
 struct MicLoopbackCalibrationPage {
   @StorageLink('safeAreaTop') topSafeInset: number = 0;
@@ -36,6 +38,7 @@ struct MicLoopbackCalibrationPage {
   @State validRuns: number = 0;
   @State detectedRuns: number = 0;
   @State spreadMs: number = -1;
+  @State playbackFrameOffsetMs: number = 0;
   @State status: string = '点击开始，自动播放测试音并用麦克风测回环时延';
   @State saving: boolean = false;
   @State inputLatencyMs: number = -1;
@@ -44,6 +47,7 @@ struct MicLoopbackCalibrationPage {
   private calibrator: MicLoopbackCalibrator = new MicLoopbackCalibrator();
   private pageActive: boolean = false;
   private measurementToken: number = 0;
+  private playbackReference: CalibrationPlaybackReference | undefined = undefined;
 
   aboutToAppear(): void {
     this.pageActive = true;
@@ -81,6 +85,8 @@ struct MicLoopbackCalibrationPage {
     const hadResult = this.hasResult;
     this.hasResult = false;
     this.resultMs = -1;
+    this.playbackReference = undefined;
+    this.playbackFrameOffsetMs = 0;
     this.validRuns = 0;
     this.detectedRuns = 0;
     this.spreadMs = -1;
@@ -98,6 +104,8 @@ struct MicLoopbackCalibrationPage {
 
   private onAudioOutputRouteChanged(): void {
     this.measurementToken++;
+    this.playbackReference = undefined;
+    this.playbackFrameOffsetMs = 0;
     if (this.measuring || this.inputCalibrating) {
       this.calibrator.cancel();
     }
@@ -141,6 +149,8 @@ struct MicLoopbackCalibrationPage {
     this.saving = false;
     this.hasResult = false;
     this.resultMs = -1;
+    this.playbackReference = undefined;
+    this.playbackFrameOffsetMs = 0;
     this.validRuns = 0;
     this.detectedRuns = 0;
     this.spreadMs = -1;
@@ -155,9 +165,24 @@ struct MicLoopbackCalibrationPage {
           if (measurementToken === this.measurementToken) {
             this.status = msg;
           }
-        });
+        },
+        () => session.flushMicCalibrationProbeBoundary());
+      session.scheduleMicPostCaptureDiagnostics('headphone');
       if (!this.pageActive || measurementToken !== this.measurementToken || !this.btAudioActive) {
         return;
+      }
+      if (result.detected) {
+        const expectedReference = result.playbackReference;
+        if (expectedReference === undefined) {
+          throw new Error('未取得本次测量的正式播放基准，请重试');
+        }
+        this.status = '测量完成，正在确认播放基准…';
+        const reference = await session.verifyMicCalibrationPlaybackReference(expectedReference);
+        if (!this.pageActive || measurementToken !== this.measurementToken || !this.btAudioActive) {
+          return;
+        }
+        this.playbackReference = reference;
+        this.playbackFrameOffsetMs = Math.round(reference.frameMappingOffsetMs * 10) / 10;
       }
       this.measuring = false;
       this.publishCalibrationActivity(false);
@@ -183,7 +208,7 @@ struct MicLoopbackCalibrationPage {
       this.hasResult = true;
       if (this.resultMs < 0) {
         this.status = '测量已完成，但时间轴结果异常，请再测一次';
-      } else if (this.outputCompensationMs() < 0) {
+      } else if (this.resultMs < this.inputLatencyMs || this.outputCompensationMs() < 0) {
         this.status = '测量已完成，但两次测量基准不一致，请重新校准输入侧后再测耳机';
       } else {
         this.status = this.resultConsistent()
@@ -231,7 +256,9 @@ struct MicLoopbackCalibrationPage {
           if (inputMeasurementToken === this.measurementToken) {
             this.inputStatus = msg;
           }
-        });
+        },
+        () => session.flushMicCalibrationProbeBoundary());
+      session.scheduleMicPostCaptureDiagnostics('input');
       session.pauseLatencyCalibration();
       if (!this.pageActive || inputMeasurementToken !== this.measurementToken) {
         return;
@@ -280,17 +307,38 @@ struct MicLoopbackCalibrationPage {
       promptAction.showToast({ message: '请先完成输入侧校准，再保存耳机输出补偿' });
       return;
     }
-    const outputMs = this.outputCompensationMs();
     const previousOutputMs = getCalibrationMs();
     const saveToken = this.measurementToken;
-    console.info(`[LatencyDiag] save outputMs=${outputMs} = resultMs=${this.resultMs} - ` +
-      `inputLatencyMs=${this.inputLatencyMs}`);
     this.saving = true;
     try {
-      await saveCalibrationMs(outputMs);
+      const session = AppSession.get();
+      const expectedReference = this.playbackReference;
+      if (session === undefined || expectedReference === undefined) {
+        throw new Error('测量所用的播放基准已失效，请重新测量');
+      }
+      const currentReference = await session.verifyMicCalibrationPlaybackReference(expectedReference);
       if (!this.pageActive || !this.btAudioActive || saveToken !== this.measurementToken) {
-        // Persistence is asynchronous. If the measured route vanished during
-        // flush, restore the prior shared value instead of activating stale mic data.
+        this.saving = false;
+        return;
+      }
+      this.playbackReference = currentReference;
+      this.playbackFrameOffsetMs = Math.round(currentReference.frameMappingOffsetMs * 10) / 10;
+      const outputMs = this.outputCompensationMs();
+      console.info(`[LatencyDiag] save outputMs=${outputMs} = resultMs=${this.resultMs} - ` +
+        `inputLatencyMs=${this.inputLatencyMs} + playbackFrameOffsetMs=${this.playbackFrameOffsetMs} ` +
+        `rendererEpoch=${currentReference.rendererEpoch} streamId=${currentReference.streamId}`);
+      await saveCalibrationMs(outputMs);
+      let playbackReferenceValid = false;
+      try {
+        session.readMicCalibrationPlaybackReference(currentReference);
+        playbackReferenceValid = true;
+      } catch (_e) {
+        // An unchanged route ID does not prove that the retained frame epoch survived.
+      }
+      if (!this.pageActive || !this.btAudioActive || saveToken !== this.measurementToken ||
+        !playbackReferenceValid) {
+        // Preferences flush can outlive a route/renderer change. Restore the
+        // prior shared value before stale mic data reaches ordinary playback.
         if (previousOutputMs >= 0) {
           await saveCalibrationMs(previousOutputMs);
         } else {
@@ -298,15 +346,14 @@ struct MicLoopbackCalibrationPage {
         }
         this.saving = false;
         if (this.pageActive) {
-          promptAction.showToast({ message: '保存期间蓝牙路由发生变化，本次结果已丢弃' });
+          promptAction.showToast({ message: '保存期间播放基准发生变化，本次结果已丢弃' });
         }
         return;
       }
-      const session = AppSession.get();
-      session?.metronome.refreshOutputCalibration();
-      session?.keepLatencyCalibrationRendererAlive();
-      session?.markLatencyCalibrationRoute(true);
-      promptAction.showToast({ message: `已保存 ${outputMs} ms（回环 ${this.resultMs} ms − 输入侧 ${this.inputLatencyMs} ms），蓝牙重连后推荐重测` });
+      session.metronome.refreshOutputCalibration();
+      session.keepLatencyCalibrationRendererAlive();
+      session.markLatencyCalibrationRoute(true);
+      promptAction.showToast({ message: `已保存输出补偿 ${outputMs} ms，蓝牙重连后推荐重测` });
       router.back({ url: 'pages/LeaderLobbyPage' });
     } catch (err) {
       promptAction.showToast({ message: `保存失败：${(err as Error).message}` });
@@ -315,7 +362,7 @@ struct MicLoopbackCalibrationPage {
   }
 
   private qualityLabel(): string {
-    if (this.resultMs < 0 || this.outputCompensationMs() < 0) {
+    if (this.resultMs < 0 || this.resultMs < this.inputLatencyMs || this.outputCompensationMs() < 0) {
       return '本次结果无效';
     }
     if (this.validRuns === 4 && this.spreadMs >= 0 && this.spreadMs <= 10 && this.snrDb >= 20) {
@@ -328,20 +375,29 @@ struct MicLoopbackCalibrationPage {
   }
 
   private resultConsistent(): boolean {
-    return this.resultMs >= 0 && this.outputCompensationMs() >= 0 &&
+    return this.resultMs >= 0 && this.resultMs >= this.inputLatencyMs &&
+      this.outputCompensationMs() >= 0 && this.playbackReference !== undefined &&
       this.validRuns >= 3 && this.spreadMs >= 0 && this.spreadMs <= 30;
   }
 
   private resultSaveable(): boolean {
     return this.hasResult && this.resultMs >= 0 && this.inputLatencyMs >= 0 &&
-      this.outputCompensationMs() >= 0 && this.validRuns >= 3;
+      this.resultMs >= this.inputLatencyMs && this.outputCompensationMs() >= 0 &&
+      this.playbackReference !== undefined && this.validRuns >= 3 &&
+      this.spreadMs >= 0 && this.spreadMs <= 30;
   }
 
   private outputCompensationMs(): number {
     if (this.inputLatencyMs < 0) {
       return this.resultMs;
     }
-    return Math.round((this.resultMs - this.inputLatencyMs) * 10) / 10;
+    // Physical input subtraction stays in the raw frame coordinate. Only the
+    // output leg gains the offset of the actual renderer retained for playback.
+    return Math.round((this.resultMs - this.inputLatencyMs + this.playbackFrameOffsetMs) * 10) / 10;
+  }
+
+  private playbackOffsetLabel(): string {
+    return `${this.playbackFrameOffsetMs >= 0 ? '+' : '−'} ${Math.abs(this.playbackFrameOffsetMs)} ms`;
   }
 
   private runSummary(): string {
@@ -364,10 +420,10 @@ struct MicLoopbackCalibrationPage {
         .fontSize(12).fontWeight(700).fontColor('#5C554D')
       Text(this.resultMs < 0
         ? '该值来自异常的采集时间轴，本次不会保存，请重新测量。'
-        : this.inputLatencyMs >= 0 && this.outputCompensationMs() < 0
+        : this.inputLatencyMs >= 0 && (this.resultMs < this.inputLatencyMs || this.outputCompensationMs() < 0)
           ? `回环 ${this.resultMs} ms − 输入侧 ${this.inputLatencyMs} ms = ${this.outputCompensationMs()} ms。这表示两次测量基准不一致，不会保存。`
         : this.inputLatencyMs >= 0
-          ? `保存值 = 回环 ${this.resultMs} ms − 输入侧 ${this.inputLatencyMs} ms = ${this.outputCompensationMs()} ms`
+          ? `输出补偿 = 回环 ${this.resultMs} ms − 输入侧 ${this.inputLatencyMs} ms ${this.playbackOffsetLabel()}（播放基准换算）= ${this.outputCompensationMs()} ms`
           : '这是回环往返值，保存前会先扣掉输入侧时延。')
         .fontSize(12).lineHeight(18).fontColor('#5C554D').width('100%')
     }

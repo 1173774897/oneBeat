@@ -462,10 +462,6 @@ struct AudioCalibrationPage {
     return `只听耳机继续敲 · ${this.tapCount} / ${TOTAL_TAP_COUNT}`;
   }
 
-  private openMicLoopbackCalibration(): void {
-    void router.pushUrl({ url: 'pages/MicLoopbackCalibrationPage' });
-  }
-
   @Builder
   private pageHeader() {
     Row({ space: 8 }) {
@@ -488,14 +484,6 @@ struct AudioCalibrationPage {
         }.alignItems(VerticalAlign.Center)
       }.alignItems(HorizontalAlign.Start)
       Blank()
-      Column({ space: 1 }) {
-        Text('其他方式').fontSize(8).fontWeight(800).fontColor('#625B53')
-        Text('麦克风回环 >').fontSize(11).fontWeight(900).fontColor('#6D58A8')
-      }
-      .height(44)
-      .justifyContent(FlexAlign.Center)
-      .alignItems(HorizontalAlign.End)
-      .onClick(() => this.openMicLoopbackCalibration())
     }
     .width('100%')
     .padding({ left: 18, right: 18, top: 8 + this.topSafeInset, bottom: 8 })

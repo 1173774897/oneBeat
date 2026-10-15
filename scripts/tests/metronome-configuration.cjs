@@ -10,9 +10,14 @@ const mocks = {
   '../common/MonotonicClock': {},
   './RhythmTimeline': { BuiltInRhythmFactory: { create: () => ({ beatsPerBar: 4 }) } },
   './DrumMachineCatalog': { parseDrumProgram: raw => ({ styleKey: raw }), buildProgramSequence: () => [{}] },
-  './DrumSampleBank': { DrumSampleBank: { loadStyle: () => new Promise(resolve => loads.push(resolve)) } }
+  './DrumSampleBank': { DrumSampleBank: { loadStyle: () => new Promise(resolve => loads.push(resolve)) } },
+  '../common/MeterModel': { defaultBeatPointStates: () => [] }
 };
-const context = { exports: {}, require: name => mocks[name], console, ArrayBuffer, Map, Int16Array };
+// Neutralize the sub-audible dither so nonzero counts measure click content.
+const deterministicMath = Object.create(Math);
+deterministicMath.random = () => 0.5;
+const context = { exports: {}, require: name => mocks[name], console, ArrayBuffer, Map, Int16Array,
+  Math: deterministicMath };
 const source = fs.readFileSync('entry/src/main/ets/audio/MetronomeEngine.ets', 'utf8');
 vm.runInNewContext(ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021 } }).outputText, context);
 function engine() {

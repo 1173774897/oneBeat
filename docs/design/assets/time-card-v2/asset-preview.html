@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>整张时间卡 · 俯视送料与竖直取卡预览</title>
+<style>
+:root{color-scheme:light;--ink:#171b1f;--paper:#fff9ee;--coral:#ff7056;--teal:#29b5ae;--blue:#a9c9f2}
+*{box-sizing:border-box}body{margin:0;padding:28px;background:var(--paper);color:var(--ink);font:15px/1.6 -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif}h1,h2,p{margin:0}h1{font-size:25px;font-weight:900}p.note{margin:8px 0 22px;color:#615d56}button{font:inherit;cursor:pointer;border:2px solid var(--ink);border-radius:7px;background:#fffdf8;padding:8px 13px;box-shadow:2px 3px 0 var(--ink);font-weight:800}button:active{transform:translate(1px,2px);box-shadow:1px 1px 0 var(--ink)}button:disabled{cursor:default;opacity:.5}.tools{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:24px}.layout{display:grid;grid-template-columns:380px minmax(300px,730px);gap:32px;align-items:start}.phone{border:3px solid var(--ink);border-radius:24px;background:#fffdf8;box-shadow:6px 7px 0 #c5b7eb;padding:20px 14px 17px;overflow:hidden}.heading{font-size:23px;font-weight:900;font-style:italic;text-align:center}.phase{text-align:center;min-height:26px;font-size:13px;margin-top:5px;color:#5d5952}.counter{text-align:center;font-size:17px;font-weight:900;margin-top:4px}.counter b{color:#08827b}.scene{position:relative;width:100%;height:385px;overflow:hidden}.world{width:1254px;height:1450px;position:absolute;left:0;top:0;transform-origin:0 0}.frame{position:absolute;inset:0;transition:transform .35s ease}.layer{position:absolute;width:1254px;height:1254px;left:0;top:0;pointer-events:none}.rear{z-index:1}.paper-window{position:absolute;inset:0;z-index:2;clip-path:inset(0 0 665px 0)}.card{position:absolute;width:1254px;height:1254px;left:0;top:0;transform-origin:0 0;transition:transform .2s ease}.card img{width:1254px;height:1254px;position:absolute;inset:0}.hole{position:absolute;border-radius:50%;width:26px;height:26px;background:#171b1f;box-shadow:inset 3px 3px 0 #080a0c,2px 2px 0 #d6bfa0;transform:translate(-50%,-50%)}.ram{z-index:3;transition:transform .065s ease}.front{z-index:4;transform:translate(50px,75px) scale(.88);transform-origin:0 0}.lever{z-index:5;transform-origin:0 0;transition:transform .075s ease}.stamp{position:absolute;left:380px;top:390px;width:500px;padding:14px;text-align:center;color:#b73528;border:10px double #b73528;border-radius:9px;transform:rotate(-8deg);font-size:55px;font-weight:900;letter-spacing:5px;opacity:0;transition:opacity .18s}.missed .frame{transform:translateY(140px)}.missed .paper-window{z-index:6;clip-path:none}.missed .stamp{opacity:1}.message{display:none;border:2px solid var(--ink);border-radius:8px;padding:12px;background:#fff0b8;margin:0 0 15px;box-shadow:3px 4px 0 var(--ink)}.message strong{display:block;font-size:19px;font-weight:900}.message p{font-size:13px;margin-top:4px}.missed .message{display:block}.tap{display:block;width:100%;height:78px;background:#ffe08b;font-size:28px;font-weight:900;font-style:italic;box-shadow:3px 4px 0 var(--ink)}.retry{display:none;width:100%;height:53px;background:var(--coral);font-size:19px}.missed .tap{display:none}.missed .retry{display:block}.listen-tip{margin-top:11px;text-align:center;font-size:12px;color:#615d56}.assets{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.asset{border:2px solid var(--ink);background:#fffdf8;border-radius:9px;padding:10px}.asset img{display:block;width:100%;aspect-ratio:1;object-fit:contain;background:repeating-conic-gradient(#eee7da 0 25%,#fffdf8 0 50%) 0/16px 16px}.asset figcaption{font-weight:800;margin-top:8px;font-size:13px}.asset small{font-size:11px;color:#6d675d}.side h2{font-size:19px;font-weight:900;margin-bottom:12px}.spec{border:2px solid var(--ink);border-radius:9px;margin-top:20px;padding:14px;background:#fffdf8}.spec p{margin-bottom:7px}.spec p:last-child{margin-bottom:0}.spec strong{font-weight:900}.status{font-size:12px;color:#615d56;margin-top:15px}.hidden{display:none}@media(max-width:840px){body{padding:16px}.layout{grid-template-columns:minmax(0,380px);justify-content:center}.assets{grid-template-columns:repeat(2,minmax(0,1fr))}.scene{height:355px}}
+@media(prefers-reduced-motion:reduce){*,*:before,*:after{transition-duration:1ms!important}}
+</style>
+<style>
+/* Keep the paper and machine in one stacking context so released paper can
+   pass in front of the machine without being captured by a transformed frame. */
+.frame{transform:none!important}
+.layer{transform-origin:0 0;transition:transform .08s ease,opacity .35s ease}
+.guide{z-index:4}.ram{z-index:3}.front{z-index:5}.lever{z-index:6}
+.paper-window{transform-origin:0 0;transition:none}
+.paper-plane{position:absolute;inset:0;transform-origin:0 0;transition:transform .35s ease}
+.card-result{position:absolute;left:310px;top:165px;width:620px;display:flex;flex-direction:column;gap:10px;color:#08827b;font-weight:900;text-align:center;opacity:0;transition:opacity .15s ease}
+.card-result>div{display:flex;align-items:center;justify-content:center;white-space:nowrap}
+.result-title{height:62px;font-size:48px;color:var(--ink)}.result-value{height:116px;font-size:96px}.result-jitter{height:42px;font-size:32px;color:#625b53}
+.hole{box-shadow:none}
+.countdown{position:absolute;left:50%;top:50%;z-index:40;pointer-events:none;font-size:138px;line-height:1;font-weight:900;font-style:italic;color:white;text-shadow:7px 8px 0 #171b1fa8;transform:translate(-50%,-50%) rotate(-4deg);opacity:0}
+.result .card-result{opacity:1}.result .tap{display:none}.result .retry{display:block}
+.missed .paper-window{z-index:2}.missed .counter{visibility:hidden}
+@media(prefers-reduced-motion:reduce){.layer,.paper-plane,.card-result{transition-duration:1ms!important}}
+</style>
+<h1>整张时间卡 · 俯视送料与竖直取卡</h1>
+<p class="note">使用本次生成的透明素材 · 约 60° 俯视的纸卡、导向座与冲头 · 预览无音频，不计算真实测量值</p>
+<div class="tools">
+<button id="reset">查看基础组合</button><button id="count-in">演示预备拍</button><button id="miss">演示漏拍</button><button id="double">演示连敲</button><button id="first">演示首拍没接上</button>
+</div>
+<div class="layout">
+<section class="phone" id="phone">
+<div class="heading">节拍打卡机</div>
+<div class="phase" id="phase">只听耳机里的强拍，再敲一下</div>
+<div class="counter"><b id="count">0</b> / 32</div>
+<div class="scene"><div class="world" id="world"><div class="frame">
+<img class="layer rear" src="../../../../entry/src/main/resources/rawfile/calibration/time-card-v2/machine-rear.png" alt="机身背层">
+<div class="paper-window" id="paper-window"><div class="card" id="card"><div class="paper-plane" id="paper-plane"><img id="card-image" src="../../../../entry/src/main/resources/rawfile/calibration/time-card-v2/blank-time-card.png" alt="原始竖直时间卡，打孔时由代码投影"><div id="holes"></div><div class="stamp">本次未完成</div><div class="card-result"><div class="result-title">测量完成</div><div class="result-value">32 孔已完成</div><div class="result-jitter">预览不计算毫秒数据</div></div></div></div></div>
+<img class="layer guide" id="guide" src="../../../../entry/src/main/resources/rawfile/calibration/time-card-v2/punch-guide-topdown-60.png" alt="俯视冲头导向座与底模">
+<img class="layer ram" id="ram" src="../../../../entry/src/main/resources/rawfile/calibration/time-card-v2/punch-ram-topdown-60.png" alt="俯视独立冲头">
+<img class="layer front" src="../../../../entry/src/main/resources/rawfile/calibration/time-card-v2/machine-front.png" alt="机身前盖与导纸夹">
+<img class="layer lever" id="lever" src="../../../../entry/src/main/resources/rawfile/calibration/time-card-v2/lever.png" alt="独立扳手">
+</div></div><div class="countdown" id="countdown" aria-hidden="true"></div></div>
+<div class="message" role="status"><strong id="error-title">刚才没接上</strong><p id="error-detail"></p><p>本次不计算、不保存，已保存的校准不会被覆盖。</p></div>
+<button class="tap" id="tap">敲一下</button>
+<button class="retry" id="retry">重新听一小节，再打卡</button>
+<div class="listen-tip" id="tip">预览中可自由点击，不按点击间隔判定。</div>
+</section>
+<section class="side">
+<h2>六张透明素材 · 1254 × 1254</h2>
+<div class="assets">
+<figure class="asset"><img src="../../../../entry/src/main/resources/rawfile/calibration/time-card-v2/machine-rear.png" alt="背层"><figcaption>机身背层</figcaption><small>底座、后导轨、托纸台、固定轴座</small></figure>
+<figure class="asset"><img src="../../../../entry/src/main/resources/rawfile/calibration/time-card-v2/machine-front.png" alt="前盖"><figcaption>机身前盖</figcaption><small>遮住进入机口的纸与导纸夹</small></figure>
+<figure class="asset"><img src="../../../../entry/src/main/resources/rawfile/calibration/time-card-v2/lever.png" alt="扳手"><figcaption>独立扳手</figcaption><small>围绕固定轴旋转，不整体平移</small></figure>
+<figure class="asset"><img src="../../../../entry/src/main/resources/rawfile/calibration/time-card-v2/punch-ram-topdown-60.png" alt="俯视冲头"><figcaption>独立冲头 · 约60°</figcaption><small>顶面与导向座保持相同俯视角度</small></figure>
+<figure class="asset"><img src="../../../../entry/src/main/resources/rawfile/calibration/time-card-v2/punch-guide-topdown-60.png" alt="俯视导向座"><figcaption>导向座与底模 · 约60°</figcaption><small>前侧灰支撑臂，顶面更明显</small></figure>
+<figure class="asset"><img src="../../../../entry/src/main/resources/rawfile/calibration/time-card-v2/blank-time-card.png" alt="原始竖直纸卡"><figcaption>空白时间卡 · 竖直原图</figcaption><small>打孔时由代码透视投影；取出后恢复原图比例</small></figure>
+</div>
+<div class="spec">
+<p><strong>正常：</strong>扳手固定在右轴，冲头沿机口的四个工位移动，每打完一行，纸卡进一行。</p>
+<p><strong>预备拍：</strong>显示 4、3、2、1，数字逐拍放大、淡出；此预览仅模拟120 BPM的四拍，不播放音频。</p>
+<p><strong>纸面：</strong>用竖直原图和孔层一起投影出上窄下宽的纸面；送料同时补偿横向宽度，使正在打孔的一行始终与进纸口对齐。</p>
+<p><strong>完成：</strong>原卡沿床面退出 → 翻起并竖直展示 → 保留32个孔。预览仅标记完成，不编造毫秒数据。</p>
+<p><strong>中断：</strong>停止采集 → 完成收杆 → 原纸卡沿导轨退回 → 保留已有孔并标明“本次未完成”。</p>
+<p><strong>重试：</strong>用户主动按按钮 → 旧卡退出 → 装入空白卡 → 先听一小节 → 从下个强拍开始。</p>
+<p><strong>反馈：</strong>不补漏掉的孔；不把失败绘成一次打孔；正式打孔阶段不增加额外视觉节拍提示。</p>
+</div>
+<p class="status">这是独立设计预览。它展示素材、遮挡和中断动作，不复现设备上的音频时钟或真实判定。</p>
+</section>
+</div>
+<script>
+const phone=document.querySelector('#phone'), world=document.querySelector('#world'),
+  card=document.querySelector('#card'), paperPlane=document.querySelector('#paper-plane'),
+  paperWindow=document.querySelector('#paper-window'),
+  rear=document.querySelector('.rear'), front=document.querySelector('.front'),
+  ram=document.querySelector('#ram'), guide=document.querySelector('#guide'), lever=document.querySelector('#lever'),
+  holeBox=document.querySelector('#holes'), countEl=document.querySelector('#count'),
+  phase=document.querySelector('#phase'), tap=document.querySelector('#tap'),
+  retryButton=document.querySelector('#retry'), tip=document.querySelector('#tip'),
+  countdown=document.querySelector('#countdown');
+let count=0, visualCount=0, token=0, failed=false, animating=false, finishing=false, changing=false, countingIn=false;
+// Use the upright artwork as the canonical plane. A single homography keeps
+// its texture, holes and ink aligned while feeding and returning upright.
+const assetLayout={
+  punchPlaneY:686,
+  front:{scale:.88,x:50,y:110},
+  card:{scale:.68,x:170,y:-7.6,clipBottom:785,depth:.966,anchorY:1020,centerX:628,perspective:.0003},
+  lever:{scale:.65,pivotX:690,pivotY:1030,axisX:1144,axisY:676,pressAngle:-32},
+  ram:{scale:.4,centerX:626.5,tipY:781,y:361.6,stroke:12},
+  guide:{scale:.166,centerX:627,dieY:505,y:602.17},
+  hole:{firstX:420,pitchX:150,firstY:1020,pitchY:-82,diameter:26},
+  missed:{cardY:-141,frameY:140,clipTop:-160},
+  result:{cardScale:.94,cardX:36,cardY:30,machineScale:.58,frameY:775}
+};
+assetLayout.card.y=assetLayout.punchPlaneY-assetLayout.card.anchorY*assetLayout.card.scale;
+assetLayout.guide.y=assetLayout.punchPlaneY-assetLayout.guide.dieY*assetLayout.guide.scale;
+assetLayout.ram.y=assetLayout.punchPlaneY-assetLayout.ram.tipY*assetLayout.ram.scale-assetLayout.ram.stroke;
+const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+const machineLayers=[rear,front,guide,ram,lever];
+function initialPose(){const c=assetLayout.card;return {cardX:c.x,cardY:c.y,cardScale:c.scale,
+  depth:c.depth,perspective:c.perspective,widthScale:1,frameY:0,machineScale:1,machineOpacity:1,clipTop:0,released:false,opacity:1};}
+let pose=initialPose();
+function resize(){world.style.transform=`scale(${document.querySelector('.scene').clientWidth/1254})`;}
+function machineX(){return (1-pose.machineScale)*1254/2;}
+function holeWorldX(col){const c=assetLayout.card,h=assetLayout.hole;
+  return c.x+(h.firstX+col*h.pitchX)*c.scale;}
+function leverTransform(angle){const l=assetLayout.lever,s=pose.machineScale;
+  return `translate(${machineX()+l.axisX*s}px,${pose.frameY+l.axisY*s}px) rotate(${angle}deg) scale(${l.scale*s}) translate(${-l.pivotX}px,${-l.pivotY}px)`;}
+function cardTransform(){return `translate(${pose.cardX}px,${pose.cardY}px) scale(${pose.cardScale})`;}
+function paperDivisor(sourceY){return 1+pose.perspective*(assetLayout.card.anchorY-sourceY);}
+function paperY(sourceY){const anchor=assetLayout.card.anchorY;
+  return anchor+pose.depth*(sourceY-anchor)/paperDivisor(sourceY);}
+function paperTransform(){const c=assetLayout.card,p=pose.perspective,divisor=1+p*c.anchorY;
+  // CSS and this preview's plane both use unscaled design pixels. Card and
+  // world scaling belong to ancestors, so no vp/physical-pixel conversion fits here.
+  return `matrix3d(${[
+    pose.widthScale,0,0,0,
+    -c.centerX*p,pose.depth-c.anchorY*p,0,-p,
+    0,0,1,0,
+    c.centerX*(divisor-pose.widthScale),c.anchorY*(divisor-pose.depth),0,divisor
+  ].join(',')})`;}
+function ramTransform(col,pressed=false){const r=assetLayout.ram,s=pose.machineScale;
+  return `translate(${machineX()+(holeWorldX(col)-r.centerX*r.scale)*s}px,${pose.frameY+(r.y+(pressed?r.stroke:0))*s}px) scale(${r.scale*s})`;}
+function guideTransform(col){const g=assetLayout.guide,s=pose.machineScale;
+  return `translate(${machineX()+(holeWorldX(col)-g.centerX*g.scale)*s}px,${pose.frameY+g.y*s}px) scale(${g.scale*s})`;}
+function applyPose(pressed=false){const s=pose.machineScale,f=assetLayout.front,col=visualCount%4;
+  rear.style.transform=`translate(${machineX()}px,${pose.frameY}px) scale(${s})`;
+  front.style.transform=`translate(${machineX()+f.x*s}px,${pose.frameY+f.y*s}px) scale(${f.scale*s})`;
+  ram.style.transform=ramTransform(col,pressed);guide.style.transform=guideTransform(col);
+  lever.style.transform=leverTransform(pressed?assetLayout.lever.pressAngle:0);
+  machineLayers.forEach(layer=>layer.style.opacity=String(pose.machineOpacity));
+  card.style.transform=cardTransform();card.style.opacity=String(pose.opacity);
+  paperPlane.style.transform=paperTransform();
+  paperWindow.style.transform=pose.released?'none':`translateY(${pose.frameY}px)`;
+  paperWindow.style.clipPath=pose.released?'none':`inset(${pose.clipTop}px 0 ${1450-assetLayout.card.clipBottom}px 0)`;
+  paperWindow.style.zIndex=pose.released?'7':'2';
+}
+function setMotionDuration(ms){const duration=`${ms}ms ease`;
+  card.style.transition=`transform ${duration},opacity ${duration}`;
+  machineLayers.forEach(layer=>layer.style.transition=`transform ${duration},opacity ${duration}`);
+}
+function showHoles(){const g=assetLayout.hole;holeBox.replaceChildren();
+  for(let i=0;i<count;i++){const h=document.createElement('i');h.className='hole';
+    h.style.left=`${g.firstX+(i%4)*g.pitchX}px`;h.style.top=`${g.firstY+Math.floor(i/4)*g.pitchY}px`;
+    h.style.width=h.style.height=`${g.diameter}px`;holeBox.append(h);}
+  countEl.textContent=String(count);}
+function updatePaperFeed(completed){const c=assetLayout.card,h=assetLayout.hole;
+  const row=Math.min(7,Math.floor(completed/4)),rowY=h.firstY+row*h.pitchY;
+  // Compensating by the current row's divisor keeps its punch columns at the
+  // four fixed carriage positions while the rest of the card retains perspective.
+  pose.widthScale=paperDivisor(rowY);
+  pose.cardY=assetLayout.punchPlaneY-paperY(rowY)*c.scale;}
+function resting(){const pulledBack=failed&&phone.classList.contains('missed');
+  updatePaperFeed(visualCount);if(pulledBack)pose.cardY=assetLayout.missed.cardY;
+  pose.frameY=pulledBack?assetLayout.missed.frameY:0;
+  pose.clipTop=pulledBack?assetLayout.missed.clipTop:0;applyPose();}
+function hideCountdown(){countingIn=false;countdown.textContent='';countdown.style.opacity='0';}
+function reset(){token++;count=0;visualCount=0;failed=false;animating=false;finishing=false;changing=false;hideCountdown();
+  pose=initialPose();phone.classList.remove('missed','result');delete tap.dataset.waiting;
+  tap.textContent='敲一下';tap.disabled=false;retryButton.disabled=false;
+  retryButton.textContent='重新听一小节，再打卡';phase.textContent='只听耳机里的强拍，再敲一下';
+  tip.textContent='预览中可自由点击，不按点击间隔判定。';setMotionDuration(80);showHoles();resting();}
+async function countInPreview(){reset();const own=token,started=performance.now();countingIn=true;tap.disabled=true;
+  phase.textContent='先完整听一小节 · 预备拍';tip.textContent='无音频演示：4、3、2、1结束后开始打卡。';
+  while(own===token){const elapsed=performance.now()-started;if(elapsed>=2000)break;
+    const beat=Math.floor(elapsed/500),beatPhase=(elapsed-beat*500)/500;
+    countdown.textContent=String(4-beat);countdown.style.opacity=String(.76*(1-beatPhase*beatPhase));
+    countdown.style.transform=`translate(-50%,-50%) rotate(-4deg) scale(${.52+beatPhase*1.1})`;
+    await delay(32);}
+  if(own!==token)return;hideCountdown();tap.disabled=false;
+  phase.textContent='从下个强拍开始，再敲一下';tip.textContent='预览中可自由点击，不按点击间隔判定。';}
+async function finishPreview(own){if(own!==token||failed||finishing)return;
+  finishing=true;phone.classList.add('result');tap.disabled=true;retryButton.disabled=true;
+  retryButton.textContent='再打一张时间卡';phase.textContent='32孔已完成 · 沿床面退出';
+  tip.textContent='孔、纸与完成标记一起翻起，取出后竖直展示。';
+  setMotionDuration(280);pose.cardY=assetLayout.missed.cardY;
+  pose.clipTop=assetLayout.missed.clipTop;pose.frameY=assetLayout.missed.frameY;applyPose();
+  await delay(300);if(own!==token)return;
+  // Convert from the moving paper window to world coordinates before lifting
+  // the same DOM card. Replacing it would discard the holes or cause a jump.
+  card.style.transition='none';pose.cardY+=pose.frameY;pose.released=true;applyPose();
+  await delay(20);if(own!==token)return;
+  setMotionDuration(350);const r=assetLayout.result;
+  pose.cardX=r.cardX;pose.cardY=r.cardY;pose.cardScale=r.cardScale;pose.depth=1;pose.perspective=0;pose.widthScale=1;
+  pose.frameY=r.frameY;pose.machineScale=r.machineScale;pose.machineOpacity=.72;applyPose();
+  await delay(350);if(own!==token)return;
+  finishing=false;retryButton.disabled=false;phase.textContent='32孔已完成 · 竖直取出';
+  tip.textContent='预览仅展示动作和这张完整时间卡，不计算实际校准值。';}
+async function drain(){if(animating)return;animating=true;const own=token;
+  while(visualCount<count&&!failed){setMotionDuration(60);applyPose(true);
+    await delay(90);if(own!==token)return;setMotionDuration(80);applyPose();
+    await delay(100);if(own!==token)return;visualCount++;resting();
+    await delay(90);if(own!==token)return;}
+  animating=false;if(count===32&&!failed)await finishPreview(own);}
+function punch(){if(failed||finishing||changing||count>=32)return;
+  count++;showHoles();if(count===32)tap.disabled=true;void drain();}
+async function miss(kind){token++;const own=token;failed=true;animating=false;finishing=false;changing=false;hideCountdown();
+  pose=initialPose();phone.classList.remove('missed','result');delete tap.dataset.waiting;
+  count=kind==='first'?0:9;visualCount=count;tap.disabled=true;retryButton.disabled=true;
+  retryButton.textContent='重新听一小节，再打卡';phase.textContent='打卡已暂停';
+  setMotionDuration(140);showHoles();resting();await delay(160);if(own!==token)return;
+  phone.classList.add('missed');setMotionDuration(280);resting();
+  document.querySelector('#error-title').textContent=kind==='double'?'两次敲击太近了':kind==='first'?'首拍没有接上':'刚才没接上';
+  document.querySelector('#error-detail').textContent=kind==='double'?'已打 9 个孔，每听到一个节拍，只轻敲一次。':kind==='first'?'还没开始打孔，请先完整听一小节。':'已打 9 个孔，第 10 拍没有接到敲击。';
+  tip.textContent='已有孔保留，不继续当前记录。';await delay(840);if(own!==token)return;retryButton.disabled=false;}
+async function retry(){if(changing||finishing||retryButton.disabled)return;
+  token++;const own=token;changing=true;animating=false;tap.disabled=true;retryButton.disabled=true;
+  phase.textContent='换入空白时间卡';setMotionDuration(220);pose.cardY=-1100;pose.opacity=0;applyPose();
+  await delay(250);if(own!==token)return;
+  // Clear the old paper model only after its exit, preserving visible holes
+  // during withdrawal instead of appearing to erase them in place.
+  count=0;visualCount=0;failed=false;pose=initialPose();pose.cardY-=220;pose.opacity=0;
+  phone.classList.remove('missed','result');showHoles();card.style.transition='none';applyPose();
+  await delay(20);if(own!==token)return;setMotionDuration(210);
+  pose.cardY=assetLayout.card.y;pose.opacity=1;applyPose();
+  await delay(250);if(own!==token)return;changing=false;retryButton.disabled=false;
+  phase.textContent='先完整听一小节';tip.textContent='预览不播放节拍，点击开始进入模拟打卡。';
+  tap.textContent='开始模拟打卡';tap.disabled=false;tap.dataset.waiting='true';}
+tap.addEventListener('pointerdown',event=>{if(event.button!==0||tap.disabled)return;
+  if(tap.dataset.waiting){delete tap.dataset.waiting;tap.textContent='敲一下';void countInPreview();return;}punch();});
+document.querySelector('#reset').onclick=reset;document.querySelector('#miss').onclick=()=>void miss('miss');
+document.querySelector('#count-in').onclick=()=>void countInPreview();
+document.querySelector('#double').onclick=()=>void miss('double');document.querySelector('#first').onclick=()=>void miss('first');
+retryButton.onclick=()=>void retry();window.addEventListener('resize',resize);
+window.addEventListener('pagehide',()=>{token++;animating=false;hideCountdown();});
+window.addEventListener('pageshow',event=>{if(event.persisted)reset();});
+resize();reset();window.timeCardPreview={assetLayout,getState:()=>({count,visualCount,failed,animating,finishing,changing,countingIn,pose:{...pose}})};
+</script>
+</html>

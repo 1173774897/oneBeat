@@ -1,7 +1,7 @@
 import { common } from '@kit.AbilityKit';
 import { router } from '@kit.ArkUI';
 import { scanCore, scanBarcode } from '@kit.ScanKit';
-import { AppSession } from '../app/AppSession';
+import { AppSession, MemberJoinStage } from '../app/AppSession';
 import { joinCodeFromPayload, parseJoinQrPayload } from '../network/join/JoinQrPayload';
 import { P2pRoomInvitation } from '../network/p2p/P2pInvitation';
 import {
@@ -32,6 +32,7 @@ struct MemberJoinPage {
   @State bluetoothAck: boolean = false;
   @State joining: boolean = false;
   @State wirelessSettingsAvailable: boolean = false;
+  private initializationToken: number = 0;
 
   aboutToAppear(): void {
     const params = router.getParams() as Record<string, string>;
@@ -54,21 +55,43 @@ struct MemberJoinPage {
   }
 
   private async initialize(): Promise<void> {
-    await AppSession.reset();
-    const session = AppSession.createMember(this.displayName);
+    const initializationToken = ++this.initializationToken;
     this.status = '请先打开系统 Wi-Fi；手输加入码时还需要打开蓝牙';
     try {
+      await AppSession.reset();
+      if (initializationToken !== this.initializationToken) {
+        return;
+      }
+      const session = await AppSession.prepareMember(this.displayName);
+      if (!this.canWarmUpDiscovery(session, initializationToken)) {
+        return;
+      }
       const ctx = getContext(this) as common.UIAbilityContext;
       const granted = await ensureTeamNetworkPermissions(ctx);
-      if (granted && await verifyTeamNetworkAccess()) {
+      if (!this.canWarmUpDiscovery(session, initializationToken)) {
+        return;
+      }
+      const accessible = granted && await verifyTeamNetworkAccess();
+      if (!this.canWarmUpDiscovery(session, initializationToken)) {
+        return;
+      }
+      if (accessible) {
         await session.p2p.prepareMemberDiscovery();
       } else if (granted) {
         this.wirelessSettingsAvailable = true;
         this.status = teamNetworkAccessUnavailableHint();
       }
-    } catch (_e) {
-      // 进入页时预申请；用户点加入时会再次校验并提示
+    } catch (err) {
+      if (initializationToken === this.initializationToken && !this.joining) {
+        this.status = `准备加入失败：${(err as Error).message}`;
+      }
     }
+  }
+
+  private canWarmUpDiscovery(session: AppSession, initializationToken: number): boolean {
+    // A join only needs the old session's teardown barrier. Its permission and
+    // discovery work must not wait for, or be overwritten by, background warmup.
+    return initializationToken === this.initializationToken && !this.joining && AppSession.get() === session;
   }
 
   build() {
@@ -287,16 +310,27 @@ struct MemberJoinPage {
     return true;
   }
 
+  private updateJoinProgress(stage: MemberJoinStage): void {
+    if (stage === 'connecting') {
+      this.status = '正在连接队长，请在队长手机上确认…';
+    } else if (stage === 'joining') {
+      this.status = '已建立局域连接，正在同步队伍…';
+    } else {
+      this.status = '队伍已连接，正在准备进入大厅…';
+    }
+  }
+
   private async joinInvitation(invitation: P2pRoomInvitation): Promise<void> {
+    this.initializationToken++;
     this.joining = true;
     try {
       if (!(await this.ensureP2pReady())) {
         return;
       }
-      const session = AppSession.get() ?? AppSession.createMember(this.displayName);
+      const session = await AppSession.prepareMember(this.displayName);
       session.controller.bluetoothAcknowledged = this.bluetoothAck;
       this.status = '正在扫描附近 P2P 设备并连接队长…';
-      await session.memberJoinWithInvitation(invitation);
+      await session.memberJoinWithInvitation(invitation, (stage) => { this.updateJoinProgress(stage); });
       this.persistDisplayName();
       this.status = '已同步时钟，正在进入…';
       router.replaceUrl({ url: 'pages/LeaderLobbyPage', params: { reuse: '1' } });
@@ -308,6 +342,7 @@ struct MemberJoinPage {
   }
 
   private async joinWithCode(code: string): Promise<void> {
+    this.initializationToken++;
     this.joining = true;
     try {
       if (!(await this.ensureP2pReady())) {
@@ -323,12 +358,12 @@ struct MemberJoinPage {
         this.status = '手输加入码需要打开蓝牙；也可以改用扫码加入';
         return;
       }
-      const session = AppSession.get() ?? AppSession.createMember(this.displayName);
+      const session = await AppSession.prepareMember(this.displayName);
       session.controller.bluetoothAcknowledged = this.bluetoothAck;
       this.status = '正在通过蓝牙查找附近房间…';
       await session.memberJoinByCode(code, () => {
         this.status = '已找到队伍，正在请求连接队长…';
-      });
+      }, (stage) => { this.updateJoinProgress(stage); });
       this.persistDisplayName();
       this.status = '已同步时钟，正在进入…';
       router.replaceUrl({ url: 'pages/LeaderLobbyPage', params: { reuse: '1' } });

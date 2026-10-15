@@ -7,7 +7,7 @@
     "pages/MainPage",
     "pages/DrumMachinePage",
     "pages/AudioCalibrationPage",
-    "pages/MicLoopbackCalibrationPage",
+    "pages/TimeCardCalibrationPage",
     "pages/StorePage",
     "pages/PrivacyPage"
   ]

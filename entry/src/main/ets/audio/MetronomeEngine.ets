@@ -27,11 +27,27 @@ const BYTES_PER_SAMPLE: number = 2;
 const CALIB_CLOCK_MIN_RATE_WINDOW_MS: number = 400;
 const CALIB_CLOCK_MIN_FRAME_DELTA: number = Math.round(SAMPLE_RATE * 0.3);
 const CALIB_CLOCK_MAX_RATE_ERROR_RATIO: number = 0.08;
+const CALIB_CLOCK_RECOVERY_TIMEOUT_MS: number = 4000;
+const CALIB_CLOCK_MAX_SAMPLE_AGE_MS: number = 250;
+// Huawei framePos often updates in 20ms steps; one stale read can look like −882 frames.
+const CALIB_CLOCK_FRAME_POS_QUANTUM: number = Math.round(SAMPLE_RATE * 20 / 1000);
+// Keep the validated production mapping independent of prior mic calibration.
+// Enable this only for a controlled playback A/B; mic probes keep their raw clock.
+const EXPERIMENTAL_EXACT_PLAYBACK_FRAME_MAP: boolean = false;
 const AUDIO_PREROLL_MS: number = 650;
 const AUDIO_CLOCK_LOCK_RETRY_MS: number = 8;
 const AUDIO_CLOCK_LOCK_TIMEOUT_MS: number = 300;
 const AUDIO_CLOCK_LOCK_MIN_REMAINING_MS: number = 80;
 const AUDIO_CALLBACK_STALL_MS: number = 1500;
+const ROUTE_PROBE_POLL_MS: number = 20;
+const ROUTE_PROBE_WARMUP_MS: number = 300;
+const ROUTE_PROBE_WARMUP_TIMEOUT_MS: number = 4000;
+const ROUTE_PROBE_LEAD_MS: number = 200;
+const ROUTE_PROBE_SUBMISSION_TIMEOUT_MS: number = 6000;
+const ROUTE_PROBE_MAX_DRAIN_MS: number = 3000;
+const ROUTE_REPHASE_SETTLE_MS: number = 160;
+const ROUTE_REPHASE_READY_TIMEOUT_MS: number = 4000;
+const ROUTE_REPHASE_GUARD_MS: number = 80;
 // Sub-audible dither floor laid under the click samples so the stream is never
 // pure digital zero. Pure zero runs are what the smart PA silence detector
 // (CustStreamCheck -> SmartpaPowerOff) keys on to power off the amplifier.
@@ -73,16 +89,69 @@ export interface TransportVisualSnapshot {
   countIn: boolean;
 }
 
+/**
+ * Difference between raw hardware and production frame coordinates in one
+ * physical renderer epoch. A positive offset increases app-to-ear compensation;
+ * it becomes invalid as soon as the renderer or its output route changes.
+ * framePos belongs to timestampMonoMs, not the later query time; submittedFrames
+ * lets post-capture verification also confirm that writeData resumed.
+ */
+export interface CalibrationPlaybackReference {
+  rendererEpoch: number;
+  streamId: number;
+  frameMappingOffsetMs: number;
+  sampledAtMonoMs: number;
+  framePos: number;
+  timestampMonoMs: number;
+  submittedFrames: number;
+}
+
+/** A fresh sample may recover in the same epoch; callers must still verify stream identity. */
+export class MicPlaybackClockPendingError extends Error {
+  readonly reason: string;
+
+  constructor(reason: string) {
+    super('麦克回环播放时钟暂未就绪，请稍候');
+    this.name = 'MicPlaybackClockPendingError';
+    this.reason = reason;
+  }
+}
+
 /** Timing metadata for a chirp placed on the renderer's presentation timeline. */
 export interface CalibrationSignalTiming {
   presentationMonoMs: number;
   hardwareLatencyMs: number;
+  playbackReference?: CalibrationPlaybackReference;
+}
+
+interface OutputLatencySnapshot {
+  allMs: number;
+  softwareMs: number;
+  hardwareMs: number;
 }
 
 interface CalibrationClockSample {
   framePos: number;
+  rawTimestampMs: number;
   timestampMonoMs: number;
   queryMonoMs: number;
+}
+
+/** Diagnostic copy of an existing playback read; never query or rebase audio to populate it. */
+interface ProductionClockSample {
+  rendererEpoch: number;
+  streamId: number;
+  physicalStartCount: number;
+  queryMonoMs: number;
+  rawFrame: number;
+  rawTimestampMs: number;
+  renderedFrame: number;
+  submittedFrames: number;
+  baseFrame: number;
+  clockOffsetMs: number;
+  legacyAgeMs: number;
+  baseUpdateReason: string;
+  previousRawFrame: number;
 }
 
 interface PendingCalibrationSignal {
@@ -108,15 +177,49 @@ interface PendingAudioTransition {
   beatIndex: number;
   countInBeats: number;
   outputLatencyMs: number;
+  routeRephase?: boolean;
+  preserveActiveSequence?: boolean;
+  // A resumed write callback must skip a route beat whose presentation time
+  // passed while callbacks were frozen, even if its submitted frame is pending.
+  hardwareAtLocalMs?: number;
+  // Rephasing seeks forward on the original transport, rather than making the
+  // chosen beat a new playhead zero that phase-lock would treat as clock drift.
+  timelineElapsedFrames?: number;
+}
+
+interface RouteProbePreparation {
+  completion: Promise<void>;
+  started: boolean;
+  abandoned: boolean;
+}
+
+interface RouteRendererPreparation {
+  settled: boolean;
+  error?: Error;
+}
+
+interface RouteRephaseSelection {
+  transition?: PendingAudioTransition;
 }
 
 export class MetronomeEngine {
   private renderer: audio.AudioRenderer | undefined = undefined;
+  private rendererInitialization: Promise<audio.AudioRenderer> | undefined = undefined;
   private rendererWriteDataCallback: audio.AudioRendererWriteDataCallback | undefined = undefined;
   private rendererEpoch: number = 0;
   private rendererStreamId: number = -1;
+  // Only the first start of a newly-created renderer has a proven raw/submitted
+  // zero for diagnostics. A normal stop/restart may retain the hardware counter.
+  private rendererPhysicalStartCount: number = 0;
+  private diagnosticRawOriginLost: boolean = false;
+  private productionClockSample: ProductionClockSample | undefined = undefined;
   private rendererStarted: boolean = false;
   private rendererOperation: Promise<void> = Promise.resolve();
+  private routeProbeOperation: Promise<void> = Promise.resolve();
+  private routeProbeGeneration: number = 0;
+  private outputRouteRephaseGeneration: number = 0;
+  private outputRouteRephasePreparing: boolean = false;
+  private expiredRouteToken: number = -1;
   // A calibration transaction stays exclusive until its target frame has
   // actually crossed the hardware playhead. Otherwise a retry can overwrite
   // the single mixed signal while the previous caller is still awaiting it.
@@ -135,6 +238,7 @@ export class MetronomeEngine {
   private timerId: number = -1;
   private audioStartTimerId: number = -1;
   private pauseTimerId: number = -1;
+  private scheduledPauseAtLocalMs: number | undefined = undefined;
   private running: boolean = false;
   private bpm: number = 120;
   private beatsPerBar: number = 4;
@@ -162,6 +266,8 @@ export class MetronomeEngine {
   private activeSequenceLooping: boolean = true;
   private activeSequenceFinished: boolean = false;
   private activeRevision: number = -1;
+  // Local route retokens leave this ownership intact; shared starts revise it.
+  private audioSequenceTransportRevision: number = -1;
   private activeSequenceIndex: number = 0;
   private activeLoopStartIndex: number = 0;
   private activeBar: RenderedBar | undefined = undefined;
@@ -190,6 +296,7 @@ export class MetronomeEngine {
   /** Only the transport that established the current audio origin may read the hardware playhead. */
   private audioTimelineToken: number = -1;
   private audioTimelineLeadFrames: number = 0;
+  private audioTimelineOutputLatencyMs: number = 0;
   private audioTimestampBaseFrame: number = 0;
   private audioTimestampBaseReady: boolean = false;
   private audioTimestampClockOffsetMs: number | undefined = undefined;
@@ -198,6 +305,7 @@ export class MetronomeEngine {
   private audioClockLocked: boolean = false;
   private lastAudioRawFrame: number = -1;
   private lastAudioTimestampAgeMs: number = Number.POSITIVE_INFINITY;
+  private lastAudioFrameMapExact: boolean = false;
   private lastAudioPlayheadMs: number = 0;
   private lastAudioSampleMonoMs: number = 0;
   private lastTimestampQueryMonoMs: number = -1;
@@ -274,6 +382,194 @@ export class MetronomeEngine {
     this.beatPointStates = defaultBeatPointStates(2);
     this.pattern = BuiltInRhythmFactory.create(0, 2, this.beatPointStates);
     this.rebuildPendingSequence([this.pattern], false);
+  }
+
+  /**
+   * Confirm the physical route with one complete accent/weak PCM pair. This
+   * preview has no shared-clock deadline: skipping a late first beat would
+   * invalidate what the user is being asked to listen for. Keep the ordinary
+   * renderer and its production frame mapping, rather than entering mic timing.
+   * Cancellation relinquishes ownership without stopping a newer transport.
+   */
+  async playRouteProbeClickPair(isCancelled: () => boolean = () => false): Promise<boolean> {
+    const generation = ++this.routeProbeGeneration;
+    const queuedAt = MonotonicClock.nowMs();
+    const preparation: RouteProbePreparation = {
+      completion: Promise.resolve(), started: false, abandoned: false
+    };
+    // Serialize cold preparation too: a superseded create/start must finish
+    // before another probe can establish the renderer it will retain.
+    const task = this.routeProbeOperation.then(() => {
+      preparation.started = true;
+      return this.playRouteProbeClickPairExclusive(generation, isCancelled, preparation);
+    });
+    this.routeProbeOperation = task.then(() => preparation.completion, () => preparation.completion);
+    let settled = false;
+    let result = false;
+    let failure: Error | undefined = undefined;
+    void task.then((completed: boolean) => {
+      result = completed;
+      settled = true;
+    }, (error: Error) => {
+      failure = error;
+      settled = true;
+    });
+    while (!settled) {
+      if (generation !== this.routeProbeGeneration || isCancelled()) {
+        preparation.abandoned = true;
+        return false;
+      }
+      if (!preparation.started && MonotonicClock.nowMs() - queuedAt >= ROUTE_PROBE_WARMUP_TIMEOUT_MS) {
+        preparation.abandoned = true;
+        throw new Error('蓝牙试音启动超时，请保持当前输出设备后重试');
+      }
+      await MetronomeEngine.delay(ROUTE_PROBE_POLL_MS);
+    }
+    if (preparation.abandoned || generation !== this.routeProbeGeneration || isCancelled()) {
+      return false;
+    }
+    if (failure !== undefined) {
+      throw new Error((failure as Error).message);
+    }
+    return result;
+  }
+
+  private async playRouteProbeClickPairExclusive(generation: number,
+    isCancelled: () => boolean, preparation: RouteProbePreparation): Promise<boolean> {
+    const requestCurrent = (): boolean => !preparation.abandoned &&
+      generation === this.routeProbeGeneration && !isCancelled();
+    if (!requestCurrent()) {
+      return false;
+    }
+    this.pause();
+    const preparationToken = this.runToken;
+    const preparationCurrent = (): boolean => requestCurrent() && this.runToken === preparationToken;
+    const warmupStartedAt = MonotonicClock.nowMs();
+    const writesBeforeWarmup = this.writeCallbackCount;
+    let warmupSettled = false;
+    let warmupError: Error | undefined = undefined;
+    const warming = this.warmUpRendererForPlayback(() => !preparationCurrent());
+    // A timeout stops this logical request, but cannot cancel a native create /
+    // start Promise. Its completion still owns preparation order, so a late
+    // response cannot replace the renderer established by the next probe.
+    preparation.completion = warming.then(() => {}, () => {});
+    void warming.then(() => {
+      warmupSettled = true;
+    }, (error: Error) => {
+      warmupError = error;
+      warmupSettled = true;
+    });
+    while (!warmupSettled) {
+      if (!preparationCurrent()) {
+        return false;
+      }
+      if (MonotonicClock.nowMs() - warmupStartedAt >= ROUTE_PROBE_WARMUP_TIMEOUT_MS) {
+        throw new Error('蓝牙试音启动超时，请保持当前输出设备后重试');
+      }
+      await MetronomeEngine.delay(ROUTE_PROBE_POLL_MS);
+    }
+    if (!preparationCurrent()) {
+      return false;
+    }
+    if (warmupError !== undefined) {
+      throw new Error((warmupError as Error).message);
+    }
+    const renderer = this.renderer;
+    if (renderer === undefined) {
+      throw new Error('蓝牙试音渲染器不可用');
+    }
+    const rendererEpoch = this.rendererEpoch;
+    const physicalStartCount = this.rendererPhysicalStartCount;
+    const physicalCurrent = (): boolean => this.renderer === renderer &&
+      this.rendererEpoch === rendererEpoch && this.rendererPhysicalStartCount === physicalStartCount &&
+      this.rendererStarted && renderer.state === audio.AudioState.STATE_RUNNING;
+    const warmedAt = MonotonicClock.nowMs();
+    // start() resolving is not evidence that A2DP accepts audio. Observe real
+    // writeData progress and let the silent stream open the physical link first.
+    while (this.writeCallbackCount <= writesBeforeWarmup ||
+      MonotonicClock.nowMs() - warmedAt < ROUTE_PROBE_WARMUP_MS) {
+      if (!preparationCurrent() || !physicalCurrent()) {
+        return false;
+      }
+      if (MonotonicClock.nowMs() - warmupStartedAt >= ROUTE_PROBE_WARMUP_TIMEOUT_MS) {
+        throw new Error('蓝牙试音未收到音频写入回调，请重试');
+      }
+      await MetronomeEngine.delay(ROUTE_PROBE_POLL_MS);
+    }
+
+    let probeToken = -1;
+    let firstFrame = -1;
+    let endFrame = -1;
+    await this.queueRendererOperation(async () => {
+      if (!preparationCurrent() || !physicalCurrent()) {
+        return;
+      }
+      this.configureRouteProbeClickPair();
+      probeToken = this.beginTransport();
+      this.transportBpm = this.bpm;
+      this.transportBeatsPerBar = this.beatsPerBar;
+      this.beatIndex = 0;
+      this.transportStartBeatIndex = 0;
+      this.transportCountInBeats = 0;
+      this.transportCountInDurationMs = 0;
+      this.transportStartLocalMs = MonotonicClock.nowMs();
+      this.transportOutputCompensationOverrideMs = 0;
+      this.transportRevision++;
+      firstFrame = this.audioSubmittedFrames + Math.round(ROUTE_PROBE_LEAD_MS * SAMPLE_RATE / 1000);
+      endFrame = firstFrame + this.pendingSequence[0].frameCount;
+      this.scheduleRunningTransition({
+        kind: 'play', token: probeToken, targetFrame: firstFrame,
+        beatIndex: 0, countInBeats: 0, outputLatencyMs: 0
+      });
+      console.info(`[RouteProbeDiag] stage=scheduled rendererEpoch=${rendererEpoch} ` +
+        `streamId=${this.rendererStreamId} token=${probeToken} firstFrame=${firstFrame} ` +
+        `endFrame=${endFrame} submittedFrames=${this.audioSubmittedFrames}`);
+    });
+    const probeCurrent = (): boolean => requestCurrent() && this.runToken === probeToken && physicalCurrent();
+    if (probeToken < 0 || !probeCurrent()) {
+      return false;
+    }
+    const submissionStartedAt = MonotonicClock.nowMs();
+    while (this.audioTimelineToken !== probeToken || !this.activeSequenceFinished ||
+      this.audioSubmittedFrames < endFrame) {
+      if (!probeCurrent()) {
+        return false;
+      }
+      const now = MonotonicClock.nowMs();
+      if (now - submissionStartedAt >= ROUTE_PROBE_SUBMISSION_TIMEOUT_MS ||
+        now - this.lastWriteProgressMs >= AUDIO_CALLBACK_STALL_MS) {
+        console.warn(`[RouteProbeDiag] stage=submission-timeout token=${probeToken} ` +
+          `submittedFrames=${this.audioSubmittedFrames} endFrame=${endFrame}`);
+        throw new Error('蓝牙试音未完整播放，请保持当前输出设备后重试');
+      }
+      await MetronomeEngine.delay(ROUTE_PROBE_POLL_MS);
+    }
+    if (!probeCurrent()) {
+      return false;
+    }
+    const now = MonotonicClock.nowMs();
+    const playedFrames = this.readRenderedStreamFrames(renderer, now);
+    const queueMs = playedFrames === undefined ? 1000 :
+      Math.max(0, (endFrame - playedFrames) * 1000 / SAMPLE_RATE);
+    const platformLatencyMs = Math.max(0, MetronomeEngine.readOutputLatencyMs(renderer));
+    // Both clicks are now irrevocably queued. Give that queue and the wireless
+    // tail time to drain before enabling the route-confirmation choices; pause
+    // must never cut a still-unsubmitted second click at a wall-clock deadline.
+    const drainMs = Math.min(ROUTE_PROBE_MAX_DRAIN_MS, Math.max(700, queueMs + platformLatencyMs + 200));
+    const drainUntil = now + drainMs;
+    console.info(`[RouteProbeDiag] stage=submitted token=${probeToken} ` +
+      `elapsedMs=${(now - submissionStartedAt).toFixed(1)} queueMs=${queueMs.toFixed(1)} ` +
+      `platformLatencyMs=${platformLatencyMs} drainMs=${drainMs.toFixed(1)}`);
+    while (MonotonicClock.nowMs() < drainUntil) {
+      if (!probeCurrent()) {
+        return false;
+      }
+      if (MonotonicClock.nowMs() - this.lastWriteProgressMs >= AUDIO_CALLBACK_STALL_MS) {
+        throw new Error('蓝牙试音音频输出已停滞，请保持当前输出设备后重试');
+      }
+      await MetronomeEngine.delay(ROUTE_PROBE_POLL_MS);
+    }
+    return probeCurrent();
   }
 
   async configureProgram(raw: string, looping: boolean = true): Promise<void> {
@@ -397,7 +693,19 @@ export class MetronomeEngine {
     if (this.renderer !== undefined) {
       return;
     }
-    await this.createRenderer();
+    // Route-preview preparation can overlap a user starting the real transport.
+    // Share native creation so its late response cannot replace a newer stream.
+    if (this.rendererInitialization === undefined) {
+      this.rendererInitialization = this.createRenderer();
+    }
+    const initialization = this.rendererInitialization;
+    try {
+      await initialization;
+    } finally {
+      if (this.rendererInitialization === initialization) {
+        this.rendererInitialization = undefined;
+      }
+    }
   }
 
   private async createRenderer(): Promise<audio.AudioRenderer> {
@@ -428,6 +736,9 @@ export class MetronomeEngine {
       return this.handleWriteData(data);
     };
     this.renderer = created;
+    this.rendererPhysicalStartCount = 0;
+    this.diagnosticRawOriginLost = false;
+    this.productionClockSample = undefined;
     this.rendererWriteDataCallback = writeDataCallback;
     created.on('writeData', writeDataCallback);
     created.on('stateChange', (state: audio.AudioState) => {
@@ -457,9 +768,9 @@ export class MetronomeEngine {
   /**
    * Schedule a one-shot calibration signal on this renderer's stream timeline.
    * The returned local monotonic time is the renderer-presentation target of
-   * the first signal frame. Production playback schedules against this same
-   * frame clock, so the calibration must not count submit-to-presentation queue
-   * depth as output latency and then compensate that queue a second time.
+   * the first signal frame on the raw hardware clock. Bluetooth results also
+   * carry the bridge to production's legacy frame mapping. The physical round
+   * trip excludes the submit queue, which must not become saved compensation.
    */
   async scheduleCalibrationSignal(signal: Int16Array,
     targetAtLocalMonoMs: number): Promise<CalibrationSignalTiming> {
@@ -478,6 +789,7 @@ export class MetronomeEngine {
     targetAtLocalMonoMs: number): Promise<CalibrationSignalTiming> {
     await this.ensureRenderer();
     this.pause();
+    const calibrationToken = this.runToken;
     await this.ensureSilentRendererRunning(true);
     // Warm the physical route before choosing a frame target so its timestamp
     // and A2DP link match the stream that production will keep using. Queue
@@ -485,6 +797,7 @@ export class MetronomeEngine {
     await this.warmUpRenderQueueForCalibration();
     let presentationMonoMs = targetAtLocalMonoMs;
     let hardwareLatencyMs = -1;
+    let playbackReference: CalibrationPlaybackReference | undefined = undefined;
     await this.queueRendererOperation(async () => {
       const renderer = this.renderer;
       if (renderer === undefined || !this.rendererStarted ||
@@ -492,13 +805,13 @@ export class MetronomeEngine {
         throw new Error('校准音频渲染器未运行');
       }
 
-      const clock = await this.readStableCalibrationClock(renderer);
+      const clock = await this.readStableCalibrationClock(renderer, calibrationToken);
       if (clock === undefined) {
         // A wall-clock/queue-depth fallback is acceptable for live playback,
         // but not for calibration: an unknown queue would be folded back into
         // the saved compensation and recreate the submit-anchor bug.
-        this.calibrationRouteResetPending = true;
-        this.micCalibrationRendererRebuildPending = true;
+        // Recovery keeps this renderer and origin. Only the explicit probe
+        // boundary or an output-route reset may rebuild the physical stream.
         throw new Error('未取得稳定的音频硬件时间戳，请保持当前输出设备后重试');
       }
       const targetFrame = Math.max(this.audioSubmittedFrames,
@@ -519,7 +832,9 @@ export class MetronomeEngine {
       // getAudioTimestampInfoSync() places the anchor at the frame written to
       // hardware. Only the downstream HAL/driver/device leg remains; SOFTWARE
       // has already elapsed and must not be subtracted again during input calibration.
-      hardwareLatencyMs = MetronomeEngine.readHardwareLatencyMs(renderer);
+      const outputLatency = this.logMicCalibrationAudioStateForRenderer(
+        'probe-capturer-active', renderer);
+      hardwareLatencyMs = outputLatency.hardwareMs;
       const scheduledLeadMs = scheduledPresentationMonoMs - clock.queryMonoMs;
       console.info(`[CalibDiag] schedule targetFrame=${targetFrame} playedFrames=${clock.framePos} ` +
         `submittedFrames=${this.audioSubmittedFrames} leadMs=${scheduledLeadMs.toFixed(1)} ` +
@@ -545,8 +860,6 @@ export class MetronomeEngine {
         if (this.calibrationSignal === pendingSignal) {
           this.calibrationSignal = undefined;
         }
-        this.calibrationRouteResetPending = true;
-        this.micCalibrationRendererRebuildPending = true;
         throw new Error('未确认校准音越过硬件播放头，请重试');
       }
       // Do not let the next probe clear/replace this signal while its 500ms
@@ -568,32 +881,46 @@ export class MetronomeEngine {
         `presentationMonoMs=${presentationMonoMs.toFixed(1)} ` +
         `scheduleCorrectionMs=${(presentationMonoMs - scheduledPresentationMonoMs).toFixed(1)} ` +
         `submitToPresentationMs=${(presentationMonoMs - pendingSignal.submitMonoMs).toFixed(1)}`);
+      if (AudioOutputMonitor.isBluetoothA2dpActive()) {
+        // Bind the raw chirp to its own epoch before the renderer transaction
+        // unlocks; a queued route boundary must not attach a replacement stream.
+        playbackReference = this.readMicCalibrationPlaybackReference();
+      }
     });
     return {
       presentationMonoMs,
-      hardwareLatencyMs
+      hardwareLatencyMs,
+      playbackReference
     };
   }
 
   /** Start the persistent renderer with dither only; do not start a UI transport. */
-  private async ensureSilentRendererRunning(requireExactCalibrationClock: boolean = false): Promise<void> {
+  private async ensureSilentRendererRunning(requireExactCalibrationClock: boolean = false,
+    isCancelled: () => boolean = () => false,
+    keepRunningOnRouteChange: boolean = false): Promise<void> {
     await this.queueRendererOperation(async () => {
+      if (isCancelled()) {
+        return;
+      }
       let renderer = this.renderer;
       if (renderer === undefined) {
-        throw new Error('校准音频渲染器不可用');
+        throw new Error(requireExactCalibrationClock ? '校准音频渲染器不可用' : '播放音频渲染器不可用');
       }
       const now = MonotonicClock.nowMs();
       const routeReset = this.calibrationRouteResetPending;
+      // Mic calibration must release on route epoch dirtiness. flush() alone does
+      // not realign framePos with audioSubmittedFrames on current Huawei builds.
       const rebuildForMic = requireExactCalibrationClock &&
-        this.micCalibrationRendererRebuildPending;
+        (this.micCalibrationRendererRebuildPending || routeReset);
       const healthy = this.rendererStarted && renderer.state === audio.AudioState.STATE_RUNNING &&
-        now - this.lastWriteProgressMs < AUDIO_CALLBACK_STALL_MS && !routeReset && !rebuildForMic &&
+        now - this.lastWriteProgressMs < AUDIO_CALLBACK_STALL_MS &&
+        (!routeReset || keepRunningOnRouteChange) && !rebuildForMic &&
         (!requireExactCalibrationClock || this.calibrationFrameOriginExact);
       if (healthy) {
         console.info(`[CalibDiag] renderer healthy, keep buffer, queueDepthFrames=${this.queueDepthFrames} submittedFrames=${this.audioSubmittedFrames}`);
         return;
       }
-      console.info(`[CalibDiag] renderer NOT healthy, flush+restart, routeReset=${routeReset} ` +
+      console.info(`[CalibDiag] renderer NOT healthy, prepare+restart, routeReset=${routeReset} ` +
         `micRebuild=${rebuildForMic} exactClock=${this.calibrationFrameOriginExact} state=${renderer.state} ` +
         `lastWriteAge=${now - this.lastWriteProgressMs}ms`);
       if (rebuildForMic) {
@@ -627,24 +954,33 @@ export class MetronomeEngine {
           renderer.state === audio.AudioState.STATE_PAUSED) {
           await this.haltRendererNow();
         }
-        if (routeReset || requireExactCalibrationClock) {
+        if (isCancelled()) {
+          return;
+        }
+        if (requireExactCalibrationClock) {
           try {
             // Mic timing resets audioSubmittedFrames, so its physical stream
             // must be flushed as well. Flush resets framePos to the same zero.
+            // Ordinary playback uses its rebased clock and must not flush a
+            // newly prepared stream just because the output route changed.
             await renderer.flush();
           } catch (err) {
             throw new Error(`重置麦克回环音频时钟失败：${(err as Error).message}`);
           }
         }
       }
+      if (isCancelled()) {
+        return;
+      }
       this.resetAudioTimestampState();
       this.audioSubmittedFrames = 0;
       this.audioStreaming = false;
       this.pendingAudioTransition = undefined;
       this.calibrationSignal = undefined;
-      this.calibrationFrameOriginExact = rebuildForMic || routeReset || requireExactCalibrationClock;
+      this.calibrationFrameOriginExact = rebuildForMic || requireExactCalibrationClock;
       this.rendererStartedAtLocalMs = MonotonicClock.nowMs();
       this.diagFirstWriteAfterStartPending = true;
+      this.rendererPhysicalStartCount++;
       await renderer.start();
       this.rendererStarted = true;
       this.observedWriteCallbackCount = this.writeCallbackCount;
@@ -660,10 +996,16 @@ export class MetronomeEngine {
    * 播放前提前暖机：启动持久 renderer 并让 writeData 用 dither 填满队列到稳态。
    * 在「进入队伍 + 蓝牙已连」时调用，让第一拍/校准直接复用已到稳态的 renderer，
    * 跳过 A2DP 建链 + 队列从空重建的冷启动。
+   * 一次性试音的取消谓词阻止晚到的 create / queued warm-up 抢回新 transport。
    */
-  async warmUpRendererForPlayback(): Promise<void> {
+  async warmUpRendererForPlayback(isCancelled: () => boolean = () => false): Promise<void> {
     await this.ensureRenderer();
-    await this.ensureSilentRendererRunning();
+    if (isCancelled()) {
+      return;
+    }
+    // A route notification invalidates mic timing, not a healthy playback
+    // queue. Let the running stream follow the system route without a restart.
+    await this.ensureSilentRendererRunning(false, isCancelled, true);
     console.info(`[WarmUp] playback renderer warm, queueDepthFrames=${this.queueDepthFrames} submittedFrames=${this.audioSubmittedFrames}`);
   }
 
@@ -688,6 +1030,58 @@ export class MetronomeEngine {
       this.readRenderedStreamFrames(renderer, MonotonicClock.nowMs());
     }
     console.info(`[CalibDiag] warm-up ${alreadyWarm ? 'skipped (already warm)' : 'done'} queueDepthFrames=${this.queueDepthFrames} submittedFrames=${this.audioSubmittedFrames}`);
+  }
+
+  /**
+   * Reset the persistent renderer queue between input-side probes on the same
+   * route. flush() alone does not realign getAudioTimestampInfo().framePos with
+   * audioSubmittedFrames on current Huawei builds, which yields multi-second
+   * negative queueMs and breaks readStableCalibrationClock().
+   */
+  async flushCalibrationStreamBetweenProbes(): Promise<void> {
+    await this.calibrationOperation.catch((): void => {});
+    await this.queueRendererOperation(async () => {
+      let renderer = this.renderer;
+      if (renderer === undefined) {
+        return;
+      }
+      try {
+        if (renderer.state === audio.AudioState.STATE_RUNNING ||
+          renderer.state === audio.AudioState.STATE_PAUSED) {
+          this.rendererStarted = false;
+          await renderer.stop();
+        }
+        const oldWriteDataCallback = this.rendererWriteDataCallback;
+        this.renderer = undefined;
+        this.rendererWriteDataCallback = undefined;
+        this.rendererEpoch++;
+        if (oldWriteDataCallback !== undefined) {
+          renderer.off('writeData', oldWriteDataCallback);
+        }
+        renderer.off('stateChange');
+        renderer.off('audioInterrupt');
+        await renderer.release();
+        renderer = await this.createRenderer();
+      } catch (err) {
+        throw new Error(`输入侧探针间重建音频时钟失败：${(err as Error).message}`);
+      }
+      this.resetAudioTimestampState();
+      this.audioSubmittedFrames = 0;
+      this.audioStreaming = false;
+      this.pendingAudioTransition = undefined;
+      this.calibrationSignal = undefined;
+      this.calibrationFrameOriginExact = true;
+      this.rendererStartedAtLocalMs = MonotonicClock.nowMs();
+      this.diagFirstWriteAfterStartPending = true;
+      this.rendererPhysicalStartCount++;
+      await renderer.start();
+      this.rendererStarted = true;
+      this.observedWriteCallbackCount = this.writeCallbackCount;
+      this.lastWriteProgressMs = MonotonicClock.nowMs();
+      this.calibrationRouteResetPending = false;
+      this.micCalibrationRendererRebuildPending = false;
+      console.info('[CalibDiag] input probe boundary rebuild, frame epoch realigned');
+    });
   }
 
   async stopEngine(): Promise<void> {
@@ -778,6 +1172,7 @@ export class MetronomeEngine {
   schedulePauseFromLeader(pauseAtLeaderMonoMs: number): void {
     const token = this.runToken;
     const localPauseAt = pauseAtLeaderMonoMs - this.offsetMs;
+    this.scheduledPauseAtLocalMs = localPauseAt;
     this.refreshOutputLatency();
     const hardwarePauseAt = localPauseAt - this.outputLatencyMs;
     this.scheduleRunningTransition({
@@ -797,6 +1192,7 @@ export class MetronomeEngine {
         return;
       }
       this.running = false;
+      this.scheduledPauseAtLocalMs = undefined;
       if (this.timerId >= 0) {
         clearTimeout(this.timerId);
         this.timerId = -1;
@@ -829,6 +1225,7 @@ export class MetronomeEngine {
   }
 
   private cancelTimers(): void {
+    this.scheduledPauseAtLocalMs = undefined;
     if (this.timerId >= 0) {
       clearTimeout(this.timerId);
       this.timerId = -1;
@@ -887,6 +1284,7 @@ export class MetronomeEngine {
           outputLatencyMs: outputCompensationMs
         };
         this.scheduleRunningTransition(transition);
+        this.logProductionClockDiagnostic('continuous-play', localAudibleStart);
         if (DEBUG) {
           console.info(`OneBeatSync transition[continuous] audible=${localAudibleStart.toFixed(2)}ms ` +
             `hardware=${hardwareStartAt.toFixed(2)}ms targetFrame=${transition.targetFrame} ` +
@@ -931,6 +1329,7 @@ export class MetronomeEngine {
     };
     this.scheduleRunningTransition(provisionalTransition);
     try {
+      this.rendererPhysicalStartCount++;
       await renderer.start();
       if (token !== this.runToken || !this.running) {
         return;
@@ -1124,12 +1523,84 @@ export class MetronomeEngine {
     }
   }
 
+  private prepareRouteAudioCursor(beatIndex: number, preserveActiveSequence: boolean): void {
+    if (!preserveActiveSequence) {
+      this.prepareAudioCursor(this.transportStartBeatIndex, this.transportCountInBeats);
+    }
+    let countInBeats = 0;
+    for (let i = 0; i < this.activeLoopStartIndex; i++) {
+      countInBeats += this.activeSequence[i].beatsPerBar;
+    }
+    let index = 0;
+    let beatOffset = beatIndex - (this.mainStartBeatIndex - countInBeats);
+    if (beatIndex < this.mainStartBeatIndex && countInBeats > 0) {
+      beatOffset = Math.max(0, beatOffset);
+      while (index < this.activeLoopStartIndex - 1 &&
+        beatOffset >= this.activeSequence[index].beatsPerBar) {
+        beatOffset -= this.activeSequence[index].beatsPerBar;
+        index++;
+      }
+      this.applyMainStartOffset = true;
+    } else {
+      index = this.activeLoopStartIndex;
+      const firstMainBar = this.activeSequence[index];
+      if (firstMainBar === undefined) {
+        this.activeBar = undefined;
+        this.activeSequenceFinished = true;
+        return;
+      }
+      // Seek the original program, including its initial partial bar. Rebuilding
+      // only the remaining count-in would add a new accent; restarting the main
+      // sequence would replay its first drum section on every output switch.
+      beatOffset = Math.max(0, beatIndex - this.mainStartBeatIndex) +
+        ((this.mainStartBeatIndex % firstMainBar.beatsPerBar) + firstMainBar.beatsPerBar) %
+          firstMainBar.beatsPerBar;
+      let mainBeats = 0;
+      for (let i = index; i < this.activeSequence.length; i++) {
+        mainBeats += this.activeSequence[i].beatsPerBar;
+      }
+      if (mainBeats <= 0 || (!this.activeSequenceLooping && beatOffset >= mainBeats)) {
+        this.activeBar = undefined;
+        this.activeSequenceFinished = true;
+        return;
+      }
+      if (this.activeSequenceLooping) {
+        beatOffset %= mainBeats;
+      }
+      while (index < this.activeSequence.length - 1 &&
+        beatOffset >= this.activeSequence[index].beatsPerBar) {
+        beatOffset -= this.activeSequence[index].beatsPerBar;
+        index++;
+      }
+      this.applyMainStartOffset = false;
+    }
+    this.activeSequenceIndex = index;
+    this.activeBar = this.activeSequence[index];
+    this.activeSequenceFinished = this.activeBar === undefined;
+    this.audioFrameCursor = this.activeBar === undefined ? 0 :
+      Math.round(beatOffset * this.activeBar.samplesPerBeat);
+  }
+
   private fillAudioData(data: ArrayBuffer): void {
     const output = new Int16Array(data);
     const bufferStartFrame = this.audioSubmittedFrames;
     let outputCursor = 0;
     while (outputCursor < output.length) {
       const transition = this.pendingAudioTransition;
+      if (transition?.routeRephase && transition.hardwareAtLocalMs !== undefined &&
+        MonotonicClock.nowMs() >= transition.hardwareAtLocalMs) {
+        // The callback can resume before the asynchronous route watcher. Do
+        // not submit a late click; the same owner will select a future beat.
+        if (transition.token === this.runToken) {
+          this.expiredRouteToken = transition.token;
+          this.audioStreaming = false;
+          this.phaseCorrectionFrames = 0;
+        }
+        if (this.pendingAudioTransition === transition) {
+          this.pendingAudioTransition = undefined;
+        }
+        continue;
+      }
       if (transition !== undefined && transition.targetFrame <= this.audioSubmittedFrames) {
         this.applyAudioTransition(transition);
         continue;
@@ -1244,15 +1715,31 @@ export class MetronomeEngine {
       }
       return;
     }
-    this.prepareAudioCursor(transition.beatIndex, transition.countInBeats);
+    if (transition.routeRephase) {
+      this.prepareRouteAudioCursor(transition.beatIndex, transition.preserveActiveSequence ?? false);
+    } else {
+      this.prepareAudioCursor(transition.beatIndex, transition.countInBeats);
+    }
     this.audioStreaming = true;
     // The click reaches the acoustic output outputLatencyMs after its hardware
     // presentation frame, so the visual/audio playhead origin includes both.
     this.audioTimelineLeadFrames = transition.targetFrame +
-      Math.round(transition.outputLatencyMs * SAMPLE_RATE / 1000);
+      Math.round(transition.outputLatencyMs * SAMPLE_RATE / 1000) -
+      (transition.timelineElapsedFrames ?? 0);
+    this.audioTimelineOutputLatencyMs = transition.outputLatencyMs;
     this.audioTimelineToken = transition.token;
+    this.audioSequenceTransportRevision = this.transportRevision;
     this.lastAudioPlayheadMs = 0;
     this.lastAudioSampleMonoMs = this.transportStartLocalMs;
+    if (transition.routeRephase) {
+      const now = MonotonicClock.nowMs();
+      this.lastAudioPlayheadMs = now - this.transportStartLocalMs;
+      this.lastAudioSampleMonoMs = now;
+      this.lastTimestampQueryMonoMs = -1;
+      console.info(`[RouteRephaseDiag] stage=applied token=${transition.token} ` +
+        `beat=${transition.beatIndex} compensationMs=${transition.outputLatencyMs} ` +
+        `timelineElapsedFrames=${transition.timelineElapsedFrames ?? 0}`);
+    }
     if (DEBUG) {
       console.info(`OneBeatSync transition[play] frame=${transition.targetFrame} ` +
         `submitted=${this.audioSubmittedFrames} latency=${transition.outputLatencyMs}`);
@@ -1291,6 +1778,7 @@ export class MetronomeEngine {
         const targetFrame = Math.max(this.audioSubmittedFrames,
           Math.round(playedFramesNow + (hardwareStartAt - now) * SAMPLE_RATE / 1000));
         this.updatePendingPlayTransition(targetFrame, outputCompensationMs, token);
+        this.logProductionClockDiagnostic('cold-lock', localAudibleStart);
         const actualAudibleMs = now + (targetFrame - playedFramesNow) * 1000 / SAMPLE_RATE +
           outputCompensationMs;
         if (DEBUG) {
@@ -1354,6 +1842,7 @@ export class MetronomeEngine {
       countInBeats: countInBeats,
       outputLatencyMs: outputCompensationMs
     });
+    this.logProductionClockDiagnostic('cold-settle', localAudibleStart);
   }
 
   private scheduleRunningTransition(transition: PendingAudioTransition): void {
@@ -1410,6 +1899,157 @@ export class MetronomeEngine {
     }
   }
 
+  private static readSoftwareLatencyMs(renderer: audio.AudioRenderer): number {
+    try {
+      return renderer.getLatency(audio.AudioLatencyType.LATENCY_TYPE_SOFTWARE);
+    } catch (_e) {
+      return -1;
+    }
+  }
+
+  private static readOutputLatencySnapshot(renderer: audio.AudioRenderer): OutputLatencySnapshot {
+    return {
+      allMs: MetronomeEngine.readOutputLatencyMs(renderer),
+      softwareMs: MetronomeEngine.readSoftwareLatencyMs(renderer),
+      hardwareMs: MetronomeEngine.readHardwareLatencyMs(renderer)
+    };
+  }
+
+  private static describeOutputDevices(renderer: audio.AudioRenderer): string {
+    try {
+      const devices = renderer.getCurrentOutputDevicesSync();
+      const parts: string[] = [];
+      for (let i = 0; i < devices.length; i++) {
+        parts.push(`${devices[i].deviceType}:${devices[i].id}`);
+      }
+      return parts.length > 0 ? parts.join(',') : 'none';
+    } catch (_e) {
+      return 'unavailable';
+    }
+  }
+
+  private static readAudioScene(): number {
+    try {
+      return audio.getAudioManager().getAudioSceneSync();
+    } catch (_e) {
+      return -1;
+    }
+  }
+
+  private logMicCalibrationAudioStateForRenderer(phase: string,
+    renderer: audio.AudioRenderer): OutputLatencySnapshot {
+    const latency = MetronomeEngine.readOutputLatencySnapshot(renderer);
+    let rawFrame = -1;
+    try {
+      rawFrame = renderer.getAudioTimestampInfoSync().framePos;
+    } catch (_e) {
+      // Timestamp availability is already enforced separately by the mic clock gate.
+    }
+    console.info(`[OutputPathDiag] phase=${phase} rendererEpoch=${this.rendererEpoch} ` +
+      `streamId=${this.rendererStreamId} state=${renderer.state} started=${this.rendererStarted} ` +
+      `outputDevices=[${MetronomeEngine.describeOutputDevices(renderer)}] ` +
+      `latencyAll=${latency.allMs} latencySoftware=${latency.softwareMs} ` +
+      `latencyHardware=${latency.hardwareMs} audioScene=${MetronomeEngine.readAudioScene()} ` +
+      `rawFrame=${rawFrame} submitted=${this.audioSubmittedFrames} ` +
+      `queueDepth=${this.queueDepthFrames.toFixed(1)} exact=${this.calibrationFrameOriginExact}`);
+    return latency;
+  }
+
+  /** Read-only snapshot used to compare the capturer-active and production output paths. */
+  logMicCalibrationAudioState(phase: string): void {
+    const renderer = this.renderer;
+    if (renderer === undefined) {
+      console.info(`[OutputPathDiag] phase=${phase} renderer=none rendererEpoch=${this.rendererEpoch}`);
+      return;
+    }
+    this.logMicCalibrationAudioStateForRenderer(phase, renderer);
+  }
+
+  /**
+   * Bridge a mic result to the already-established production frame coordinate.
+   * Do not prime or rebase that coordinate here: doing so would change the very
+   * playback mapping being measured. Raw and legacy frames use one timestamp
+   * sample so hardware timestamp quantization cannot enter their difference.
+   */
+  readMicCalibrationPlaybackReference(expected?: CalibrationPlaybackReference): CalibrationPlaybackReference {
+    const renderer = this.renderer;
+    const clockOffsetMs = this.audioTimestampClockOffsetMs;
+    if (expected !== undefined &&
+      (this.rendererEpoch !== expected.rendererEpoch || this.rendererStreamId !== expected.streamId)) {
+      throw new Error('测量后的正式播放基准发生变化，请重新测量');
+    }
+    if (renderer === undefined || !this.rendererStarted ||
+      renderer.state !== audio.AudioState.STATE_RUNNING || !this.calibrationFrameOriginExact ||
+      this.calibrationRouteResetPending || this.micCalibrationRendererRebuildPending ||
+      !this.audioTimestampBaseReady || clockOffsetMs === undefined ||
+      !Number.isFinite(clockOffsetMs) || !Number.isFinite(this.audioTimestampBaseFrame) ||
+      !Number.isFinite(this.audioSubmittedFrames) || this.audioSubmittedFrames <= 0 ||
+      EXPERIMENTAL_EXACT_PLAYBACK_FRAME_MAP) {
+      throw new Error('麦克回环尚未取得可复用的正式播放时间基准，请重新测量');
+    }
+    const sample = this.readCalibrationClockSample(renderer, true);
+    if (sample === undefined || !Number.isFinite(sample.framePos) ||
+      !Number.isFinite(sample.rawTimestampMs) || !Number.isFinite(sample.queryMonoMs)) {
+      console.info(`[MicPlaybackBridge] state=pending reason=timestamp-unavailable ` +
+        `rendererEpoch=${this.rendererEpoch} streamId=${this.rendererStreamId}`);
+      throw new MicPlaybackClockPendingError('timestamp-unavailable');
+    }
+    const rawAgeMs = sample.queryMonoMs - sample.timestampMonoMs;
+    const legacyAgeMs = sample.queryMonoMs - (sample.rawTimestampMs - clockOffsetMs);
+    // Production contains stale timestamps with a 250ms interpolation clamp.
+    // A calibration bridge must reject that stale state rather than turn the
+    // clamp into an apparently stable, but time-dependent, coordinate offset.
+    if (!Number.isFinite(rawAgeMs) || !Number.isFinite(legacyAgeMs) ||
+      rawAgeMs < -50 || legacyAgeMs < -50 ||
+      (this.lastAudioRawFrame >= 0 &&
+        this.calibrationFramePosRegressedBeyondQuantum(this.lastAudioRawFrame, sample.framePos)) ||
+      (expected !== undefined &&
+        (this.calibrationFramePosRegressedBeyondQuantum(expected.framePos, sample.framePos) ||
+          sample.timestampMonoMs < expected.timestampMonoMs - 1))) {
+      console.warn(`[MicPlaybackBridge] state=invalid reason=clock-regression-or-future-timestamp ` +
+        `rendererEpoch=${this.rendererEpoch} streamId=${this.rendererStreamId} ` +
+        `rawAgeMs=${rawAgeMs.toFixed(1)} legacyAgeMs=${legacyAgeMs.toFixed(1)} ` +
+        `framePos=${sample.framePos} lastRawFrame=${this.lastAudioRawFrame}`);
+      throw new Error('麦克回环播放时钟已失效，请保持当前输出设备后重新测量');
+    }
+    if (rawAgeMs > 250 || legacyAgeMs > 250) {
+      // Keep the strict freshness gate. Capture teardown and callback backlog
+      // may briefly freeze a live stream; verification can wait for new samples.
+      console.info(`[MicPlaybackBridge] state=pending reason=timestamp-stale ` +
+        `rendererEpoch=${this.rendererEpoch} streamId=${this.rendererStreamId} ` +
+        `rawAgeMs=${rawAgeMs.toFixed(1)} legacyAgeMs=${legacyAgeMs.toFixed(1)} ` +
+        `framePos=${sample.framePos} submittedFrames=${this.audioSubmittedFrames}`);
+      throw new MicPlaybackClockPendingError('timestamp-stale');
+    }
+    const rawFrameAtQuery = sample.framePos + rawAgeMs * SAMPLE_RATE / 1000;
+    const legacyFrameAtQuery = sample.framePos - this.audioTimestampBaseFrame +
+      Math.max(0, Math.min(250, legacyAgeMs)) * SAMPLE_RATE / 1000;
+    if (!Number.isFinite(rawFrameAtQuery) || !Number.isFinite(legacyFrameAtQuery) ||
+      rawFrameAtQuery < -CALIB_CLOCK_FRAME_POS_QUANTUM ||
+      legacyFrameAtQuery < -CALIB_CLOCK_FRAME_POS_QUANTUM ||
+      rawFrameAtQuery > this.audioSubmittedFrames + CALIB_CLOCK_FRAME_POS_QUANTUM ||
+      legacyFrameAtQuery > this.audioSubmittedFrames + CALIB_CLOCK_FRAME_POS_QUANTUM) {
+      throw new Error('麦克回环播放帧超出当前音频流范围，请重新测量');
+    }
+    const rawFrame = Math.min(this.audioSubmittedFrames, Math.max(0, rawFrameAtQuery));
+    const legacyFrame = Math.min(this.audioSubmittedFrames, Math.max(0, legacyFrameAtQuery));
+    const frameMappingOffsetMs = (legacyFrame - rawFrame) * 1000 / SAMPLE_RATE;
+    console.info(`[MicPlaybackBridge] rendererEpoch=${this.rendererEpoch} ` +
+      `streamId=${this.rendererStreamId} rawFrame=${rawFrame.toFixed(1)} ` +
+      `legacyFrame=${legacyFrame.toFixed(1)} m=${frameMappingOffsetMs.toFixed(1)}ms ` +
+      `rawAgeMs=${rawAgeMs.toFixed(1)} legacyAgeMs=${legacyAgeMs.toFixed(1)} ` +
+      `sampledAtMonoMs=${sample.queryMonoMs.toFixed(1)}`);
+    return {
+      rendererEpoch: this.rendererEpoch,
+      streamId: this.rendererStreamId,
+      frameMappingOffsetMs,
+      sampledAtMonoMs: sample.queryMonoMs,
+      framePos: sample.framePos,
+      timestampMonoMs: sample.timestampMonoMs,
+      submittedFrames: this.audioSubmittedFrames
+    };
+  }
+
   /**
    * 蓝牙 A2DP 才使用用户实测的「应用时间轴 → 耳朵」绝对补偿；外放和有线路由只采用
    * getLatency。这个边界必须保留，否则一次耳机校准会污染之后的手机外放时序。
@@ -1419,14 +2059,14 @@ export class MetronomeEngine {
     if (btActive) {
       const calibrated = getEffectiveCalibrationMs();
       if (calibrated >= 0) {
-        // 校准补偿 vs 平台 getLatency(ALL) 的差值即「相对外放超前/滞后的量级」：
-        // delta > 0 → 耳机比平台估算更早出声；delta ≈ 40ms 时正是早出声偏差的来源。
-        // 同时打印 inputLatency 与 platform，便于反推 resultMs = calibrated + inputLatency。
+        // Saved compensation belongs to the production frame mapping. Its
+        // difference from a platform estimate is not an independent acoustic
+        // measurement; keep these legacy logs out of mic input calibration.
         const platform = MetronomeEngine.readOutputLatencyMs(renderer);
         console.info(`[LatencyDiag] route=BT calibrated=${calibrated} platform=${platform} ` +
           `inputLatency=${getInputLatencyMs()} resultMs=${calibrated + getInputLatencyMs()} ` +
           `delta=${calibrated - platform}ms`);
-        // 反推蓝牙路由下的输入侧时延，与外放路由测得的 inputLatency 对比，验证「输入时延路由无关」假设。
+        // resultMs/inputBT are legacy inferred diagnostics, not captured timings.
         const inputSPK = getInputLatencyMs();
         const resultMs = calibrated + inputSPK;
         const inputBT = resultMs - platform;
@@ -1481,6 +2121,218 @@ export class MetronomeEngine {
     this.refreshOutputLatency();
   }
 
+  /**
+   * Move only this device's output onto a future beat of the existing shared
+   * transport. Queued PCM cannot be recalled; missed beats are skipped rather
+   * than replayed. The local token cancels old native starts, not the team clock.
+   * Success requires writeData to apply the target, not merely queue it locally.
+   */
+  async rescheduleForOutputRouteChange(): Promise<boolean> {
+    const generation = ++this.outputRouteRephaseGeneration;
+    this.outputRouteRephasePreparing = true;
+    try {
+      return await this.rescheduleOutputRouteInternal();
+    } finally {
+      if (generation === this.outputRouteRephaseGeneration) {
+        this.outputRouteRephasePreparing = false;
+      }
+    }
+  }
+
+  private async rescheduleOutputRouteInternal(): Promise<boolean> {
+    if (!this.running || this.transportOutputCompensationOverrideMs !== undefined ||
+      (this.audioSequenceTransportRevision === this.transportRevision && this.activeSequenceFinished)) {
+      return false;
+    }
+    const previous = this.pendingAudioTransition;
+    const oldCompensationMs = Math.max(this.audioTimelineOutputLatencyMs,
+      previous?.kind === 'play' ? previous.outputLatencyMs : 0);
+    // Route retokens are local cancellation boundaries, not a new transport.
+    // Keep the original sequence across several switches before any new target
+    // has reached writeData; only a real shared start changes this revision.
+    const preserveActiveSequence = this.audioSequenceTransportRevision === this.transportRevision &&
+      this.activeSequence.length > 0;
+    const pendingPauseAt = this.scheduledPauseAtLocalMs;
+    const token = this.beginTransport();
+    this.audioStreaming = false;
+    this.phaseCorrectionFrames = 0;
+    // UI callbacks stay on the same nextBeatAt/beatIndex grid. Reusing a new
+    // local token prevents an old cold lock/settle from overwriting this route.
+    if (pendingPauseAt !== undefined) {
+      // A route update must never replace a shared pause with a play transition.
+      this.schedulePauseFromLeader(pendingPauseAt + this.offsetMs);
+      if (pendingPauseAt > MonotonicClock.nowMs()) {
+        this.timerId = setTimeout(() => this.emitBeatAndScheduleNext(token),
+          Math.max(0, this.nextBeatAtMs - MonotonicClock.nowMs()));
+      }
+      return false;
+    }
+    this.timerId = setTimeout(() => this.emitBeatAndScheduleNext(token),
+      Math.max(0, this.nextBeatAtMs - MonotonicClock.nowMs()));
+    let abandoned = false;
+    const current = (): boolean => !abandoned && token === this.runToken && this.running &&
+      this.scheduledPauseAtLocalMs === undefined;
+    let selected: PendingAudioTransition | undefined = undefined;
+    let applyDeadline = Number.POSITIVE_INFINITY;
+    this.expiredRouteToken = -1;
+    try {
+      while (current()) {
+        if (!await this.prepareOutputRouteRenderer(current, applyDeadline)) {
+          return false;
+        }
+        selected = await this.installOutputRouteTransition(token, oldCompensationMs,
+          preserveActiveSequence, current);
+        if (selected === undefined) {
+          return false;
+        }
+        if (!Number.isFinite(applyDeadline)) {
+          // Retrying a frozen target must not extend this request forever.
+          // Native preparation remains separately bounded before this deadline.
+          applyDeadline = (selected.hardwareAtLocalMs ?? MonotonicClock.nowMs()) +
+            ROUTE_REPHASE_READY_TIMEOUT_MS;
+        }
+        while (current()) {
+          if (this.audioTimelineToken === token) {
+            return true;
+          }
+          const now = MonotonicClock.nowMs();
+          if (now >= applyDeadline) {
+            throw new Error('声音出口切换后的节拍未能及时写入，请暂停后重新开始');
+          }
+          if (this.expiredRouteToken === token ||
+            (selected.hardwareAtLocalMs !== undefined && now >= selected.hardwareAtLocalMs) ||
+            now - this.lastWriteProgressMs >= AUDIO_CALLBACK_STALL_MS) {
+            if (this.pendingAudioTransition === selected) {
+              this.pendingAudioTransition = undefined;
+            }
+            this.expiredRouteToken = -1;
+            console.info(`[RouteRephaseDiag] stage=retry token=${token} beat=${selected.beatIndex}`);
+            break;
+          }
+          await MetronomeEngine.delay(20);
+        }
+      }
+      return false;
+    } catch (err) {
+      const stillOwned = current();
+      abandoned = true;
+      if (this.pendingAudioTransition === selected && selected !== undefined) {
+        this.pendingAudioTransition = undefined;
+      }
+      if (!stillOwned) {
+        return false;
+      }
+      throw new Error((err as Error).message);
+    }
+  }
+
+  private async prepareOutputRouteRenderer(current: () => boolean,
+    applyDeadline: number): Promise<boolean> {
+    const writesBefore = this.writeCallbackCount;
+    const preparation: RouteRendererPreparation = { settled: false };
+    const preparationStartedAt = MonotonicClock.nowMs();
+    const prepareRenderer = async (): Promise<void> => {
+      await this.ensureRenderer();
+      if (!current()) {
+        return;
+      }
+      // A healthy renderer already follows the system route; restarting it would
+      // discard its queue and frame mapping. Only a stopped/stalled stream recovers.
+      await this.ensureSilentRendererRunning(false, () => !current(), true);
+    };
+    void prepareRenderer().then(() => {
+      preparation.settled = true;
+    }, (err: Error) => {
+      preparation.error = err;
+      preparation.settled = true;
+    });
+    while (!preparation.settled) {
+      if (!current()) {
+        return false;
+      }
+      if (MonotonicClock.nowMs() >= Math.min(applyDeadline,
+        preparationStartedAt + ROUTE_REPHASE_READY_TIMEOUT_MS)) {
+        // Native stop/start cannot be revoked. Its serialized operation remains
+        // queued, but late completion may no longer install this logical route.
+        throw new Error('声音出口切换准备超时，请暂停后重新开始');
+      }
+      await MetronomeEngine.delay(20);
+    }
+    if (!current()) {
+      return false;
+    }
+    if (preparation.error !== undefined) {
+      throw new Error((preparation.error as Error).message);
+    }
+    const readyAt = MonotonicClock.nowMs();
+    while (this.writeCallbackCount <= writesBefore ||
+      MonotonicClock.nowMs() - readyAt < ROUTE_REPHASE_SETTLE_MS) {
+      if (!current()) {
+        return false;
+      }
+      if (MonotonicClock.nowMs() >= Math.min(applyDeadline,
+        readyAt + ROUTE_REPHASE_READY_TIMEOUT_MS)) {
+        throw new Error('声音出口切换后未收到音频写入，请暂停后重新开始');
+      }
+      await MetronomeEngine.delay(20);
+    }
+    return current();
+  }
+
+  private async installOutputRouteTransition(token: number, oldCompensationMs: number,
+    preserveActiveSequence: boolean, current: () => boolean): Promise<PendingAudioTransition | undefined> {
+    const selection: RouteRephaseSelection = {};
+    await this.queueRendererOperation(async () => {
+      const renderer = this.renderer;
+      if (!current() || renderer === undefined) {
+        return;
+      }
+      if (!this.rendererStarted || renderer.state !== audio.AudioState.STATE_RUNNING) {
+        throw new Error('声音出口切换后音频输出尚未恢复，请暂停后重新开始');
+      }
+      this.refreshOutputLatency();
+      const compensationMs = this.outputLatencyMs;
+      const now = MonotonicClock.nowMs();
+      const rendered = this.readRenderedStreamFrames(renderer, now);
+      const queueMs = rendered === undefined ? Math.max(1000, this.queueDepthFrames * 1000 / SAMPLE_RATE) :
+        Math.max(0, (this.audioSubmittedFrames - rendered) * 1000 / SAMPLE_RATE);
+      // Include both routes: old queued clicks must precede the new beat even
+      // when the new device has much less delay than the previous headphones.
+      const earliestAudible = now + queueMs + Math.max(oldCompensationMs, compensationMs) +
+        ROUTE_REPHASE_GUARD_MS;
+      const beatMs = 60000 / Math.max(1, this.transportBpm);
+      let steps = Math.max(0, Math.ceil((earliestAudible - this.transportStartLocalMs) / beatMs));
+      let audibleAt = this.transportStartLocalMs + steps * beatMs;
+      let targetFrame = this.estimateTargetStreamFrame(audibleAt - compensationMs);
+      // A slow timestamp query can consume the guard. Choose a later real beat,
+      // never clamp an already-late beat into the queue at a non-beat time.
+      for (let i = 0; i < 8 && targetFrame < this.audioSubmittedFrames +
+        Math.round(ROUTE_REPHASE_GUARD_MS * SAMPLE_RATE / 1000); i++) {
+        steps++;
+        audibleAt = this.transportStartLocalMs + steps * beatMs;
+        targetFrame = this.estimateTargetStreamFrame(audibleAt - compensationMs);
+      }
+      if (targetFrame < this.audioSubmittedFrames +
+        Math.round(ROUTE_REPHASE_GUARD_MS * SAMPLE_RATE / 1000)) {
+        throw new Error('声音出口切换后的音频队列尚未稳定，请暂停后重新开始');
+      }
+      const beatIndex = this.transportStartBeatIndex + steps;
+      const transition: PendingAudioTransition = {
+        kind: 'play', token, targetFrame, beatIndex, countInBeats: 0,
+        outputLatencyMs: compensationMs, routeRephase: true, preserveActiveSequence,
+        hardwareAtLocalMs: audibleAt - compensationMs,
+        timelineElapsedFrames: Math.round(steps * beatMs * SAMPLE_RATE / 1000)
+      };
+      this.scheduleRunningTransition(transition);
+      selection.transition = transition;
+      console.info(`[RouteRephaseDiag] stage=scheduled token=${token} beat=${beatIndex} ` +
+        `audible=${audibleAt.toFixed(1)} oldCompensationMs=${oldCompensationMs} ` +
+        `compensationMs=${compensationMs} queueMs=${queueMs.toFixed(1)} targetFrame=${targetFrame}`);
+      this.logProductionClockDiagnostic('route-rephase', audibleAt);
+    });
+    return selection.transition;
+  }
+
   private advanceAudioBar(): void {
     if (this.activeRevision !== this.pendingRevision && !this.deferPendingSequenceActivation) {
       this.activeSequence = this.pendingSequence;
@@ -1509,8 +2361,10 @@ export class MetronomeEngine {
   }
 
   private resetAudioTimestampState(): void {
+    this.productionClockSample = undefined;
     this.audioTimelineToken = -1;
     this.audioTimelineLeadFrames = 0;
+    this.audioTimelineOutputLatencyMs = 0;
     this.audioTimestampBaseFrame = 0;
     this.audioTimestampBaseReady = false;
     this.audioTimestampClockOffsetMs = undefined;
@@ -1519,6 +2373,7 @@ export class MetronomeEngine {
     this.audioClockLocked = false;
     this.lastAudioRawFrame = -1;
     this.lastAudioTimestampAgeMs = Number.POSITIVE_INFINITY;
+    this.lastAudioFrameMapExact = false;
     this.lastAudioPlayheadMs = 0;
     this.lastAudioSampleMonoMs = 0;
     this.lastTimestampQueryMonoMs = -1;
@@ -1533,7 +2388,8 @@ export class MetronomeEngine {
    * monotonic clock, while app scheduling uses startup uptime; sample both
    * clocks together so the timestamp's real age is preserved.
    */
-  private readCalibrationClockSample(renderer: audio.AudioRenderer): CalibrationClockSample | undefined {
+  private readCalibrationClockSample(renderer: audio.AudioRenderer,
+    includeOutOfRangeAge: boolean = false): CalibrationClockSample | undefined {
     if (!this.calibrationFrameOriginExact) {
       return undefined;
     }
@@ -1553,11 +2409,13 @@ export class MetronomeEngine {
       const activeToStartupMs = queryMonoMs - activeAtQueryMs;
       const timestampMonoMs = info.timestamp / 1000000 + activeToStartupMs;
       const timestampAgeMs = queryMonoMs - timestampMonoMs;
-      if (!Number.isFinite(timestampMonoMs) || timestampAgeMs < -50 || timestampAgeMs > 2000) {
+      if (!Number.isFinite(timestampMonoMs) ||
+        (!includeOutOfRangeAge && (timestampAgeMs < -50 || timestampAgeMs > 2000))) {
         return undefined;
       }
       return {
         framePos: info.framePos,
+        rawTimestampMs: info.timestamp / 1000000,
         timestampMonoMs,
         queryMonoMs
       };
@@ -1584,42 +2442,124 @@ export class MetronomeEngine {
     return rateErrorRatio <= CALIB_CLOCK_MAX_RATE_ERROR_RATIO;
   }
 
-  /** Require monotonic frame progress at the configured 44.1 kHz before trusting calibration. */
+  /** True only when framePos moved backward by more than one hardware quantum. */
+  private calibrationFramePosRegressedBeyondQuantum(previousFramePos: number,
+    currentFramePos: number): boolean {
+    return currentFramePos < previousFramePos - CALIB_CLOCK_FRAME_POS_QUANTUM;
+  }
+
+  /** Wait for a fresh rate window in the same stream; a stalled window is never a chirp anchor. */
   private async readStableCalibrationClock(
-    renderer: audio.AudioRenderer
+    renderer: audio.AudioRenderer,
+    expectedRunToken: number = this.runToken
   ): Promise<CalibrationClockSample | undefined> {
     const MAX_QUEUE_MS = 2500;
+    const startedAtMonoMs = MonotonicClock.nowMs();
+    const deadline = startedAtMonoMs + CALIB_CLOCK_RECOVERY_TIMEOUT_MS;
+    const rendererEpoch = this.rendererEpoch;
+    const streamId = this.rendererStreamId;
     let first: CalibrationClockSample | undefined = undefined;
-    // First sample plus a 400ms rate window, with slack for 20ms timestamp quanta.
-    for (let retry = 0; retry < 40; retry++) {
-      const current = this.readCalibrationClockSample(renderer);
-      if (current !== undefined) {
-        if (first === undefined) {
-          first = current;
-        } else if (current.framePos < first.framePos ||
-          current.timestampMonoMs < first.timestampMonoMs) {
+    let firstSubmittedFrames = 0;
+    let previous: CalibrationClockSample | undefined = undefined;
+    let maxFramePos = -1;
+    let lastReason = 'timestamp-unavailable';
+    let loggedReason = '';
+    let lastRateHz = 0;
+    let lastAgeMs = Number.POSITIVE_INFINITY;
+    let lastQueueMs = Number.POSITIVE_INFINITY;
+    while (MonotonicClock.nowMs() <= deadline) {
+      if (this.renderer !== renderer || this.rendererEpoch !== rendererEpoch ||
+        this.rendererStreamId !== streamId || this.runToken !== expectedRunToken ||
+        !this.rendererStarted || renderer.state !== audio.AudioState.STATE_RUNNING ||
+        !this.calibrationFrameOriginExact || this.calibrationRouteResetPending ||
+        this.micCalibrationRendererRebuildPending) {
+        console.warn(`[CalibClock] stage=pre-chirp state=rejected reason=stream-invalidated ` +
+          `rendererEpoch=${rendererEpoch}->${this.rendererEpoch} streamId=${streamId}->${this.rendererStreamId} ` +
+          `cancelled=${this.runToken !== expectedRunToken} started=${this.rendererStarted} ` +
+          `routeReset=${this.calibrationRouteResetPending} micRebuild=${this.micCalibrationRendererRebuildPending}`);
+        return undefined;
+      }
+      const current = this.readCalibrationClockSample(renderer, true);
+      if (current === undefined) {
+        first = undefined;
+        lastReason = 'timestamp-unavailable';
+      } else {
+        lastAgeMs = current.queryMonoMs - current.timestampMonoMs;
+        if (!Number.isFinite(current.framePos) || !Number.isFinite(lastAgeMs) ||
+          !Number.isFinite(this.audioSubmittedFrames) || lastAgeMs < -50 ||
+          this.calibrationFramePosRegressedBeyondQuantum(maxFramePos, current.framePos) ||
+          (previous !== undefined && current.timestampMonoMs < previous.timestampMonoMs - 1)) {
+          console.warn(`[CalibClock] stage=pre-chirp state=rejected reason=clock-invalid ` +
+            `rendererEpoch=${rendererEpoch} streamId=${streamId} ageMs=${lastAgeMs.toFixed(1)} ` +
+            `framePos=${current.framePos} previousFrame=${previous?.framePos ?? -1} ` +
+            `maxFrame=${maxFramePos} submittedFrames=${this.audioSubmittedFrames}`);
           return undefined;
+        }
+        const frameRegressed = current.framePos < maxFramePos;
+        maxFramePos = Math.max(maxFramePos, current.framePos);
+        previous = current;
+        if (lastAgeMs > CALIB_CLOCK_MAX_SAMPLE_AGE_MS) {
+          first = undefined;
+          lastReason = 'timestamp-stale';
         } else {
-          const observedRateHz = this.calibrationObservedRateHz(first, current);
-          if (observedRateHz !== undefined) {
-            const timestampAgeMs = current.queryMonoMs - current.timestampMonoMs;
-            const playedAtQuery = current.framePos +
-              Math.max(0, timestampAgeMs) * SAMPLE_RATE / 1000;
-            const queueFrames = this.audioSubmittedFrames - playedAtQuery;
-            const queueMs = queueFrames * 1000 / SAMPLE_RATE;
-            console.info(`[CalibClock] framePos=${current.framePos} submittedFrames=${this.audioSubmittedFrames} ` +
-              `rateHz=${observedRateHz.toFixed(1)} ageMs=${timestampAgeMs.toFixed(1)} ` +
-              `queueMs=${queueMs.toFixed(1)}`);
-            if (!this.calibrationRatePlausible(observedRateHz) || queueMs < -50 || queueMs > MAX_QUEUE_MS) {
-              return undefined;
+          const playedAtQuery = current.framePos + Math.max(0, lastAgeMs) * SAMPLE_RATE / 1000;
+          const queueFrames = this.audioSubmittedFrames - playedAtQuery;
+          lastQueueMs = queueFrames * 1000 / SAMPLE_RATE;
+          if (lastQueueMs < -50 || lastQueueMs > MAX_QUEUE_MS) {
+            console.warn(`[CalibClock] stage=pre-chirp state=rejected reason=queue-out-of-range ` +
+              `rendererEpoch=${rendererEpoch} streamId=${streamId} queueMs=${lastQueueMs.toFixed(1)} ` +
+              `ageMs=${lastAgeMs.toFixed(1)} framePos=${current.framePos} ` +
+              `submittedFrames=${this.audioSubmittedFrames}`);
+            return undefined;
+          }
+          // A transient old read may be one hardware quantum behind. Discard
+          // its rate window, but never rebase frames or loosen the final rate gate.
+          if (frameRegressed) {
+            first = undefined;
+            lastReason = 'frame-quantum-regression';
+          } else if (first === undefined) {
+            first = current;
+            firstSubmittedFrames = this.audioSubmittedFrames;
+            lastReason = 'collecting-rate-window';
+          } else if (current.timestampMonoMs - first.timestampMonoMs >= CALIB_CLOCK_MIN_RATE_WINDOW_MS) {
+            const observedRateHz = this.calibrationObservedRateHz(first, current);
+            lastRateHz = observedRateHz ?? 0;
+            if (observedRateHz !== undefined && this.calibrationRatePlausible(observedRateHz) &&
+              this.audioSubmittedFrames > firstSubmittedFrames) {
+              this.queueDepthFrames = Math.max(0, queueFrames);
+              console.info(`[CalibClock] stage=pre-chirp state=stable rendererEpoch=${rendererEpoch} ` +
+                `streamId=${streamId} framePos=${current.framePos} submittedFrames=${this.audioSubmittedFrames} ` +
+                `rateHz=${observedRateHz.toFixed(1)} ageMs=${lastAgeMs.toFixed(1)} ` +
+                `queueMs=${lastQueueMs.toFixed(1)} elapsedMs=${(MonotonicClock.nowMs() - startedAtMonoMs).toFixed(1)}`);
+              return current;
             }
-            this.queueDepthFrames = Math.max(0, queueFrames);
-            return current;
+            lastReason = this.audioSubmittedFrames <= firstSubmittedFrames
+              ? 'write-not-advancing' : 'rate-not-stable';
+            // Callback backlog or stream startup can spoil the first rate pair.
+            // Recovery requires an entirely new 400ms window within one deadline.
+            first = current;
+            firstSubmittedFrames = this.audioSubmittedFrames;
           }
         }
       }
-      await MetronomeEngine.delay(20);
+      if (lastReason !== loggedReason) {
+        console.info(`[CalibClock] stage=pre-chirp state=waiting reason=${lastReason} ` +
+          `rendererEpoch=${rendererEpoch} streamId=${streamId} framePos=${previous?.framePos ?? -1} ` +
+          `submittedFrames=${this.audioSubmittedFrames} ageMs=${lastAgeMs.toFixed(1)} ` +
+          `rateHz=${lastRateHz.toFixed(1)} queueMs=${lastQueueMs.toFixed(1)}`);
+        loggedReason = lastReason;
+      }
+      const remainingMs = deadline - MonotonicClock.nowMs();
+      if (remainingMs <= 0) {
+        break;
+      }
+      await MetronomeEngine.delay(Math.min(20, remainingMs));
     }
+    console.warn(`[CalibClock] stage=pre-chirp state=timeout reason=${lastReason} ` +
+      `rendererEpoch=${rendererEpoch} streamId=${streamId} framePos=${previous?.framePos ?? -1} ` +
+      `submittedFrames=${this.audioSubmittedFrames} ageMs=${lastAgeMs.toFixed(1)} ` +
+      `rateHz=${lastRateHz.toFixed(1)} queueMs=${lastQueueMs.toFixed(1)} ` +
+      `elapsedMs=${(MonotonicClock.nowMs() - startedAtMonoMs).toFixed(1)}`);
     return undefined;
   }
 
@@ -1634,45 +2574,86 @@ export class MetronomeEngine {
     const rendererEpoch = this.rendererEpoch;
     const deadline = MonotonicClock.nowMs() + 4000;
     let previous = anchor;
+    let playheadMax = anchor.framePos;
     let waitingForRateAfterCross = false;
+    let firstCrossSample: CalibrationClockSample | undefined = undefined;
+    let lastFramePos = anchor.framePos;
     while (MonotonicClock.nowMs() < deadline) {
-      if (this.renderer !== renderer || this.rendererEpoch !== rendererEpoch ||
-        !this.rendererStarted || !this.calibrationFrameOriginExact ||
-        this.calibrationRouteResetPending || this.micCalibrationRendererRebuildPending ||
-        (this.calibrationSignal !== pendingSignal && !pendingSignal.fullySubmitted)) {
+      if (this.renderer !== renderer || this.rendererEpoch !== rendererEpoch) {
+        console.warn(`[CalibClock] crossing failed: renderer replaced epoch=${rendererEpoch}->` +
+          `${this.rendererEpoch}`);
+        return undefined;
+      }
+      if (!this.rendererStarted || !this.calibrationFrameOriginExact) {
+        console.warn(`[CalibClock] crossing failed: renderer not running or clock epoch not exact ` +
+          `started=${this.rendererStarted} exact=${this.calibrationFrameOriginExact}`);
+        return undefined;
+      }
+      if (this.calibrationRouteResetPending || this.micCalibrationRendererRebuildPending) {
+        console.warn(`[CalibClock] crossing failed: route reset pending ` +
+          `routeReset=${this.calibrationRouteResetPending} micRebuild=${this.micCalibrationRendererRebuildPending}`);
+        return undefined;
+      }
+      if (this.calibrationSignal !== pendingSignal && !pendingSignal.fullySubmitted) {
+        console.warn(`[CalibClock] crossing failed: calibration signal replaced before submit complete`);
         return undefined;
       }
       const current = this.readCalibrationClockSample(renderer);
       if (current !== undefined) {
-        if (current.framePos < previous.framePos ||
-          current.timestampMonoMs < previous.timestampMonoMs) {
+        lastFramePos = current.framePos;
+        if (current.timestampMonoMs < previous.timestampMonoMs - 1) {
+          console.warn(`[CalibClock] crossing failed: timestamp regressed ` +
+            `prev=${previous.timestampMonoMs.toFixed(1)} cur=${current.timestampMonoMs.toFixed(1)} ` +
+            `targetFrame=${targetFrame} framePos=${current.framePos}`);
           return undefined;
         }
+        if (this.calibrationFramePosRegressedBeyondQuantum(previous.framePos, current.framePos)) {
+          console.warn(`[CalibClock] crossing failed: framePos regressed beyond quantum ` +
+            `prev=${previous.framePos} cur=${current.framePos} targetFrame=${targetFrame}`);
+          return undefined;
+        }
+        playheadMax = Math.max(playheadMax, current.framePos);
         const observedRateHz = this.calibrationObservedRateHz(anchor, current);
-        if (observedRateHz !== undefined) {
-          if (!this.calibrationRatePlausible(observedRateHz)) {
-            console.warn(`[CalibClock] crossing rate rejected rateHz=${observedRateHz.toFixed(1)} ` +
-              `targetFrame=${targetFrame} framePos=${current.framePos}`);
-            return undefined;
+        if (current.framePos >= targetFrame) {
+          if (firstCrossSample === undefined) {
+            firstCrossSample = current;
           }
-          if (current.framePos >= targetFrame) {
-            // Use the raw timestamped playhead, never query-time extrapolation.
-            const presentationMonoMs = current.timestampMonoMs -
-              (current.framePos - targetFrame) * 1000 / SAMPLE_RATE;
-            console.info(`[CalibClock] crossed targetFrame=${targetFrame} framePos=${current.framePos} ` +
-              `rateHz=${observedRateHz.toFixed(1)} overshootFrames=${current.framePos - targetFrame} ` +
+          if (observedRateHz === undefined) {
+            if (!waitingForRateAfterCross) {
+              waitingForRateAfterCross = true;
+              console.info(`[CalibClock] crossed targetFrame=${targetFrame} framePos=${current.framePos} ` +
+                `waiting for ${CALIB_CLOCK_MIN_RATE_WINDOW_MS}ms rate window`);
+            }
+          } else if (!this.calibrationRatePlausible(observedRateHz)) {
+            console.warn(`[CalibClock] crossing failed: rate out of range after target ` +
+              `rateHz=${observedRateHz.toFixed(1)} targetFrame=${targetFrame} framePos=${current.framePos}`);
+            return undefined;
+          } else {
+            // Anchor presentation to the first post-target timestamp read. Later
+            // reads can jump several 20ms quanta ahead and would back-interpolate
+            // presentation too early, collapsing round-trip into invalid input latency.
+            const crossSample = firstCrossSample ?? current;
+            const presentationMonoMs = crossSample.timestampMonoMs -
+              (crossSample.framePos - targetFrame) * 1000 / SAMPLE_RATE;
+            console.info(`[CalibClock] crossed targetFrame=${targetFrame} anchorFramePos=${crossSample.framePos} ` +
+              `readFramePos=${current.framePos} rateHz=${observedRateHz.toFixed(1)} ` +
+              `overshootFrames=${crossSample.framePos - targetFrame} ` +
               `presentationMonoMs=${presentationMonoMs.toFixed(1)}`);
             return presentationMonoMs;
           }
-        } else if (current.framePos >= targetFrame && !waitingForRateAfterCross) {
-          waitingForRateAfterCross = true;
-          console.info(`[CalibClock] crossed targetFrame=${targetFrame} framePos=${current.framePos} ` +
-            `waiting for ${CALIB_CLOCK_MIN_RATE_WINDOW_MS}ms rate window`);
+        } else if (observedRateHz !== undefined && !this.calibrationRatePlausible(observedRateHz)) {
+          // Before the playhead reaches target, a long-window rate sample can still
+          // wobble from 20ms framePos quanta; keep waiting instead of aborting.
+          console.info(`[CalibClock] crossing pre-target rate ignored rateHz=${observedRateHz.toFixed(1)} ` +
+            `targetFrame=${targetFrame} framePos=${current.framePos} playheadMax=${playheadMax}`);
         }
         previous = current;
       }
       await MetronomeEngine.delay(8);
     }
+    console.warn(`[CalibClock] crossing failed: timeout targetFrame=${targetFrame} ` +
+      `playheadMax=${playheadMax} lastFramePos=${lastFramePos} ` +
+      `waitingForRate=${waitingForRateAfterCross} remainingMs=${Math.max(0, deadline - MonotonicClock.nowMs())}`);
     return undefined;
   }
 
@@ -1707,6 +2688,51 @@ export class MetronomeEngine {
 
   /** Map the renderer's persistent frame counter into this stream's submitted-frame coordinate. */
   private readRenderedStreamFrames(renderer: audio.AudioRenderer, nowMs: number): number | undefined {
+    this.productionClockSample = undefined;
+    if (EXPERIMENTAL_EXACT_PLAYBACK_FRAME_MAP && this.calibrationFrameOriginExact &&
+      !this.calibrationRouteResetPending && !this.micCalibrationRendererRebuildPending) {
+      const sample = this.readCalibrationClockSample(renderer);
+      if (sample === undefined) {
+        return undefined;
+      }
+      const timestampAgeMs = nowMs - sample.timestampMonoMs;
+      this.lastAudioTimestampAgeMs = timestampAgeMs;
+      if (timestampAgeMs < -50 || timestampAgeMs > 2000) {
+        return undefined;
+      }
+      if (this.lastAudioRawFrame >= 0 &&
+        this.calibrationFramePosRegressedBeyondQuantum(this.lastAudioRawFrame, sample.framePos)) {
+        // A large regression means the renderer changed epochs behind our back.
+        // Never rebase an allegedly exact mic-calibration stream from elapsed wall time.
+        console.warn(`[ClockDiag] exact frame epoch lost previous=${this.lastAudioRawFrame} ` +
+          `current=${sample.framePos}`);
+        this.calibrationFrameOriginExact = false;
+        this.audioTimestampBaseReady = false;
+        this.audioTimestampClockOffsetMs = undefined;
+        this.lastAudioRawFrame = -1;
+        this.lastAudioFrameMapExact = false;
+        return undefined;
+      }
+      const firstExactRead = !this.lastAudioFrameMapExact;
+      const timestampedFrame = sample.framePos +
+        Math.max(0, Math.min(250, timestampAgeMs)) * SAMPLE_RATE / 1000;
+      // A mic boundary rebuild proves framePos and audioSubmittedFrames share
+      // zero. Preserve that coordinate during playback; elapsed-time rebasing
+      // would add a headset-dependent 200–300ms offset a second time.
+      const renderedFrames = Math.min(this.audioSubmittedFrames, Math.max(
+        this.lastRenderedStreamFrame, Math.max(0, timestampedFrame)));
+      this.lastAudioRawFrame = sample.framePos;
+      this.lastRenderedStreamFrame = renderedFrames;
+      this.queueDepthFrames = Math.max(0, this.audioSubmittedFrames - renderedFrames);
+      this.lastAudioFrameMapExact = true;
+      if (firstExactRead) {
+        console.info(`[ClockDiag] frameMap=exact rawFrame=${sample.framePos} ` +
+          `ageMs=${timestampAgeMs.toFixed(1)} rendered=${renderedFrames.toFixed(1)} ` +
+          `submitted=${this.audioSubmittedFrames} queueDepth=${this.queueDepthFrames.toFixed(1)}`);
+      }
+      return renderedFrames;
+    }
+    this.lastAudioFrameMapExact = false;
     try {
       const info = renderer.getAudioTimestampInfoSync();
       if (info.timestamp <= 0) {
@@ -1722,6 +2748,8 @@ export class MetronomeEngine {
       if (timestampAgeMs < -50 || timestampAgeMs > 2000) {
         return undefined;
       }
+      const previousRawFrame = this.lastAudioRawFrame;
+      let baseUpdateReason = 'retained';
       if (!this.audioTimestampBaseReady) {
         // framePos can survive stop/flush on some devices. Anchor it to the
         // amount that could actually have played since this physical start.
@@ -1730,6 +2758,7 @@ export class MetronomeEngine {
         const playedEstimate = Math.min(this.audioSubmittedFrames, elapsedFrames);
         this.audioTimestampBaseFrame = info.framePos - playedEstimate;
         this.audioTimestampBaseReady = true;
+        baseUpdateReason = 'elapsed-time-initialization';
         const clockOffset = this.audioTimestampClockOffsetMs === undefined ? 'NA' :
           this.audioTimestampClockOffsetMs.toFixed(1);
         console.info(`[ClockDiag] rawTs=${rawTimestampMs.toFixed(1)}ms now=${nowMs.toFixed(1)}ms ` +
@@ -1737,7 +2766,19 @@ export class MetronomeEngine {
           `elapsedFrames=${elapsedFrames.toFixed(0)} playedEstimate=${playedEstimate.toFixed(0)} ` +
           `baseFrame=${this.audioTimestampBaseFrame.toFixed(0)}`);
       } else if (this.lastAudioRawFrame >= 0 && info.framePos < this.lastAudioRawFrame) {
+        const previousBaseFrame = this.audioTimestampBaseFrame;
+        if (this.calibrationFramePosRegressedBeyondQuantum(this.lastAudioRawFrame, info.framePos)) {
+          // The legacy recovery remains unchanged, but its diagnostic cannot
+          // assume raw zero survived an unexplained hardware-counter reset.
+          this.diagnosticRawOriginLost = true;
+        }
         this.audioTimestampBaseFrame = info.framePos - this.lastRenderedStreamFrame;
+        baseUpdateReason = 'raw-frame-regression';
+        console.info(`[ProductionClockDiag] stage=frame-map state=base-update reason=raw-frame-regression ` +
+          `rendererEpoch=${this.rendererEpoch} streamId=${this.rendererStreamId} ` +
+          `physicalStartCount=${this.rendererPhysicalStartCount} previousRawFrame=${previousRawFrame} ` +
+          `rawFrame=${info.framePos} previousBaseFrame=${previousBaseFrame.toFixed(1)} ` +
+          `baseFrame=${this.audioTimestampBaseFrame.toFixed(1)} queryMonoMs=${nowMs.toFixed(1)}`);
       }
       this.lastAudioRawFrame = info.framePos;
       // Presentation cannot advance beyond data already accepted by the
@@ -1748,11 +2789,87 @@ export class MetronomeEngine {
         Math.max(0, Math.min(250, timestampAgeMs)) * SAMPLE_RATE / 1000));
       this.lastRenderedStreamFrame = renderedFrames;
       this.queueDepthFrames = Math.max(0, this.audioSubmittedFrames - renderedFrames);
+      this.productionClockSample = {
+        rendererEpoch: this.rendererEpoch,
+        streamId: this.rendererStreamId,
+        physicalStartCount: this.rendererPhysicalStartCount,
+        queryMonoMs: nowMs,
+        rawFrame: info.framePos,
+        rawTimestampMs,
+        renderedFrame: renderedFrames,
+        submittedFrames: this.audioSubmittedFrames,
+        baseFrame: this.audioTimestampBaseFrame,
+        clockOffsetMs: this.audioTimestampClockOffsetMs,
+        legacyAgeMs: timestampAgeMs,
+        baseUpdateReason,
+        previousRawFrame
+      };
       return renderedFrames;
     } catch (_e) {
       // API 19+ exposes hardware timestamps; older devices retain the monotonic fallback.
       this.lastAudioTimestampAgeMs = Number.POSITIVE_INFINITY;
       return undefined;
+    }
+  }
+
+  /**
+   * Compare production coordinates after its target is committed. Reuse the
+   * playback sample, so diagnostics add no audio API queries or scheduling changes.
+   * An old hardware counter after stop/flush must never be presented as an
+   * acoustic offset; only a new renderer's first physical start proves its zero.
+   */
+  private logProductionClockDiagnostic(stage: string, localAudibleStart: number): void {
+    const sample = this.productionClockSample;
+    const transition = this.pendingAudioTransition;
+    if (sample === undefined || sample.rendererEpoch !== this.rendererEpoch ||
+      sample.streamId !== this.rendererStreamId ||
+      sample.physicalStartCount !== this.rendererPhysicalStartCount || !this.rendererStarted ||
+      this.renderer === undefined || this.renderer.state !== audio.AudioState.STATE_RUNNING) {
+      console.info(`[ProductionClockDiag] stage=${stage} state=sample-unavailable ` +
+        `rendererEpoch=${this.rendererEpoch} streamId=${this.rendererStreamId} ` +
+        `physicalStartCount=${this.rendererPhysicalStartCount}`);
+      return;
+    }
+    try {
+      const startupBeforeMs = systemDateTime.getUptime(systemDateTime.TimeType.STARTUP, true) / 1000000;
+      const activeMs = systemDateTime.getUptime(systemDateTime.TimeType.ACTIVE, true) / 1000000;
+      const startupAfterMs = systemDateTime.getUptime(systemDateTime.TimeType.STARTUP, true) / 1000000;
+      const activeToStartupMs = (startupBeforeMs + startupAfterMs) / 2 - activeMs;
+      const rawTimestampMonoMs = sample.rawTimestampMs + activeToStartupMs;
+      const rawAgeMs = sample.queryMonoMs - rawTimestampMonoMs;
+      const rawFrameAtQuery = sample.rawFrame + rawAgeMs * SAMPLE_RATE / 1000;
+      const coordinateDeltaMs = (sample.renderedFrame - rawFrameAtQuery) * 1000 / SAMPLE_RATE;
+      const sampleFresh = Number.isFinite(rawAgeMs) && rawAgeMs >= -50 && rawAgeMs <= 250 &&
+        Number.isFinite(sample.legacyAgeMs) && sample.legacyAgeMs >= -50 && sample.legacyAgeMs <= 250 &&
+        startupAfterMs - sample.queryMonoMs >= 0 && startupAfterMs - sample.queryMonoMs <= 250 &&
+        Number.isFinite(sample.rawFrame) && sample.rawFrame >= 0 && Number.isFinite(coordinateDeltaMs);
+      const originProven = sample.physicalStartCount === 1 && !this.diagnosticRawOriginLost &&
+        !this.calibrationRouteResetPending && !this.micCalibrationRendererRebuildPending;
+      const usable = originProven && sampleFresh;
+      const targetPending = transition !== undefined && transition.token === this.runToken;
+      const rawTargetMonoMs = usable && targetPending && transition !== undefined &&
+        Number.isFinite(transition.targetFrame) && Number.isFinite(localAudibleStart)
+        ? rawTimestampMonoMs + (transition.targetFrame - sample.rawFrame) * 1000 / SAMPLE_RATE : undefined;
+      const m = usable ? coordinateDeltaMs.toFixed(1) : 'unproven';
+      const rawTarget = rawTargetMonoMs === undefined ? 'unproven' : rawTargetMonoMs.toFixed(1);
+      const targetError = rawTargetMonoMs === undefined ? 'unproven'
+        : (rawTargetMonoMs - localAudibleStart).toFixed(1);
+      console.info(`[ProductionClockDiag] stage=${stage} state=sample ` +
+        `rendererEpoch=${sample.rendererEpoch} streamId=${sample.streamId} ` +
+        `physicalStartCount=${sample.physicalStartCount} originProven=${originProven} ` +
+        `rawOriginLost=${this.diagnosticRawOriginLost} ` +
+        `exactCalibrationOrigin=${this.calibrationFrameOriginExact} sampleFresh=${sampleFresh} ` +
+        `baseUpdate=${sample.baseUpdateReason} baseFrame=${sample.baseFrame.toFixed(1)} ` +
+        `clockOffsetMs=${sample.clockOffsetMs.toFixed(1)} rawFrame=${sample.rawFrame} ` +
+        `previousRawFrame=${sample.previousRawFrame} rendered=${sample.renderedFrame.toFixed(1)} ` +
+        `submittedFrames=${sample.submittedFrames} rawAgeMs=${rawAgeMs.toFixed(1)} ` +
+        `legacyAgeMs=${sample.legacyAgeMs.toFixed(1)} coordinateDeltaMs=${coordinateDeltaMs.toFixed(1)} ` +
+        `m=${m}ms targetPending=${targetPending} targetFrame=${transition?.targetFrame ?? -1} ` +
+        `compensation=${transition?.outputLatencyMs ?? -1}ms audible=${localAudibleStart.toFixed(1)} ` +
+        `targetEstimate=true rawTargetMonoMs=${rawTarget} rawTargetMinusAudibleMs=${targetError}`);
+    } catch (_e) {
+      console.info(`[ProductionClockDiag] stage=${stage} state=clock-domain-unavailable ` +
+        `rendererEpoch=${sample.rendererEpoch} streamId=${sample.streamId}`);
     }
   }
 
@@ -1812,6 +2929,17 @@ export class MetronomeEngine {
 
   private async recoverAudio(reason: string): Promise<void> {
     if (!this.running || this.recoveringAudio || this.activeSequenceFinished) { return; }
+    // Switching endpoints can emit a focus-resume event while route preparation
+    // already owns the renderer. A second recovery would overwrite its target.
+    if (this.outputRouteRephasePreparing) { return; }
+    if (this.pendingAudioTransition?.routeRephase) {
+      try {
+        await this.rescheduleForOutputRouteChange();
+      } catch (err) {
+        console.warn(`MetronomeEngine route recovery failed: ${(err as Error).message}`);
+      }
+      return;
+    }
     this.recoveringAudio = true;
     const token = this.runToken;
     const now = MonotonicClock.nowMs();

@@ -1,0 +1,145 @@
+{
+  "version": 1,
+  "status": "素材与独立设计预览；漫画整卡页已接替正式校准入口",
+  "canvas": {
+    "width": 1254,
+    "height": 1254
+  },
+  "assetRoot": "entry/src/main/resources/rawfile/calibration/time-card-v2/",
+  "palette": {
+    "paper": "#FFF9EE",
+    "ink": "#171B1F",
+    "coral": "#FF7056",
+    "teal": "#29B5AE",
+    "blue": "#A9C9F2",
+    "lilac": "#C5B7EB"
+  },
+  "layers": [
+    {
+      "file": "machine-rear.png",
+      "z": 1,
+      "scale": 1,
+      "x": 0,
+      "y": 0,
+      "role": "固定机身、后导轨、托纸台、扳手固定轴座"
+    },
+    {
+      "file": "blank-time-card.png",
+      "z": 2,
+      "scale": 0.68,
+      "x": 170,
+      "y": -7.6,
+      "clipBottom": 785,
+      "role": "只用竖直纸纹理；同一容器旋转并缩放纸/孔/墨层，共享明确锚点，送料补偿打孔行等宽，结果角度归零",
+      "depthScale": 0.966,
+      "planeAnchorY": 1020,
+      "resultDepthScale": 1,
+      "perspective": 0.0003,
+      "perspectiveCenterX": 628,
+      "feedWidthCompensation": "1 + perspective * (1020 - currentRowY)",
+      "resultPerspective": 0,
+      "resultWidthScale": 1
+    },
+    {
+      "file": "punch-guide-topdown-60.png",
+      "z": 4,
+      "scale": 0.166,
+      "sourceCenterX": 627,
+      "y": 602.17,
+      "role": "约60度俯视的灰色前臂/导向座与底模；镜头侧遮冲头，上方U口开放",
+      "sourceDieY": 505
+    },
+    {
+      "file": "punch-ram-topdown-60.png",
+      "z": 3,
+      "scale": 0.4,
+      "x": 205,
+      "y": 361.6,
+      "strokeY": 12,
+      "role": "移动冲头；四个横向工位，和扳手联动",
+      "sourceCenterX": 626.5,
+      "sourceTipY": 781
+    },
+    {
+      "file": "machine-front.png",
+      "z": 5,
+      "scale": 0.88,
+      "x": 50,
+      "y": 110,
+      "role": "前盖、机口前唇与导纸夹，遮挡进入内部的纸"
+    },
+    {
+      "file": "lever.png",
+      "z": 6,
+      "scale": 0.65,
+      "pivotInAsset": {
+        "x": 690,
+        "y": 1030
+      },
+      "axisInScene": {
+        "x": 1144,
+        "y": 676
+      },
+      "restAngle": 0,
+      "pressAngle": -32,
+      "role": "固定轴旋转的刚体扳手；黄色圆柱左端实心封闭；不换轴，不整体平移"
+    }
+  ],
+  "holeGrid": {
+    "columns": 4,
+    "rows": 8,
+    "firstCenterInCard": {
+      "x": 420,
+      "y": 1020
+    },
+    "columnStep": 150,
+    "rowStep": -82,
+    "diameter": 26,
+    "shadow": false,
+    "order": "先完成卡纸底部一行的四孔，然后向卡纸顶边逐行打孔"
+  },
+  "feed": {
+    "stepY": null,
+    "direction": "每四孔送料一行，同时补偿该行透视收窄，四列工作X保持恒定",
+    "stepYFormula": "punchPlaneY - cardScale * projectedCurrentRowY"
+  },
+  "resultText": {
+    "x": 310,
+    "y": 165,
+    "width": 620,
+    "gap": 10,
+    "lineHeights": [62, 116, 42],
+    "fontSizes": [48, 96, 32],
+    "bottomY": 405,
+    "holeGridTopY": 433
+  },
+  "countdown": {
+    "beats": 4,
+    "fontSizeVp": 138,
+    "centerYOffsetVp": 0,
+    "scaleStart": 0.52,
+    "scaleRange": 1.1,
+    "maxOpacity": 0.76,
+    "refreshMs": 32
+  },
+  "missed": {
+    "existingHolesRemain": true,
+    "extraHole": false,
+    "oldCalibrationRetained": true,
+    "stampText": "本次未完成",
+    "cardY": -141,
+    "frameY": 140,
+    "clipTop": -160,
+    "requiresExplicitRetry": true
+  },
+  "registrationNote": "纸只引用竖直blank-time-card.png；透视和送料补偿由代码统一作用于图/孔/文字。旧俯视纸及备份在archive/paper-perspective保留。导向座源底模y505，前盖y110。",
+  "sourceMaster": "docs/design/assets/time-card-v2/machine-master-reference.png",
+  "preview": "docs/design/assets/time-card-v2/asset-preview.html",
+  "camera": {
+    "targetElevationDegrees": 60,
+    "approximateIllustratedProjection": true,
+    "punchPlaneY": 686,
+    "paperProjection": "native scale + X rotation over upright texture; explicit shared pivot; CSS matrix3d in preview",
+    "resultPaper": "upright"
+  }
+}
