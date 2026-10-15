@@ -189,6 +189,15 @@ interface PendingAudioTransition {
 
 type StartTargetMode = 'timestamp' | 'fallback' | 'cold-wall';
 
+interface StartFrameMappingEstimate {
+  rawFrame: number;
+  rawTimestampMs: number;
+  baseFrame: number;
+  uncappedMappedFrame: number;
+  submittedCapFrames: number;
+  legacyAgeMs: number;
+}
+
 /** Read-only evidence from the same calculation that selects a playback target. */
 interface StartTargetEstimate {
   token: number;
@@ -199,6 +208,7 @@ interface StartTargetEstimate {
   submittedAtEstimate: number;
   selectedFrame: number;
   playedFrame: number;
+  frameMapping?: StartFrameMappingEstimate;
 }
 
 interface StartTimingRequest {
@@ -215,6 +225,17 @@ interface StartTimingTransition {
   estimate: StartTargetEstimate;
   audibleMs: number;
   sequence: number;
+}
+
+interface StartWriteBufferContext {
+  startTiming: StartTimingTransition;
+  callbackEntryMonoMs: number;
+  bufferStartFrame: number;
+  bufferFrames: number;
+  previousCallbackGapMs?: number;
+  rendererEpoch: number;
+  physicalStartCount: number;
+  applied: boolean;
 }
 
 interface RouteProbePreparation {
@@ -237,6 +258,10 @@ export class MetronomeEngine {
   private startTimingRequest: StartTimingRequest | undefined = undefined;
   private startTargetEstimate: StartTargetEstimate | undefined = undefined;
   private startTimingTransition: StartTimingTransition | undefined = undefined;
+  private startWriteBufferContext: StartWriteBufferContext | undefined = undefined;
+  private previousWriteCallbackEntryMonoMs: number | undefined = undefined;
+  private previousWriteCallbackRendererEpoch: number = -1;
+  private previousWriteCallbackPhysicalStartCount: number = -1;
   private renderer: audio.AudioRenderer | undefined = undefined;
   private rendererInitialization: Promise<audio.AudioRenderer> | undefined = undefined;
   private rendererWriteDataCallback: audio.AudioRendererWriteDataCallback | undefined = undefined;
@@ -295,6 +320,9 @@ export class MetronomeEngine {
   private pendingSequence: RenderedBar[] = [];
   private pendingSequenceLooping: boolean = true;
   private pendingRevision: number = 0;
+  private preparedCountInBars: Map<number, RenderedBar> = new Map();
+  private preparedCountInRevision: number = -1;
+  private preparedCountInCapacity: number = 0;
   private deferPendingSequenceActivation: boolean = false;
   private activeSequence: RenderedBar[] = [];
   private activeSequenceLooping: boolean = true;
@@ -360,13 +388,38 @@ export class MetronomeEngine {
 
   private handleWriteData(data: ArrayBuffer): audio.AudioDataCallbackResult {
     this.writeCallbackCount++;
-    this.lastWriteProgressMs = MonotonicClock.nowMs();
+    const callbackEntryMonoMs = MonotonicClock.nowMs();
+    this.lastWriteProgressMs = callbackEntryMonoMs;
+    const previousEntry = this.previousWriteCallbackEntryMonoMs;
+    const previousCallbackGapMs = previousEntry !== undefined && callbackEntryMonoMs >= previousEntry &&
+      this.previousWriteCallbackRendererEpoch === this.rendererEpoch &&
+      this.previousWriteCallbackPhysicalStartCount === this.rendererPhysicalStartCount
+      ? callbackEntryMonoMs - previousEntry : undefined;
+    this.previousWriteCallbackEntryMonoMs = callbackEntryMonoMs;
+    this.previousWriteCallbackRendererEpoch = this.rendererEpoch;
+    this.previousWriteCallbackPhysicalStartCount = this.rendererPhysicalStartCount;
     if (this.diagFirstWriteAfterStartPending) {
       this.diagFirstWriteAfterStartPending = false;
       const elapsed = MonotonicClock.nowMs() - this.rendererStartedAtLocalMs;
       console.info(`[A2DP-DIAG] first writeData after start: +${elapsed}ms (A2DP/media-link establishment)`);
     }
-    this.fillAudioData(data);
+    const startTiming = this.startTimingTransition;
+    const bufferContext: StartWriteBufferContext | undefined = startTiming !== undefined &&
+      startTiming.transition.token === this.runToken && startTiming.estimate.token === this.runToken &&
+      this.pendingAudioTransition === startTiming.transition ? {
+        startTiming, callbackEntryMonoMs, bufferStartFrame: this.audioSubmittedFrames,
+        bufferFrames: data.byteLength / BYTES_PER_SAMPLE, previousCallbackGapMs,
+        rendererEpoch: this.rendererEpoch, physicalStartCount: this.rendererPhysicalStartCount, applied: false
+      } : undefined;
+    this.startWriteBufferContext = bufferContext;
+    try {
+      this.fillAudioData(data);
+    } finally {
+      this.startWriteBufferContext = undefined;
+    }
+    if (bufferContext?.applied) {
+      this.logStartWriteCompletion(bufferContext, MonotonicClock.nowMs());
+    }
     return audio.AudioDataCallbackResult.VALID;
   }
 
@@ -1150,6 +1203,7 @@ export class MetronomeEngine {
       timerDueAtMs: -1, timerFiredAtMs: -1, operationStartedAtMs: -1
     };
     this.startTimingRequest = timing;
+    this.preparePlaybackBuffers(countInBeats);
     try {
       await this.ensureRenderer();
     } catch (err) {
@@ -1263,6 +1317,7 @@ export class MetronomeEngine {
     this.startTimingRequest = undefined;
     this.startTargetEstimate = undefined;
     this.startTimingTransition = undefined;
+    this.startWriteBufferContext = undefined;
     this.runToken++;
     this.running = true;
     this.pendingAudioTransition = undefined;
@@ -1277,6 +1332,7 @@ export class MetronomeEngine {
     this.startTimingRequest = undefined;
     this.startTargetEstimate = undefined;
     this.startTimingTransition = undefined;
+    this.startWriteBufferContext = undefined;
     this.runToken++;
     this.cancelTimers();
   }
@@ -1304,6 +1360,7 @@ export class MetronomeEngine {
       if (renderer === undefined || token !== this.runToken || !this.running) {
         return;
       }
+      this.preparePlaybackBuffers(countInBeats);
       const now = MonotonicClock.nowMs();
       if (this.startTimingRequest?.token === token) {
         this.startTimingRequest.operationStartedAtMs = now;
@@ -1370,6 +1427,7 @@ export class MetronomeEngine {
     if (renderer === undefined || token !== this.runToken || !this.running) {
       return;
     }
+    this.preparePlaybackBuffers(countInBeats);
     // A physical restart resets only the stream clock. Normal play/pause/BPM
     // transitions never enter this path once the renderer is running.
     this.resetAudioTimestampState();
@@ -1505,6 +1563,7 @@ export class MetronomeEngine {
     this.pendingSequence = sequence;
     this.pendingSequenceLooping = looping;
     this.pendingRevision++;
+    this.prepareCountInBuffers();
     // Configuration packets arrive before their shared transport boundary. The
     // old sequence must keep looping until that boundary instead of switching
     // on whichever device happens to finish its current bar first.
@@ -1561,11 +1620,55 @@ export class MetronomeEngine {
     return this.renderBar(new SequencerPattern(DEFAULT_TICKS_PER_BEAT, beats, events), false);
   }
 
-  private prepareAudioCursor(beatIndex: number, countInBeats: number = 0): void {
+  private preparePlaybackBuffers(countInBeats: number): void {
     if (this.pendingSequence.length === 0) {
       this.rebuildPendingSequence([this.pattern], true);
     }
-    const countInBar = countInBeats > 0 ? this.renderCountInBar(countInBeats) : undefined;
+    if (countInBeats > 0 && (this.preparedCountInRevision !== this.pendingRevision ||
+      countInBeats > this.preparedCountInCapacity || !this.preparedCountInBars.has(countInBeats))) {
+      this.prepareCountInBuffers(countInBeats);
+    }
+  }
+
+  private prepareCountInBuffers(requiredBeats: number = 0): void {
+    const pendingBeats = this.pendingAudioTransition?.kind === 'play'
+      ? this.pendingAudioTransition.countInBeats : 0;
+    const capacity = Math.ceil(Math.max(1, this.beatsPerBar, requiredBeats,
+      this.transportCountInBeats, pendingBeats));
+    const full = this.renderCountInBar(capacity);
+    const prepared = new Map<number, RenderedBar>();
+    // Every remaining count-in restarts with an accent. Prefixes of the same
+    // rendered bar preserve its rounding and sounds without repeating the PCM
+    // allocation/dither loop in writeData. A revision also covers sample-bank
+    // changes; configurationToken alone changes even when PCM is unchanged.
+    const addPrefix = (beats: number): void => {
+      if (beats <= 0 || prepared.has(beats)) {
+        return;
+      }
+      const frameCount = Math.max(1, Math.round(full.samplesPerBeat * beats));
+      prepared.set(beats, {
+        samples: new Int16Array(full.samples.buffer, full.samples.byteOffset, frameCount),
+        frameCount, samplesPerBeat: full.samplesPerBeat, beatsPerBar: beats
+      });
+    };
+    for (let beats = 1; beats <= capacity; beats++) {
+      addPrefix(beats);
+    }
+    addPrefix(requiredBeats);
+    addPrefix(this.transportCountInBeats);
+    addPrefix(pendingBeats);
+    this.preparedCountInBars = prepared;
+    this.preparedCountInCapacity = capacity;
+    this.preparedCountInRevision = this.pendingRevision;
+  }
+
+  private hasPreparedPlaybackBuffers(countInBeats: number): boolean {
+    return this.pendingSequence.length > 0 && (countInBeats <= 0 ||
+      (this.preparedCountInRevision === this.pendingRevision && this.preparedCountInBars.has(countInBeats)));
+  }
+
+  private prepareAudioCursor(beatIndex: number, countInBeats: number = 0): void {
+    const countInBar = countInBeats > 0 ? this.preparedCountInBars.get(countInBeats) : undefined;
     this.activeSequence = countInBar === undefined ? this.pendingSequence : [countInBar, ...this.pendingSequence];
     this.activeSequenceLooping = this.pendingSequenceLooping;
     this.activeSequenceFinished = false;
@@ -1780,6 +1883,16 @@ export class MetronomeEngine {
       }
       return;
     }
+    const requiredCountIn = transition.routeRephase ? this.transportCountInBeats : transition.countInBeats;
+    if ((!transition.routeRephase || !transition.preserveActiveSequence) &&
+      !this.hasPreparedPlaybackBuffers(requiredCountIn)) {
+      // A missing plan must remain silent, rather than build a multi-second PCM
+      // bar in this callback or silently drop the count-in and play the main bar.
+      this.audioStreaming = false;
+      console.warn(`MetronomeEngine start buffers unavailable: token=${transition.token} ` +
+        `countIn=${requiredCountIn} revision=${this.pendingRevision}`);
+      return;
+    }
     if (transition.routeRephase) {
       this.prepareRouteAudioCursor(transition.beatIndex, transition.preserveActiveSequence ?? false);
     } else {
@@ -1797,14 +1910,31 @@ export class MetronomeEngine {
     this.lastAudioPlayheadMs = 0;
     this.lastAudioSampleMonoMs = this.transportStartLocalMs;
     const startTiming = this.startTimingTransition;
-    if (startTiming?.transition === transition) {
+    if (startTiming?.transition === transition && startTiming.estimate.token === this.runToken) {
       this.startTimingTransition = undefined;
       const appliedMonoMs = MonotonicClock.nowMs();
+      const context = this.startWriteBufferContext;
+      const targetOffsetFrames = context !== undefined ? transition.targetFrame - context.bufferStartFrame : -1;
+      const bufferKnown = context !== undefined && context.startTiming === startTiming &&
+        context.rendererEpoch === this.rendererEpoch &&
+        context.physicalStartCount === this.rendererPhysicalStartCount &&
+        targetOffsetFrames >= 0 && targetOffsetFrames < context.bufferFrames;
+      if (bufferKnown && context !== undefined) {
+        context.applied = true;
+      }
       console.info(`[StartTimingDiag] stage=applied seq=${startTiming.sequence} token=${transition.token} ` +
         `beat=${transition.beatIndex} targetFrame=${transition.targetFrame} submittedFrame=${this.audioSubmittedFrames} ` +
         `appliedMonoMs=${appliedMonoMs.toFixed(1)} audibleLeadMs=${(startTiming.audibleMs - appliedMonoMs).toFixed(1)} ` +
         `estimatedFrameDeadlineDeltaMs=${(appliedMonoMs - startTiming.estimate.targetHardwareMs).toFixed(1)} ` +
         `clampMs=${(Math.max(0, transition.targetFrame - startTiming.estimate.requestedFrame) * 1000 / SAMPLE_RATE).toFixed(2)} ` +
+        `bufferContextKnown=${bufferKnown} ` +
+        `callbackEntryMonoMs=${bufferKnown && context !== undefined ? context.callbackEntryMonoMs.toFixed(1) : 'unknown'} ` +
+        `bufferStartFrame=${bufferKnown && context !== undefined ? context.bufferStartFrame : 'unknown'} ` +
+        `bufferFrames=${bufferKnown && context !== undefined ? context.bufferFrames : 'unknown'} ` +
+        `targetOffsetFrames=${bufferKnown ? targetOffsetFrames : 'unknown'} ` +
+        `targetOffsetMs=${bufferKnown ? (targetOffsetFrames * 1000 / SAMPLE_RATE).toFixed(2) : 'unknown'} ` +
+        `previousCallbackGapMs=${bufferKnown && context?.previousCallbackGapMs !== undefined ? context.previousCallbackGapMs.toFixed(1) : 'unknown'} ` +
+        `cachedUnderflowCount=${this.lastUnderflowCount} ` +
         `rendererEpoch=${this.rendererEpoch} streamId=${this.rendererStreamId} ` +
         `physicalStartCount=${this.rendererPhysicalStartCount} audioClockLocked=${this.audioClockLocked}`);
     }
@@ -1823,6 +1953,31 @@ export class MetronomeEngine {
     }
   }
 
+  private logStartWriteCompletion(context: StartWriteBufferContext, fillCompletedMonoMs: number): void {
+    const startTiming = context.startTiming;
+    if (startTiming.transition.token !== this.runToken || startTiming.estimate.token !== this.runToken ||
+      context.rendererEpoch !== this.rendererEpoch ||
+      context.physicalStartCount !== this.rendererPhysicalStartCount) {
+      return;
+    }
+    const targetOffsetFrames = startTiming.transition.targetFrame - context.bufferStartFrame;
+    // This is sampled after filling PCM but before VALID is returned. It does
+    // not prove native acceptance or presentation; the duration excludes this log.
+    const callbackDurationMs = fillCompletedMonoMs >= context.callbackEntryMonoMs
+      ? (fillCompletedMonoMs - context.callbackEntryMonoMs).toFixed(1) : 'unknown';
+    console.info(`[StartTimingDiag] stage=write-complete seq=${startTiming.sequence} ` +
+      `token=${startTiming.transition.token} targetFrame=${startTiming.transition.targetFrame} ` +
+      `callbackEntryMonoMs=${context.callbackEntryMonoMs.toFixed(1)} ` +
+      `fillCompletedMonoMs=${fillCompletedMonoMs.toFixed(1)} fillCompletedBeforeReturn=true ` +
+      `callbackDurationMs=${callbackDurationMs} bufferStartFrame=${context.bufferStartFrame} ` +
+      `bufferFrames=${context.bufferFrames} targetOffsetFrames=${targetOffsetFrames} ` +
+      `targetOffsetMs=${(targetOffsetFrames * 1000 / SAMPLE_RATE).toFixed(2)} ` +
+      `previousCallbackGapMs=${context.previousCallbackGapMs?.toFixed(1) ?? 'unknown'} ` +
+      `cachedUnderflowCount=${this.lastUnderflowCount} ` +
+      `rendererEpoch=${this.rendererEpoch} streamId=${this.rendererStreamId} ` +
+      `physicalStartCount=${this.rendererPhysicalStartCount}`);
+  }
+
   private async lockAudioStartToPresentationClock(
     renderer: audio.AudioRenderer,
     localAudibleStart: number,
@@ -1830,6 +1985,7 @@ export class MetronomeEngine {
     token: number,
     outputCompensationOverrideMs?: number
   ): Promise<void> {
+    this.preparePlaybackBuffers(this.pendingAudioTransition?.countInBeats ?? 0);
     const lockDeadline = Math.min(
       rendererStartRequestedAtMs + AUDIO_CLOCK_LOCK_TIMEOUT_MS,
       localAudibleStart - AUDIO_CLOCK_LOCK_MIN_REMAINING_MS);
@@ -1903,6 +2059,7 @@ export class MetronomeEngine {
     if (token !== this.runToken || !this.running) {
       return;
     }
+    this.preparePlaybackBuffers(countInBeats);
     const outputCompensationMs = outputCompensationOverrideMs ?? this.outputLatencyMs;
     const hardwareStartAt = localAudibleStart - outputCompensationMs;
     const btActive = AudioOutputMonitor.isBluetoothA2dpActive();
@@ -1966,8 +2123,26 @@ export class MetronomeEngine {
 
   private cacheStartTargetEstimate(mode: StartTargetMode, queryMonoMs: number,
     targetHardwareMs: number, playedFrame: number, requestedFrame: number, selectedFrame: number): void {
-    this.startTargetEstimate = { token: this.runToken, mode, queryMonoMs, targetHardwareMs,
+    const estimate: StartTargetEstimate = { token: this.runToken, mode, queryMonoMs, targetHardwareMs,
       playedFrame, requestedFrame, selectedFrame, submittedAtEstimate: this.audioSubmittedFrames };
+    const sample = this.productionClockSample;
+    // The next diagnostic read can replace productionClockSample. Bind this
+    // copy to the target's first legacy query; exact/fallback reads have no copy.
+    if (mode === 'timestamp' && this.startTimingRequest?.token === this.runToken &&
+      !this.lastAudioFrameMapExact && sample !== undefined && sample.queryMonoMs === queryMonoMs &&
+      sample.rendererEpoch === this.rendererEpoch && sample.streamId === this.rendererStreamId &&
+      sample.physicalStartCount === this.rendererPhysicalStartCount &&
+      sample.submittedFrames === this.audioSubmittedFrames && sample.renderedFrame === playedFrame) {
+      const uncappedMappedFrame = sample.rawFrame - sample.baseFrame +
+        Math.max(0, Math.min(250, sample.legacyAgeMs)) * SAMPLE_RATE / 1000;
+      estimate.frameMapping = {
+        rawFrame: sample.rawFrame, rawTimestampMs: sample.rawTimestampMs,
+        baseFrame: sample.baseFrame, uncappedMappedFrame,
+        submittedCapFrames: Math.max(0, uncappedMappedFrame - sample.submittedFrames),
+        legacyAgeMs: sample.legacyAgeMs
+      };
+    }
+    this.startTargetEstimate = estimate;
   }
 
   private logStartTimingTarget(path: string, transition: PendingAudioTransition | undefined,
@@ -1989,6 +2164,7 @@ export class MetronomeEngine {
       request.timerFiredAtMs - request.timerDueAtMs : -1;
     const operationWaitMs = request !== undefined && request.timerFiredAtMs >= 0 ?
       request.operationStartedAtMs - request.timerFiredAtMs : -1;
+    const mapping = estimate.frameMapping;
     console.info(`[StartTimingDiag] stage=target path=${path} seq=${request?.sequence ?? 0} token=${this.runToken} ` +
       `mode=${estimate.mode} queryMonoMs=${estimate.queryMonoMs.toFixed(1)} ` +
       `targetHardwareMs=${estimate.targetHardwareMs.toFixed(1)} audibleMs=${audibleMs.toFixed(1)} compensationMs=${compensationMs} ` +
@@ -1997,6 +2173,13 @@ export class MetronomeEngine {
       `headroomMs=${((estimate.requestedFrame - estimate.submittedAtEstimate) * 1000 / SAMPLE_RATE).toFixed(2)} ` +
       `clampMs=${(Math.max(0, committedFrame - estimate.requestedFrame) * 1000 / SAMPLE_RATE).toFixed(2)} ` +
       `queueEstimateMs=${((estimate.submittedAtEstimate - estimate.playedFrame) * 1000 / SAMPLE_RATE).toFixed(1)} ` +
+      `estimateFrameMapKnown=${mapping !== undefined} estimateRawFrame=${mapping?.rawFrame ?? 'unknown'} ` +
+      `estimateRawTimestampMs=${mapping?.rawTimestampMs.toFixed(3) ?? 'unknown'} ` +
+      `estimateBaseFrame=${mapping?.baseFrame ?? 'unknown'} ` +
+      `uncappedMappedFrame=${mapping?.uncappedMappedFrame.toFixed(1) ?? 'unknown'} ` +
+      `submittedCapFrames=${mapping?.submittedCapFrames.toFixed(1) ?? 'unknown'} ` +
+      `submittedCapMs=${mapping !== undefined ? (mapping.submittedCapFrames * 1000 / SAMPLE_RATE).toFixed(2) : 'unknown'} ` +
+      `estimateLegacyAgeMs=${mapping?.legacyAgeMs.toFixed(1) ?? 'unknown'} ` +
       `remainingAudibleMs=${(audibleMs - estimate.queryMonoMs).toFixed(1)} ` +
       `timerLateMs=${timerLateMs.toFixed(1)} operationWaitMs=${operationWaitMs.toFixed(1)} ` +
       `rendererEpoch=${this.rendererEpoch} streamId=${this.rendererStreamId} ` +
@@ -2415,6 +2598,9 @@ export class MetronomeEngine {
       }
       if (!this.rendererStarted || renderer.state !== audio.AudioState.STATE_RUNNING) {
         throw new Error('声音出口切换后音频输出尚未恢复，请暂停后重新开始');
+      }
+      if (!preserveActiveSequence) {
+        this.preparePlaybackBuffers(this.transportCountInBeats);
       }
       this.refreshOutputLatency();
       const compensationMs = this.outputLatencyMs;

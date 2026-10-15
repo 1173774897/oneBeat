@@ -4,17 +4,22 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const ts = require(process.argv[2]);
 
-const compiled = ts.transpileModule(fs.readFileSync('entry/src/main/ets/sync/ClockSync.ets', 'utf8'), {
-  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021 },
-  reportDiagnostics: true
-});
-assert.equal((compiled.diagnostics ?? []).filter(d => d.category === ts.DiagnosticCategory.Error).length, 0);
+function compile(file) {
+  const result = ts.transpileModule(fs.readFileSync(file, 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021 },
+    reportDiagnostics: true
+  });
+  assert.equal((result.diagnostics ?? []).filter(d => d.category === ts.DiagnosticCategory.Error).length, 0);
+  return result.outputText;
+}
+const compiled = compile('entry/src/main/ets/sync/ClockSync.ets');
+const controllerCompiled = compile('entry/src/main/ets/session/SessionController.ets');
 
 function harness() {
   const clock = { now: 37000000 };
   const logs = [];
   const exports = {};
-  vm.runInNewContext(compiled.outputText, {
+  vm.runInNewContext(compiled, {
     exports,
     require: name => {
       if (name === '../common/MonotonicClock') return { MonotonicClock: { nowMs: () => clock.now } };
@@ -27,6 +32,36 @@ function harness() {
     Math, Number, Promise
   });
   return { estimator: new exports.ClockSyncEstimator(), Estimator: exports.ClockSyncEstimator, clock, logs };
+}
+
+function memberController(h) {
+  const exports = {};
+  const mocks = {
+    '../common/Constants': { PING_SAMPLES: 11 },
+    '../common/MonotonicClock': { MonotonicClock: { nowMs: () => h.clock.now } },
+    BuildProfile: { DEBUG: false },
+    '../protocol/messages': {},
+    '../network/socket/SessionServer': { SessionServer: class {} },
+    '../network/socket/SessionClient': { SessionClient: class {} },
+    '../sync/ClockSync': { ClockSyncEstimator: h.Estimator },
+    '../network/p2p/P2pInvitation': {},
+    '../assets/AssetCatalog': {},
+    '../common/MeterModel': { defaultBeatPointStates: () => [] },
+    '../audio/DrumMachineCatalog': {},
+    '../assets/CharacterCatalog': { defaultSessionAvatar: () => 'test-avatar' }
+  };
+  vm.runInNewContext(controllerCompiled, {
+    exports,
+    require: name => {
+      assert.ok(mocks[name], `Unmocked controller dependency ${name}`);
+      return mocks[name];
+    },
+    AppStorage: { get: () => undefined },
+    Map, Set, Promise
+  });
+  const controller = new exports.SessionController('test-session', false, 'test');
+  controller.clockSync = h.estimator;
+  return controller;
 }
 
 const TRUE_OFFSET = 87230308;
@@ -69,22 +104,53 @@ async function main() {
     assert.equal(h.logs.length, 0, 'in-bound jitter must not reset the fit');
   }
   {
-    // Raw pings never reach the estimator: only the filtered median is returned.
+    // A sample inside the NTP interval does not trigger the reset above. After
+    // 60 s, however, expired skew history must not project into a fresh start.
     const h = harness();
+    for (let i = 0; i < 6; i++) {
+      h.estimator.applySample({ offsetMs: TRUE_OFFSET, rttMs: 14 });
+      h.clock.now += 5000;
+    }
+    h.clock.now += 65000;
+    h.estimator.applySample({ offsetMs: TRUE_OFFSET + 8, rttMs: 14 });
+    assert.equal(h.logs.length, 0, 'This case must exercise expiry rather than an NTP reset');
+    assert.equal(h.estimator.getOffsetMs(), TRUE_OFFSET + 8,
+      'A fresh result must replace expired history without a residual blend');
+    assert.equal(h.estimator.getOffsetAt(h.clock.now + 20000), TRUE_OFFSET + 8,
+      'One fresh sample must not inherit drift from expired history');
+  }
+  {
+    // Exercise the real SessionController caller as well as ClockSync. A static
+    // measurement and an unrelated estimator would stay independent even when
+    // the old per-ping fit callback was accidentally restored in the caller.
+    const h = harness();
+    for (let i = 0; i < 6; i++) {
+      h.estimator.applySample({ offsetMs: TRUE_OFFSET, rttMs: 12 });
+      h.clock.now += 5000;
+    }
+    const controller = memberController(h);
     const rtts = [600, 12, 450, 14, 13, 520, 15, 700, 16, 480, 20];
     let i = 0;
-    const result = await h.Estimator.measureWithSender(async (_id, t0) => {
+    controller.sendPing = async (_id, t0) => {
+      assert.ok(Math.abs(h.estimator.getOffsetMs() - TRUE_OFFSET) < 0.01,
+        'Unfiltered packets must not alter the live clock fit while a batch is measuring');
       const rtt = rtts[i++];
       h.clock.now = t0 + rtt;
       const bias = rtt > 100 ? -rtt / 2 : 0;
       const serverMono = t0 + TRUE_OFFSET + rtt / 2 + bias;
       return { serverMono, leaderMono: serverMono };
-    }, rtts.length);
-    assert.equal(h.estimator.getOffsetMs(), 0, 'measurement must not mutate the estimator');
+    };
+    const result = await controller.measureClockSync(rtts.length);
+    assert.equal(i, rtts.length, 'The real caller must measure the whole batch');
+    assert.ok(Math.abs(h.estimator.getOffsetMs() - TRUE_OFFSET) < 0.01,
+      'The live fit must remain unchanged until the caller accepts the filtered result');
     assert.ok(Math.abs(result.offsetMs - TRUE_OFFSET) < 1, `median ${result.offsetMs}`);
     assert.equal(result.rttMs, 12);
+    h.estimator.applySample(result);
+    assert.ok(Math.abs(h.estimator.getOffsetAt(h.clock.now + 20000) - TRUE_OFFSET) < 0.1,
+      'A wake-up batch containing slow asymmetric packets must not bias a later shared start');
   }
-  console.log('PASS clock sync fit: rtt weighting, NTP-bound reset, raw pings excluded');
+  console.log('PASS clock sync fit: rtt weighting, NTP-bound reset, expired-history recovery, real SessionController raw-ping isolation');
 }
 
 main().catch(error => { console.error(error); process.exitCode = 1; });

@@ -9,7 +9,10 @@ const RATE = 44100;
 const ENGINE = path.resolve('entry/src/main/ets/audio/MetronomeEngine.ets');
 const AUDIO_STATE = { STATE_RUNNING: 2, STATE_STOPPED: 3, STATE_PAUSED: 5 };
 
-function fixture({ compensationMs = 300, queueMs = 280, timestampAvailable = true } = {}) {
+function fixture({ compensationMs = 300, queueMs = 280, timestampAvailable = true,
+  frameBiasFrames = 0, physicalLatencyMs = compensationMs, moduleMocks = {} } = {}) {
+  let savedCompensationMs = compensationMs;
+  let queueFrames = Math.round(queueMs * RATE / 1000);
   let now = 100000;
   const nativeStartedAt = now - 4000;
   let nextTimer = 1;
@@ -41,7 +44,8 @@ function fixture({ compensationMs = 300, queueMs = 280, timestampAvailable = tru
     '@kit.BasicServicesKit': { systemDateTime: {
       TimeType: { STARTUP: 0, ACTIVE: 1 }, getUptime: () => now * 1000000
     } },
-    BuildProfile: { DEBUG: false }
+    BuildProfile: { DEBUG: false },
+    ...moduleMocks
   };
   function load(file) {
     if (cache.has(file)) return cache.get(file);
@@ -65,7 +69,7 @@ function fixture({ compensationMs = 300, queueMs = 280, timestampAvailable = tru
           isBluetoothA2dpActive: () => true, estimateBluetoothLinkLatencyMs: () => 240
         } };
         if (name.endsWith('/AudioLatencyPersistence')) return {
-          getCalibrationMs: () => compensationMs, getEffectiveCalibrationMs: () => compensationMs,
+          getCalibrationMs: () => savedCompensationMs, getEffectiveCalibrationMs: () => savedCompensationMs,
           getInputLatencyMs: () => 52
         };
         if (name.endsWith('/DrumMachineCatalog') || name.endsWith('/DrumSampleBank')) return {};
@@ -88,15 +92,15 @@ function fixture({ compensationMs = 300, queueMs = 280, timestampAvailable = tru
   engine.rendererEpoch = 9;
   engine.rendererStreamId = 42;
   engine.audioTimestampBaseReady = true;
-  engine.audioTimestampBaseFrame = 0;
+  engine.audioTimestampBaseFrame = -frameBiasFrames;
   engine.audioTimestampClockOffsetMs = 0;
   engine.outputLatencyMs = compensationMs;
   engine.offsetMs = 0;
   const playedAt = () => Math.round((now - nativeStartedAt) * RATE / 1000);
-  engine.audioSubmittedFrames = playedAt() + Math.round(queueMs * RATE / 1000);
+  engine.audioSubmittedFrames = playedAt() + queueFrames;
   engine.lastRenderedStreamFrame = playedAt();
   engine.lastAudioRawFrame = playedAt();
-  engine.queueDepthFrames = Math.round(queueMs * RATE / 1000);
+  engine.queueDepthFrames = queueFrames;
   engine.lastWriteProgressMs = now;
 
   async function flushMicrotasks() { for (let i = 0; i < 20; i++) await Promise.resolve(); }
@@ -108,7 +112,7 @@ function fixture({ compensationMs = 300, queueMs = 280, timestampAvailable = tru
   }
   function advanceKeepAlive(ms) {
     now += ms;
-    const wantedSubmitted = playedAt() + Math.round(queueMs * RATE / 1000);
+    const wantedSubmitted = playedAt() + queueFrames;
     assert.ok(wantedSubmitted >= engine.audioSubmittedFrames);
     engine.handleWriteData(new ArrayBuffer((wantedSubmitted - engine.audioSubmittedFrames) * 2));
     engine.lastWriteProgressMs = now;
@@ -116,8 +120,15 @@ function fixture({ compensationMs = 300, queueMs = 280, timestampAvailable = tru
   return {
     engine, renderer, logs, audioCalls, fireDueTimers, flushMicrotasks, advanceKeepAlive,
     get now() { return now; },
-    audibleAtFrame: frame => nativeStartedAt + frame * 1000 / RATE + compensationMs,
-    compensationMs, queueMs
+    get physicalFrame() { return playedAt(); },
+    // Model CPU work on the shared JS thread without synthesizing an extra
+    // write callback; realtime-boundary tests inject render cost here.
+    advanceClock(ms) { now += ms; },
+    audibleAtFrame: frame => nativeStartedAt + frame * 1000 / RATE + physicalLatencyMs,
+    setQueueFrames(frames) { queueFrames = frames; },
+    setCompensationMs(ms) { savedCompensationMs = ms; },
+    get compensationMs() { return savedCompensationMs; },
+    queueMs
   };
 }
 
@@ -221,7 +232,7 @@ function assertDiagnostics(result, h, mode = 'timestamp') {
   return scheduled.seq;
 }
 
-(async () => {
+async function main() {
   const warm = fixture();
   const first = await startAndRender(warm, 120);
   assert.ok(Math.abs(first.audibleErrorMs - 50) < 1 / RATE * 1000,
@@ -264,4 +275,9 @@ function assertDiagnostics(result, h, mode = 'timestamp') {
   assertDiagnostics(delayed, delayedHarness);
 
   console.log('PASS: actual warm-renderer PCM and correlated diagnostics reproduce first-start 50ms clamp and aligned resume with unchanged calibration; queue, sufficient lead, fallback, timer lateness and operation wait covered');
-})().catch(error => { console.error(error); process.exitCode = 1; });
+}
+
+module.exports = { fixture, startAndRender, diagnostic, RATE };
+if (require.main === module) {
+  main().catch(error => { console.error(error); process.exitCode = 1; });
+}

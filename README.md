@@ -33,6 +33,8 @@
 
 多人连接架构、权限边界与真机测试步骤见 [连接方案](designs/network-connection-plan.md)。
 
+音频与多人同步的关键回归可运行 `node scripts/tests/run-sync-regressions.cjs`；DevEco Node 用法、覆盖范围和真机验证边界见 [测试说明](scripts/tests/README.md)。
+
 ## 商店 API
 
 商店服务端已拆分为同级独立工程 [`oneBeatBackend`](../oneBeatBackend/)，当前提供 HTTPS

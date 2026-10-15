@@ -85,7 +85,15 @@ function fixture() {
       getEffectiveCalibrationMs: () => 298.2, getCalibrationMs: () => 298.2, getInputLatencyMs: () => 53
     },
     '../common/MonotonicClock': { MonotonicClock: { nowMs: () => clock.now } },
-    './RhythmTimeline': { BuiltInRhythmFactory: { create: () => ({ beatsPerBar: 4 }) } },
+    './RhythmTimeline': {
+      DEFAULT_TICKS_PER_BEAT: 480,
+      SequencerPattern: class {
+        constructor(ticksPerBeat, beatsPerBar, events) {
+          Object.assign(this, { ticksPerBeat, beatsPerBar, events });
+        }
+      },
+      BuiltInRhythmFactory: { create: () => ({ ticksPerBeat: 480, beatsPerBar: 4, events: [] }) }
+    },
     './DrumMachineCatalog': {}, './DrumSampleBank': {},
     '../common/MeterModel': { defaultBeatPointStates: () => [] }, BuildProfile: { DEBUG: false }
   };

@@ -8,7 +8,15 @@ const mocks = {
   '@kit.AudioKit': {}, '@kit.BasicServicesKit': {},
   './ClickSound': { ClickSound: { buildAccentBuffer: () => new ArrayBuffer(2), buildWeakBuffer: () => new ArrayBuffer(2), buildTone: () => new ArrayBuffer(2) } },
   '../common/MonotonicClock': {},
-  './RhythmTimeline': { BuiltInRhythmFactory: { create: () => ({ beatsPerBar: 4 }) } },
+  './RhythmTimeline': {
+    DEFAULT_TICKS_PER_BEAT: 480,
+    SequencerPattern: class {
+      constructor(ticksPerBeat, beatsPerBar, events) {
+        Object.assign(this, { ticksPerBeat, beatsPerBar, events });
+      }
+    },
+    BuiltInRhythmFactory: { create: () => ({ beatsPerBar: 4 }) }
+  },
   './DrumMachineCatalog': { parseDrumProgram: raw => ({ styleKey: raw }), buildProgramSequence: () => [{}] },
   './DrumSampleBank': { DrumSampleBank: { loadStyle: () => new Promise(resolve => loads.push(resolve)) } },
   '../common/MeterModel': { defaultBeatPointStates: () => [] }
