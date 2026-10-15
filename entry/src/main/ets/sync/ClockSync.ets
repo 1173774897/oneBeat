@@ -7,6 +7,11 @@ export interface SyncSample {
   rttMs: number;
 }
 
+// 拟合投影与新测量的 NTP 区间之间允许的额外余量（覆盖两端调度抖动与 ms 取整）。
+const CLOCK_FIT_CONSISTENCY_MARGIN_MS: number = 5;
+// 权重下限，避免 rtt≈0 的单个结果独占整个拟合。
+const CLOCK_FIT_MIN_WEIGHT_RTT_MS: number = 4;
+
 interface TimedOffsetSample {
   atMs: number;
   offsetMs: number;
@@ -62,14 +67,34 @@ export class ClockSyncEstimator {
     this.recordSample(sample.offsetMs, sample.rttMs);
   }
 
-  smoothAdjust(nextOffsetMs: number, alpha: number = 0.25): void {
-    this.offsetMs = this.offsetMs * (1 - alpha) + nextOffsetMs * alpha;
-    this.recordSample(nextOffsetMs, this.rttMs);
+  smoothAdjust(next: SyncSample, alpha: number = 0.25): void {
+    this.offsetMs = this.offsetMs * (1 - alpha) + next.offsetMs * alpha;
+    this.rttMs = next.rttMs;
+    this.recordSample(next.offsetMs, next.rttMs);
   }
 
-  /** 记录带时间戳的样本，用于 skew 线性拟合。 */
-  recordSample(offsetMs: number, rttMs: number): void {
+  /**
+   * 记录一次「已按 RTT 过滤」的测量结果，用于 skew 线性拟合。
+   * 只能传 medianFromSamples 的输出，不能传单个原始 ping：链路唤醒或排队时的
+   * 原始 ping 偏差可达上百毫秒，一旦进入 60s 窗口，getOffsetMs 会在整个窗口期内被拖偏。
+   */
+  private recordSample(offsetMs: number, rttMs: number): void {
+    if (!Number.isFinite(offsetMs) || !Number.isFinite(rttMs) || rttMs < 0) {
+      return;
+    }
     const now = MonotonicClock.nowMs();
+    // NTP 约束：真实 offset 必在 [offset - rtt/2, offset + rtt/2] 内。新测量与拟合投影
+    // 超出该范围时，历史窗口已被证伪，继续线性回归只会让新值被旧值稀释。
+    if (this.hasSkewFit) {
+      const projected = this.getOffsetAt(now);
+      const boundMs = rttMs / 2 + CLOCK_FIT_CONSISTENCY_MARGIN_MS;
+      if (Math.abs(projected - offsetMs) > boundMs) {
+        console.info(`[ClockFitDiag] action=reset projectedOffsetMs=${projected.toFixed(2)} ` +
+          `sampleOffsetMs=${offsetMs.toFixed(2)} rttMs=${rttMs.toFixed(2)} boundMs=${boundMs.toFixed(2)} ` +
+          `droppedSamples=${this.samples.length}`);
+        this.samples = [];
+      }
+    }
     this.samples.push({ atMs: now, offsetMs: offsetMs, rttMs: rttMs });
     // 只保留最近 60s 内的样本，避免陈旧样本污染拟合。
     const horizon = now - 60000;
@@ -79,7 +104,10 @@ export class ClockSyncEstimator {
     this.fitSkew();
   }
 
-  /** 最小二乘线性回归拟合 offset(t) = a + b*(t - tRef)，b 即两端晶振的相对漂移率。 */
+  /**
+   * 加权最小二乘拟合 offset(t) = a + b*(t - tRef)，b 即两端晶振的相对漂移率。
+   * 权重 1/rtt²：单次测量误差上界与 rtt/2 成正比，慢链路结果不能与快链路结果等权。
+   */
   private fitSkew(): void {
     const n = this.samples.length;
     if (n < 2) {
@@ -87,25 +115,29 @@ export class ClockSyncEstimator {
       return;
     }
     const refAtMs = this.samples[n - 1].atMs;
+    let sumW = 0;
     let sumX = 0;
     let sumY = 0;
     let sumXX = 0;
     let sumXY = 0;
     for (const s of this.samples) {
+      const rtt = Math.max(CLOCK_FIT_MIN_WEIGHT_RTT_MS, s.rttMs);
+      const w = 1 / (rtt * rtt);
       const x = s.atMs - refAtMs;
       const y = s.offsetMs;
-      sumX += x;
-      sumY += y;
-      sumXX += x * x;
-      sumXY += x * y;
+      sumW += w;
+      sumX += w * x;
+      sumY += w * y;
+      sumXX += w * x * x;
+      sumXY += w * x * y;
     }
-    const denom = n * sumXX - sumX * sumX;
-    if (Math.abs(denom) < 1e-9) {
+    const denom = sumW * sumXX - sumX * sumX;
+    if (Math.abs(denom) < 1e-9 * sumW * sumW) {
       this.hasSkewFit = false;
       return;
     }
-    const driftRate = (n * sumXY - sumX * sumY) / denom; // ms per ms
-    const intercept = (sumY - driftRate * sumX) / n;
+    const driftRate = (sumW * sumXY - sumX * sumY) / denom; // ms per ms
+    const intercept = (sumY - driftRate * sumX) / sumW;
     this.skewRefAtMs = refAtMs;
     this.skewRefOffsetMs = intercept;
     this.skewPpm = driftRate * 1e6;
@@ -137,8 +169,7 @@ export class ClockSyncEstimator {
 
   static async measureWithSender(
     sendPing: (id: string, clientMono: number) => Promise<PingResponse>,
-    sampleCount: number = PING_SAMPLES,
-    onSample?: (offsetMs: number, rttMs: number) => void
+    sampleCount: number = PING_SAMPLES
   ): Promise<SyncSample> {
     const samples: SyncSample[] = [];
     for (let i = 0; i < sampleCount; i++) {
@@ -151,9 +182,6 @@ export class ClockSyncEstimator {
       const offset = ((t1 - t0) + (t2 - t3)) / 2;
       const rtt = (t3 - t0) - (t2 - t1);
       samples.push({ offsetMs: offset, rttMs: rtt });
-      if (onSample !== undefined) {
-        onSample(offset, rtt);
-      }
       if (i + 1 < sampleCount) {
         await ClockSyncEstimator.delay(20);
       }

@@ -1572,8 +1572,7 @@ export class SessionController {
       async (id, clientMono) => {
         return await this.sendPing(id, clientMono);
       },
-      sampleCount,
-      (offsetMs, rttMs) => this.clockSync.recordSample(offsetMs, rttMs)
+      sampleCount
     );
     this.clockSyncWork = work;
     this.clockSyncWorkSampleCount = sampleCount;
@@ -1670,7 +1669,7 @@ export class SessionController {
       const sample = await this.measureClockSync(5);
       const delta = Math.abs(sample.offsetMs - this.clockSync.getOffsetMs());
       if (delta > 3) {
-        this.clockSync.smoothAdjust(sample.offsetMs);
+        this.clockSync.smoothAdjust(sample);
       } else {
         this.clockSync.applySample(sample);
       }

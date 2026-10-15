@@ -32,7 +32,6 @@ function harness(leader = false) {
     offset = 7;
     getOffsetMs() { return this.offset; }
     getRttMs() { return 2; }
-    recordSample() {}
     applySample(sample) { this.offset = sample.offsetMs + 0.25; }
     static measureWithSender(_sender, count) {
       measurements.push(count);

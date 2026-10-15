@@ -72,11 +72,47 @@ offset(t) ≈ skewRefOffsetMs + skewPpm * (t - skewRefAtMs) / 1e6
 
 `getOffsetAt(t)` 按此投影，把「固定偏移」升级为「随时间漂移的偏移」。
 
+拟合输入与约束（2026-10-15 修复，见 §3.4）：
+
+- 只记录每次测量经 `medianFromSamples` 过滤后的结果（`applySample` / `smoothAdjust`），**不记录单个原始 ping**。
+- 加权最小二乘，权重 `1 / max(4, rtt)²`：单次测量误差上界正比于 `rtt/2`，慢链路结果不能与快链路结果等权。
+- NTP 一致性重置：真实 offset 必落在 `[offset − rtt/2, offset + rtt/2]`。新结果与拟合投影之差超过 `rtt/2 + 5ms` 时，历史窗口已被证伪，清空后从新结果重新拟合，并打印 `[ClockFitDiag] action=reset`。
+
 ### 3.3 采样与重采样
 
 - `PING_SAMPLES = 11`：起拍前的完整采样次数。测量包含 RTT 和样本间隔，实际耗时随链路变化，不能假定必在约 300ms 内完成；也可能复用已在途的轻量同步。
 - `RESYNC_INTERVAL_MS = 5000`：行进中每 5s 重采样，抑制晶振与网络变化的长期漂移。
 - 网络质量分级：`rtt < 50` good / `< 150` fair / 其余 poor。
+
+### 3.4 案例：队员切回前台后首次开始失败、随后拍子错位约 120ms（2026-10-15）
+
+现象：两端都戴蓝牙耳机，多次开始/暂停都能对齐；12:53 这一次先弹「开始失败」toast，紧接着重试开始后拍子明显错位，之后再次开始又恢复对齐。
+
+日志证据（队员 `[TransportPrepareDiag] role=member`）：
+
+| prepare | elapsedMs | offsetBeforeMs | sampleOffsetMs（过滤后中位数） | usedOffsetMs | rttMs |
+|---|---|---|---|---|---|
+| 18（12:51:30，正常） | 744 | 87230317.01 | 87230308.00 | 87230317.66 | 12 |
+| 19（12:52:50，队长侧超时） | 3535 | 87230162.91 | 87230307.00 | 87230159.64 | 22 |
+| 20（12:52:54，用于 seq=11 开拍） | 1820 | 87230159.76 | 87230308.50 | 87230189.82 | 17 |
+| 21（12:53:13，暂停） | 588 | 87230250.24 | 87230308.00 | 87230277.02 | 14 |
+
+- 12:52:38–41 队员连续 4 次 `[AudioRouteDiag] action=playback-warmup`（路由未变），说明队员刚从后台/息屏切回前台；`handleAppForeground` 立即触发一次轻量重采样，此时 P2P 链路尚在唤醒，单次 ping 很慢（prepare-19 采 11 个 ping 用了 3.5s，正常约 0.6s）。
+- 队长 `transport-prepare-19` 4001ms `reason=timeout`：`TRANSPORT_PREPARE` 送达和 11 次 ping 都很慢，严格准备按设计 fail-closed，弹出开始失败 toast。这一步本身是正确行为。
+- 关键缺陷：过滤后中位数一直正确（≈87230308，rtt 12–22ms），但 `usedOffsetMs` 偏低约 150ms，且 `applySample(中位数)` 之后几乎不动。seq=11 实际用的 `offsetMs=87230193.8` 比真值小约 115ms，队员因此比队长晚约 115ms 发声，拍子混乱。约 60s 后脏样本滑出窗口，才逐步恢复。
+
+根因：`measureWithSender` 通过 `onSample` 把**每个原始 ping** 都写进 skew 拟合窗口（60s），并且等权参与回归；`getOffsetMs()` 有拟合时返回回归投影，而不是刚测出的中位数。链路唤醒期间的原始 ping 不对称时延可达数百毫秒，拉偏整个回归；一个 rtt=22ms 的新中位数在十几个等权脏点里只占一票，因此 `usedOffsetMs` 停留在错误值。
+
+修复（`entry/src/main/ets/sync/ClockSync.ets`、`SessionController.ets`）：
+
+1. 移除原始 ping 回调，只把过滤后的测量结果写入拟合窗口。
+2. 回归按 `1/rtt²` 加权。
+3. 新结果与投影超出 NTP 区间（`rtt/2 + 5ms`）时清空窗口，以新结果为准，打印 `[ClockFitDiag] action=reset`。
+4. `smoothAdjust` 改为接收完整样本，记录真实 rtt，不再沿用上一次的 rtt。
+
+回归测试：`scripts/tests/clock-sync-fit.cjs` 回放该序列。旧实现中，单个 rtt=380ms 的结果就能把 offset 拖偏 48ms；新实现下偏差小于 3ms，且被污染的窗口会被新中位数直接重置。
+
+复测：队员息屏或切后台约 1 分钟后回到行进页，立即开始。若首次因链路唤醒超时，属于预期内的 fail-closed；重试后应对齐。队员日志中 `usedOffsetMs` 应与 `sampleOffsetMs` 相差不超过 `rtt/2 + 5ms`，必要时会出现一条 `[ClockFitDiag] action=reset`。
 
 ---
 
