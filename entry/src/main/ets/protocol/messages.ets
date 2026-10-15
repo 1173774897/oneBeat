@@ -69,6 +69,10 @@ export interface TransportPayload {
 
 export interface TransportPreparePayload {
   id: string;
+  /** 新起拍要求明确成功，缺省保留旧队长有界等待后继续的协议行为。 */
+  requireClockReady?: boolean;
+  /** 严格请求的 ACK 必须明确报告测量成功，失败不能冒充准备完成。 */
+  clockReady?: boolean;
 }
 
 export interface TransportPausePayload {

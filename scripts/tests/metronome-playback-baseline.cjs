@@ -154,9 +154,10 @@ async function run(version, route, micExact, entry, compensation) {
     firstClick: Array.from(new Int16Array(pcm)).findIndex(sample => sample !== 0),
     now: f.clock.now,
     trace: f.trace,
-    // The added clock snapshot is read-only observability. Retain every prior
-    // log and the full audio API trace so diagnostics cannot hide a hot-path change.
-    logs: f.logs.filter(text => !text.startsWith('[ProductionClockDiag]')),
+    // Added diagnostics are read-only observability. Retain every prior log and
+    // the full audio API trace so diagnostics cannot hide a hot-path change.
+    logs: f.logs.filter(text => !text.startsWith('[ProductionClockDiag]') &&
+      !text.startsWith('[StartTimingDiag]')),
     mapExact: e.lastAudioFrameMapExact ?? false
   };
 }

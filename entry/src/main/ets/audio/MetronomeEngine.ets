@@ -187,6 +187,36 @@ interface PendingAudioTransition {
   timelineElapsedFrames?: number;
 }
 
+type StartTargetMode = 'timestamp' | 'fallback' | 'cold-wall';
+
+/** Read-only evidence from the same calculation that selects a playback target. */
+interface StartTargetEstimate {
+  token: number;
+  mode: StartTargetMode;
+  queryMonoMs: number;
+  targetHardwareMs: number;
+  requestedFrame: number;
+  submittedAtEstimate: number;
+  selectedFrame: number;
+  playedFrame: number;
+}
+
+interface StartTimingRequest {
+  token: number;
+  sequence: number;
+  requestedAtMs: number;
+  timerDueAtMs: number;
+  timerFiredAtMs: number;
+  operationStartedAtMs: number;
+}
+
+interface StartTimingTransition {
+  transition: PendingAudioTransition;
+  estimate: StartTargetEstimate;
+  audibleMs: number;
+  sequence: number;
+}
+
 interface RouteProbePreparation {
   completion: Promise<void>;
   started: boolean;
@@ -203,6 +233,10 @@ interface RouteRephaseSelection {
 }
 
 export class MetronomeEngine {
+  private startTimingSequence: number = 0;
+  private startTimingRequest: StartTimingRequest | undefined = undefined;
+  private startTargetEstimate: StartTargetEstimate | undefined = undefined;
+  private startTimingTransition: StartTimingTransition | undefined = undefined;
   private renderer: audio.AudioRenderer | undefined = undefined;
   private rendererInitialization: Promise<audio.AudioRenderer> | undefined = undefined;
   private rendererWriteDataCallback: audio.AudioRendererWriteDataCallback | undefined = undefined;
@@ -1109,7 +1143,13 @@ export class MetronomeEngine {
 
   async scheduleFromLeaderStart(startAtLeaderMonoMs: number, beatIndex: number,
     countInBeats: number = 0, outputCompensationOverrideMs?: number): Promise<void> {
+    const requestedAtMs = MonotonicClock.nowMs();
     const token = this.beginTransport();
+    const timing: StartTimingRequest = {
+      token, sequence: ++this.startTimingSequence, requestedAtMs,
+      timerDueAtMs: -1, timerFiredAtMs: -1, operationStartedAtMs: -1
+    };
+    this.startTimingRequest = timing;
     try {
       await this.ensureRenderer();
     } catch (err) {
@@ -1146,13 +1186,24 @@ export class MetronomeEngine {
       this.renderer?.state === audio.AudioState.STATE_RUNNING;
     const audioDelay = rendererAlreadyRunning ? 0 :
       Math.max(0, localStart - MonotonicClock.nowMs() - AUDIO_PREROLL_MS);
+    console.info(`[StartTimingDiag] stage=schedule seq=${timing.sequence} token=${token} ` +
+      `requestedAtMs=${requestedAtMs.toFixed(1)} nowMonoMs=${now.toFixed(1)} ` +
+      `leaderAudibleMs=${startAtLeaderMonoMs.toFixed(1)} audibleMs=${localStart.toFixed(1)} ` +
+      `offsetMs=${this.offsetMs.toFixed(1)} remainingAudibleMs=${(localStart - now).toFixed(1)} ` +
+      `requestWaitMs=${(now - requestedAtMs).toFixed(1)} rendererRunning=${rendererAlreadyRunning} ` +
+      `physicalStartCount=${this.rendererPhysicalStartCount} ` +
+      `compensationOverrideMs=${outputCompensationOverrideMs ?? 'saved-or-platform'}`);
     if (DEBUG) {
       console.info(`OneBeatSync schedule offsetMs=${this.offsetMs.toFixed(2)} ` +
         `startAtLeader=${startAtLeaderMonoMs.toFixed(2)}ms localStart=${localStart.toFixed(2)}ms ` +
         `now=${now.toFixed(2)}ms audioDelay=${audioDelay.toFixed(2)}ms ` +
         `countIn=${countInBeats} beat=${firstBeatIndex} bpm=${this.transportBpm.toFixed(1)}`);
     }
+    timing.timerDueAtMs = MonotonicClock.nowMs() + audioDelay;
     this.audioStartTimerId = setTimeout(() => {
+      timing.timerFiredAtMs = MonotonicClock.nowMs();
+      console.info(`[StartTimingDiag] stage=timer seq=${timing.sequence} token=${token} ` +
+        `timerLateMs=${(timing.timerFiredAtMs - timing.timerDueAtMs).toFixed(1)}`);
       void this.startAudioStream(localStart, firstBeatIndex, remainingCountInBeats, token,
         outputCompensationOverrideMs);
     }, audioDelay);
@@ -1209,6 +1260,9 @@ export class MetronomeEngine {
 
   private beginTransport(): number {
     this.cancelTimers();
+    this.startTimingRequest = undefined;
+    this.startTargetEstimate = undefined;
+    this.startTimingTransition = undefined;
     this.runToken++;
     this.running = true;
     this.pendingAudioTransition = undefined;
@@ -1220,6 +1274,9 @@ export class MetronomeEngine {
     this.audioStreaming = false;
     this.pendingAudioTransition = undefined;
     this.calibrationSignal = undefined;
+    this.startTimingRequest = undefined;
+    this.startTargetEstimate = undefined;
+    this.startTimingTransition = undefined;
     this.runToken++;
     this.cancelTimers();
   }
@@ -1248,6 +1305,9 @@ export class MetronomeEngine {
         return;
       }
       const now = MonotonicClock.nowMs();
+      if (this.startTimingRequest?.token === token) {
+        this.startTimingRequest.operationStartedAtMs = now;
+      }
       const rendererHealthy = this.rendererStarted &&
         renderer.state === audio.AudioState.STATE_RUNNING &&
         now - this.lastWriteProgressMs < AUDIO_CALLBACK_STALL_MS;
@@ -1285,6 +1345,7 @@ export class MetronomeEngine {
         };
         this.scheduleRunningTransition(transition);
         this.logProductionClockDiagnostic('continuous-play', localAudibleStart);
+        this.logStartTimingTarget('continuous', transition, localAudibleStart, outputCompensationMs);
         if (DEBUG) {
           console.info(`OneBeatSync transition[continuous] audible=${localAudibleStart.toFixed(2)}ms ` +
             `hardware=${hardwareStartAt.toFixed(2)}ms targetFrame=${transition.targetFrame} ` +
@@ -1318,16 +1379,20 @@ export class MetronomeEngine {
     this.audioStreaming = false;
     const outputCompensationMs = outputCompensationOverrideMs ?? this.outputLatencyMs;
     const provisionalHardwareStart = localAudibleStart - outputCompensationMs;
+    const requestedFrame = Math.round((provisionalHardwareStart - rendererStartRequestedAtMs) *
+      SAMPLE_RATE / 1000);
     const provisionalTransition: PendingAudioTransition = {
       kind: 'play',
       token: token,
-      targetFrame: Math.max(0,
-        Math.round((provisionalHardwareStart - rendererStartRequestedAtMs) * SAMPLE_RATE / 1000)),
+      targetFrame: Math.max(0, requestedFrame),
       beatIndex: beatIndex,
       countInBeats: countInBeats,
       outputLatencyMs: outputCompensationMs
     };
+    this.cacheStartTargetEstimate('cold-wall', rendererStartRequestedAtMs, provisionalHardwareStart,
+      0, requestedFrame, provisionalTransition.targetFrame);
     this.scheduleRunningTransition(provisionalTransition);
+    this.logStartTimingTarget('cold-provisional', provisionalTransition, localAudibleStart, outputCompensationMs);
     try {
       this.rendererPhysicalStartCount++;
       await renderer.start();
@@ -1731,6 +1796,18 @@ export class MetronomeEngine {
     this.audioSequenceTransportRevision = this.transportRevision;
     this.lastAudioPlayheadMs = 0;
     this.lastAudioSampleMonoMs = this.transportStartLocalMs;
+    const startTiming = this.startTimingTransition;
+    if (startTiming?.transition === transition) {
+      this.startTimingTransition = undefined;
+      const appliedMonoMs = MonotonicClock.nowMs();
+      console.info(`[StartTimingDiag] stage=applied seq=${startTiming.sequence} token=${transition.token} ` +
+        `beat=${transition.beatIndex} targetFrame=${transition.targetFrame} submittedFrame=${this.audioSubmittedFrames} ` +
+        `appliedMonoMs=${appliedMonoMs.toFixed(1)} audibleLeadMs=${(startTiming.audibleMs - appliedMonoMs).toFixed(1)} ` +
+        `estimatedFrameDeadlineDeltaMs=${(appliedMonoMs - startTiming.estimate.targetHardwareMs).toFixed(1)} ` +
+        `clampMs=${(Math.max(0, transition.targetFrame - startTiming.estimate.requestedFrame) * 1000 / SAMPLE_RATE).toFixed(2)} ` +
+        `rendererEpoch=${this.rendererEpoch} streamId=${this.rendererStreamId} ` +
+        `physicalStartCount=${this.rendererPhysicalStartCount} audioClockLocked=${this.audioClockLocked}`);
+    }
     if (transition.routeRephase) {
       const now = MonotonicClock.nowMs();
       this.lastAudioPlayheadMs = now - this.transportStartLocalMs;
@@ -1775,10 +1852,12 @@ export class MetronomeEngine {
           `hardware=${hardwareStartAt.toFixed(2)}ms platform=${platformLatency}ms ` +
           `calibrated=${getCalibrationMs()}ms inputLatency=${getInputLatencyMs()}ms ` +
           `delta=${(outputCompensationMs - platformLatency).toFixed(1)}ms`);
-        const targetFrame = Math.max(this.audioSubmittedFrames,
-          Math.round(playedFramesNow + (hardwareStartAt - now) * SAMPLE_RATE / 1000));
+        const requestedFrame = Math.round(playedFramesNow + (hardwareStartAt - now) * SAMPLE_RATE / 1000);
+        const targetFrame = Math.max(this.audioSubmittedFrames, requestedFrame);
+        this.cacheStartTargetEstimate('timestamp', now, hardwareStartAt, playedFramesNow, requestedFrame, targetFrame);
         this.updatePendingPlayTransition(targetFrame, outputCompensationMs, token);
         this.logProductionClockDiagnostic('cold-lock', localAudibleStart);
+        this.logStartTimingTarget('cold-lock', this.pendingAudioTransition, localAudibleStart, outputCompensationMs);
         const actualAudibleMs = now + (targetFrame - playedFramesNow) * 1000 / SAMPLE_RATE +
           outputCompensationMs;
         if (DEBUG) {
@@ -1834,15 +1913,17 @@ export class MetronomeEngine {
       `hardware=${hardwareStartAt.toFixed(2)}ms platform=${platformLatency}ms ` +
       `calibrated=${getCalibrationMs()}ms inputLatency=${getInputLatencyMs()}ms ` +
       `delta=${(outputCompensationMs - platformLatency).toFixed(1)}ms`);
-    this.scheduleRunningTransition({
+    const transition: PendingAudioTransition = {
       kind: 'play',
       token: token,
       targetFrame: this.estimateTargetStreamFrame(hardwareStartAt),
       beatIndex: beatIndex,
       countInBeats: countInBeats,
       outputLatencyMs: outputCompensationMs
-    });
+    };
+    this.scheduleRunningTransition(transition);
     this.logProductionClockDiagnostic('cold-settle', localAudibleStart);
+    this.logStartTimingTarget('cold-settle', transition, localAudibleStart, outputCompensationMs);
   }
 
   private scheduleRunningTransition(transition: PendingAudioTransition): void {
@@ -1851,6 +1932,7 @@ export class MetronomeEngine {
     }
     transition.targetFrame = Math.max(this.audioSubmittedFrames, transition.targetFrame);
     this.pendingAudioTransition = transition;
+    this.startTimingTransition = undefined;
   }
 
   private updatePendingPlayTransition(targetFrame: number, outputLatencyMs: number, token: number): void {
@@ -1868,13 +1950,57 @@ export class MetronomeEngine {
     if (renderer !== undefined && this.rendererStarted) {
       const played = this.readRenderedStreamFrames(renderer, now);
       if (played !== undefined) {
-        return Math.max(this.audioSubmittedFrames,
-          Math.round(played + (targetHardwareAtMs - now) * SAMPLE_RATE / 1000));
+        const requestedFrame = Math.round(played + (targetHardwareAtMs - now) * SAMPLE_RATE / 1000);
+        const selectedFrame = Math.max(this.audioSubmittedFrames, requestedFrame);
+        this.cacheStartTargetEstimate('timestamp', now, targetHardwareAtMs, played, requestedFrame, selectedFrame);
+        return selectedFrame;
       }
     }
-    return Math.max(this.audioSubmittedFrames,
-      Math.round(this.audioSubmittedFrames + (targetHardwareAtMs - now) * SAMPLE_RATE / 1000 -
-        this.queueDepthFrames));
+    const requestedFrame = Math.round(this.audioSubmittedFrames +
+      (targetHardwareAtMs - now) * SAMPLE_RATE / 1000 - this.queueDepthFrames);
+    const selectedFrame = Math.max(this.audioSubmittedFrames, requestedFrame);
+    this.cacheStartTargetEstimate('fallback', now, targetHardwareAtMs,
+      this.audioSubmittedFrames - this.queueDepthFrames, requestedFrame, selectedFrame);
+    return selectedFrame;
+  }
+
+  private cacheStartTargetEstimate(mode: StartTargetMode, queryMonoMs: number,
+    targetHardwareMs: number, playedFrame: number, requestedFrame: number, selectedFrame: number): void {
+    this.startTargetEstimate = { token: this.runToken, mode, queryMonoMs, targetHardwareMs,
+      playedFrame, requestedFrame, selectedFrame, submittedAtEstimate: this.audioSubmittedFrames };
+  }
+
+  private logStartTimingTarget(path: string, transition: PendingAudioTransition | undefined,
+    audibleMs: number, compensationMs: number): void {
+    // Reuse the exact target-selection sample. Another timestamp/latency query
+    // here would perturb the short first-start margin we are investigating.
+    const estimate = this.startTargetEstimate;
+    if (estimate === undefined || estimate.token !== this.runToken) {
+      return;
+    }
+    const request = this.startTimingRequest?.token === this.runToken ? this.startTimingRequest : undefined;
+    const targetPending = transition !== undefined && transition.kind === 'play' &&
+      transition.token === this.runToken && this.pendingAudioTransition === transition;
+    const committedFrame = targetPending && transition !== undefined ? transition.targetFrame : estimate.selectedFrame;
+    if (targetPending && transition !== undefined) {
+      this.startTimingTransition = { transition, estimate, audibleMs, sequence: request?.sequence ?? 0 };
+    }
+    const timerLateMs = request !== undefined && request.timerFiredAtMs >= 0 ?
+      request.timerFiredAtMs - request.timerDueAtMs : -1;
+    const operationWaitMs = request !== undefined && request.timerFiredAtMs >= 0 ?
+      request.operationStartedAtMs - request.timerFiredAtMs : -1;
+    console.info(`[StartTimingDiag] stage=target path=${path} seq=${request?.sequence ?? 0} token=${this.runToken} ` +
+      `mode=${estimate.mode} queryMonoMs=${estimate.queryMonoMs.toFixed(1)} ` +
+      `targetHardwareMs=${estimate.targetHardwareMs.toFixed(1)} audibleMs=${audibleMs.toFixed(1)} compensationMs=${compensationMs} ` +
+      `requestedFrame=${estimate.requestedFrame} submittedAtEstimate=${estimate.submittedAtEstimate} ` +
+      `selectedFrame=${estimate.selectedFrame} committedFrame=${committedFrame} targetPending=${targetPending} ` +
+      `headroomMs=${((estimate.requestedFrame - estimate.submittedAtEstimate) * 1000 / SAMPLE_RATE).toFixed(2)} ` +
+      `clampMs=${(Math.max(0, committedFrame - estimate.requestedFrame) * 1000 / SAMPLE_RATE).toFixed(2)} ` +
+      `queueEstimateMs=${((estimate.submittedAtEstimate - estimate.playedFrame) * 1000 / SAMPLE_RATE).toFixed(1)} ` +
+      `remainingAudibleMs=${(audibleMs - estimate.queryMonoMs).toFixed(1)} ` +
+      `timerLateMs=${timerLateMs.toFixed(1)} operationWaitMs=${operationWaitMs.toFixed(1)} ` +
+      `rendererEpoch=${this.rendererEpoch} streamId=${this.rendererStreamId} ` +
+      `physicalStartCount=${this.rendererPhysicalStartCount} audioClockLocked=${this.audioClockLocked}`);
   }
 
   private static delay(ms: number): Promise<void> {

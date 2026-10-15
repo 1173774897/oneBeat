@@ -9,7 +9,8 @@ import {
   TRANSPORT_PREPARE_TIMEOUT_MS,
   TRANSPORT_PAUSE_PREROLL_MS,
   TRANSPORT_PREROLL_MS,
-  TRANSPORT_RESTART_PREROLL_MS
+  TRANSPORT_RESTART_PREROLL_MS,
+  TRANSPORT_START_PREPARE_TIMEOUT_MS
 } from '../common/Constants';
 import { DEBUG } from 'BuildProfile';
 import { MonotonicClock } from '../common/MonotonicClock';
@@ -77,11 +78,16 @@ export interface ProDrumEditorSettings {
   bpm: number;
 }
 
+type TransportPreparationResult = 'ready' | 'timeout' | 'failed' | 'cancelled' | 'disconnected';
+
 interface TransportPrepareWaiter {
   id: string;
   pendingConnectionIds: Set<string>;
+  startedAtMs: number;
+  peerCount: number;
+  requireClockReady: boolean;
   timerId: number;
-  resolve: () => void;
+  resolve: (result: TransportPreparationResult) => void;
 }
 
 const SOLO_BOT_ID_PREFIX: string = 'solo-bot-';
@@ -119,7 +125,13 @@ export class SessionController {
   private proDrumEditorSettings: ProDrumEditorSettings | undefined = undefined;
   private nextTransportPrepareId: number = 0;
   private transportPrepareWaiter: TransportPrepareWaiter | undefined = undefined;
+  // An exited or superseded command cannot publish after its preparation promise
+  // settles, including the microtask gap after a successful READY.
+  private transportRequestGeneration: number = 0;
   private clockSyncWork: Promise<SyncSample> | undefined = undefined;
+  // Diagnostic metadata only: transport preparation can inherit an in-flight
+  // light resync, so the requested count does not prove how many samples ran.
+  private clockSyncWorkSampleCount: number = 0;
   private transportPauseTimer: number = -1;
   private remoteSessionEndReason: RemoteSessionEndReason | undefined = undefined;
   private readonly pendingDisbandAcks: Set<string> = new Set();
@@ -471,6 +483,8 @@ export class SessionController {
     if (!this.isLeader || (!this.soloTeam && !this.lobbyDeparted)) {
       return;
     }
+    this.transportRequestGeneration += 1;
+    this.finishTransportPreparation();
     this.cancelScheduledPauseState();
     if (!this.soloTeam) {
       const pausePayload: TransportPausePayload = {
@@ -719,6 +733,7 @@ export class SessionController {
   }
 
   async disconnect(): Promise<void> {
+    this.transportRequestGeneration += 1;
     this.randomAvatarRevealsActive = false;
     this.stopRandomAvatarRevealTimer();
     this.revealedRandomAvatars.clear();
@@ -866,10 +881,17 @@ export class SessionController {
     // Configure every peer first, then restart on a shared future downbeat. Applying
     // on packet receipt would let network latency put devices in different bars.
     // 发送前先强制队员重采样时钟偏移，避免重启时刻 offset 陈旧导致即使有充足 preroll 仍偏。
+    const generation = ++this.transportRequestGeneration;
     this.cancelScheduledPauseState();
     await this.prepareConnectedMembersForTransport();
+    if (generation !== this.transportRequestGeneration) {
+      return;
+    }
     this.state = 'countdown';
     await this.broadcastSnapshot();
+    if (generation !== this.transportRequestGeneration) {
+      return;
+    }
     const nextBarBeatIndex = (Math.floor(this.beatIndex / this.beatsPerBar) + 1) * this.beatsPerBar;
     this.beatIndex = nextBarBeatIndex;
     const restartAt = MonotonicClock.nowMs() + TRANSPORT_RESTART_PREROLL_MS;
@@ -925,8 +947,12 @@ export class SessionController {
     if (!this.isLeader) {
       return 0;
     }
+    const generation = ++this.transportRequestGeneration;
+    const prepared = await this.prepareConnectedMembersForTransport(true);
+    if (!this.canPublishPreparedStart(prepared, generation)) {
+      return 0;
+    }
     this.cancelScheduledPauseState();
-    await this.prepareConnectedMembersForTransport();
     this.state = 'countdown';
     // 全新起拍从第一小节 downbeat（第 1 拍）开始，避免沿用上一次停在中途的拍号
     this.beatIndex = 0;
@@ -940,6 +966,9 @@ export class SessionController {
       countInBeats: countInBeats
     };
     await this.sendToAll(createMessage('TRANSPORT', payload));
+    if (generation !== this.transportRequestGeneration) {
+      return 0;
+    }
     AppStorage.setOrCreate('lastTransportMessage', JSON.stringify(createMessage('TRANSPORT', payload)));
     await this.broadcastSnapshot();
     return startAt;
@@ -949,7 +978,11 @@ export class SessionController {
     if (!this.isLeader) {
       return;
     }
+    const generation = ++this.transportRequestGeneration;
     await this.prepareConnectedMembersForTransport();
+    if (generation !== this.transportRequestGeneration) {
+      return;
+    }
     const pauseAt = MonotonicClock.nowMs() + TRANSPORT_PAUSE_PREROLL_MS;
     const payload: TransportPausePayload = {
       pauseAtLeaderMonoMs: pauseAt,
@@ -966,8 +999,12 @@ export class SessionController {
     if (!this.isLeader) {
       return 0;
     }
+    const generation = ++this.transportRequestGeneration;
+    const prepared = await this.prepareConnectedMembersForTransport(true);
+    if (!this.canPublishPreparedStart(prepared, generation)) {
+      return 0;
+    }
     this.cancelScheduledPauseState();
-    await this.prepareConnectedMembersForTransport();
     this.state = 'countdown';
     // 恢复时把拍号对齐到下一小节 downbeat，保证 count-in 结束后主循环从第 1 拍（小节头）切入
     this.beatIndex = Math.ceil(this.beatIndex / this.beatsPerBar) * this.beatsPerBar;
@@ -980,9 +1017,22 @@ export class SessionController {
     };
     const wire = createMessage('TRANSPORT_RESUME', payload);
     await this.sendToAll(wire);
+    if (generation !== this.transportRequestGeneration) {
+      return 0;
+    }
     AppStorage.setOrCreate('lastTransportMessage', JSON.stringify(wire));
     await this.broadcastSnapshot();
     return resumeAt;
+  }
+
+  private canPublishPreparedStart(result: TransportPreparationResult, generation: number): boolean {
+    if (generation !== this.transportRequestGeneration || result === 'cancelled' || result === 'disconnected') {
+      return false;
+    }
+    if (result !== 'ready') {
+      throw new Error('队员时钟准备未完成，请稍后重试');
+    }
+    return true;
   }
 
   completeCountIn(index: number): void {
@@ -1122,9 +1172,16 @@ export class SessionController {
       const ready = message.payload as TransportPreparePayload;
       const waiter = this.transportPrepareWaiter;
       if (waiter !== undefined && ready.id === waiter.id) {
+        if (!waiter.pendingConnectionIds.has(connection.id)) {
+          return;
+        }
+        if (waiter.requireClockReady && ready.clockReady !== true) {
+          this.finishTransportPreparation(waiter.id, 'failed');
+          return;
+        }
         waiter.pendingConnectionIds.delete(connection.id);
         if (waiter.pendingConnectionIds.size === 0) {
-          this.finishTransportPreparation(waiter.id);
+          this.finishTransportPreparation(waiter.id, 'ready');
         }
       }
       return;
@@ -1369,50 +1426,77 @@ export class SessionController {
     return key === 'neon_street' ? 'neon_street' : 'sunset_coast';
   }
 
-  private async prepareConnectedMembersForTransport(): Promise<void> {
-    if (this.soloTeam || this.authenticatedConnections.size === 0) {
-      return;
-    }
+  private async prepareConnectedMembersForTransport(requireClockReady: boolean = false): Promise<TransportPreparationResult> {
     this.finishTransportPreparation();
+    if (this.soloTeam || this.authenticatedConnections.size === 0) {
+      return 'ready';
+    }
     const pendingConnectionIds = new Set<string>();
     this.authenticatedConnections.forEach((connectionId: string) => {
       pendingConnectionIds.add(connectionId);
     });
     const id = `transport-prepare-${++this.nextTransportPrepareId}-${Math.round(MonotonicClock.nowMs())}`;
-    let resolveReady: () => void = () => {};
-    const ready = new Promise<void>((resolve) => {
+    let resolveReady: (result: TransportPreparationResult) => void = () => {};
+    const ready = new Promise<TransportPreparationResult>((resolve) => {
       resolveReady = resolve;
     });
     const waiter: TransportPrepareWaiter = {
       id: id,
       pendingConnectionIds: pendingConnectionIds,
+      startedAtMs: MonotonicClock.nowMs(),
+      peerCount: pendingConnectionIds.size,
+      requireClockReady: requireClockReady,
       timerId: -1,
       resolve: resolveReady
     };
     this.transportPrepareWaiter = waiter;
+    console.info(`[TransportPrepareDiag] role=leader stage=begin id=${id} peers=${waiter.peerCount} ` +
+      `pending=${pendingConnectionIds.size} requireClockReady=${requireClockReady}`);
+    const timeoutMs = requireClockReady ? TRANSPORT_START_PREPARE_TIMEOUT_MS : TRANSPORT_PREPARE_TIMEOUT_MS;
     waiter.timerId = setTimeout(() => {
-      this.finishTransportPreparation(id);
-    }, TRANSPORT_PREPARE_TIMEOUT_MS);
+      this.finishTransportPreparation(id, 'timeout');
+    }, Math.max(0, waiter.startedAtMs + timeoutMs - MonotonicClock.nowMs()));
 
-    const wire = createMessage('TRANSPORT_PREPARE', { id: id } as TransportPreparePayload);
+    const wire = createMessage('TRANSPORT_PREPARE', {
+      id: id,
+      requireClockReady: requireClockReady ? true : undefined
+    } as TransportPreparePayload);
     const connections = this.server.getConnections();
     for (let i = 0; i < connections.length; i++) {
       if (!pendingConnectionIds.has(connections[i].id)) {
         continue;
       }
       try {
-        await connections[i].send(wire);
+        const connectionId = connections[i].id;
+        // A native send can remain pending after the total preparation budget.
+        // Its late completion or rejection belongs only to this waiter.
+        void connections[i].send(wire).catch(() => {
+          if (this.transportPrepareWaiter !== waiter) {
+            return;
+          }
+          if (requireClockReady) {
+            this.finishTransportPreparation(id, 'failed');
+          } else {
+            this.releaseTransportPreparationConnection(connectionId);
+          }
+        });
       } catch (_e) {
-        this.releaseTransportPreparationConnection(connections[i].id);
+        if (this.transportPrepareWaiter === waiter) {
+          if (requireClockReady) {
+            this.finishTransportPreparation(id, 'failed');
+          } else {
+            this.releaseTransportPreparationConnection(connections[i].id);
+          }
+        }
       }
     }
     if (pendingConnectionIds.size === 0) {
-      this.finishTransportPreparation(id);
+      this.finishTransportPreparation(id, 'ready');
     }
-    await ready;
+    return await ready;
   }
 
-  private finishTransportPreparation(expectedId?: string): void {
+  private finishTransportPreparation(expectedId?: string, reason: TransportPreparationResult = 'cancelled'): void {
     const waiter = this.transportPrepareWaiter;
     if (waiter === undefined || (expectedId !== undefined && waiter.id !== expectedId)) {
       return;
@@ -1421,7 +1505,10 @@ export class SessionController {
     if (waiter.timerId >= 0) {
       clearTimeout(waiter.timerId);
     }
-    waiter.resolve();
+    console.info(`[TransportPrepareDiag] role=leader stage=finish id=${waiter.id} reason=${reason} ` +
+      `peers=${waiter.peerCount} pending=${waiter.pendingConnectionIds.size} ` +
+      `elapsedMs=${(MonotonicClock.nowMs() - waiter.startedAtMs).toFixed(1)}`);
+    waiter.resolve(reason);
   }
 
   private releaseTransportPreparationConnection(connectionId: string): void {
@@ -1429,25 +1516,47 @@ export class SessionController {
     if (waiter === undefined) {
       return;
     }
+    if (waiter.requireClockReady && waiter.pendingConnectionIds.has(connectionId)) {
+      this.finishTransportPreparation(waiter.id, 'disconnected');
+      return;
+    }
     waiter.pendingConnectionIds.delete(connectionId);
     if (waiter.pendingConnectionIds.size === 0) {
-      this.finishTransportPreparation(waiter.id);
+      this.finishTransportPreparation(waiter.id, 'disconnected');
     }
   }
 
   private async handleTransportPreparation(payload: TransportPreparePayload): Promise<void> {
+    const startedAtMs = MonotonicClock.nowMs();
+    const offsetBeforeMs = this.clockSync.getOffsetMs();
+    const reused = this.clockSyncWork !== undefined;
+    const actualSampleCount = reused ? this.clockSyncWorkSampleCount : PING_SAMPLES;
+    let result = 'failure';
+    let sampleOffset = 'unavailable';
+    let sampleRtt = 'unavailable';
     try {
       const sample = await this.measureClockSync(PING_SAMPLES);
+      sampleOffset = sample.offsetMs.toFixed(2);
+      sampleRtt = sample.rttMs.toFixed(2);
       this.clockSync.applySample(sample);
       this.scheduleRandomAvatarReveals();
       this.notifyUi();
+      result = 'success';
     } catch (_e) {
-      // The leader has a bounded wait and will use the last valid offset if a
-      // fresh exchange is interrupted by a transient network failure.
+      // Best-effort pause preparation can retain the last valid offset. A strict
+      // start instead receives an explicit failure ACK and publishes no deadline.
     }
+    console.info(`[TransportPrepareDiag] role=member stage=finish id=${payload.id} result=${result} ` +
+      `requestedSampleCount=${PING_SAMPLES} actualSampleCount=${actualSampleCount} reused=${reused} ` +
+      `elapsedMs=${(MonotonicClock.nowMs() - startedAtMs).toFixed(1)} ` +
+      `offsetBeforeMs=${offsetBeforeMs.toFixed(2)} sampleOffsetMs=${sampleOffset} ` +
+      `usedOffsetMs=${this.clockSync.getOffsetMs().toFixed(2)} rttMs=${sampleRtt}`);
     if (this.isMemberTransportConnected()) {
       try {
-        await this.sendToLeader(createMessage('TRANSPORT_READY', { id: payload.id } as TransportPreparePayload));
+        await this.sendToLeader(createMessage('TRANSPORT_READY', {
+          id: payload.id,
+          clockReady: payload.requireClockReady === true ? result === 'success' : undefined
+        } as TransportPreparePayload));
       } catch (_e) {
         // A closed connection no longer participates in the leader's waiter.
       }
@@ -1467,11 +1576,13 @@ export class SessionController {
       (offsetMs, rttMs) => this.clockSync.recordSample(offsetMs, rttMs)
     );
     this.clockSyncWork = work;
+    this.clockSyncWorkSampleCount = sampleCount;
     try {
       return await work;
     } finally {
       if (this.clockSyncWork === work) {
         this.clockSyncWork = undefined;
+        this.clockSyncWorkSampleCount = 0;
       }
     }
   }

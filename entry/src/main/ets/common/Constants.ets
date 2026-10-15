@@ -20,3 +20,5 @@ export const MEMBER_HEARTBEAT_SWEEP_MS: number = 3000;
 /** 起拍前采足够多的低延迟样本，同时把总测量时间控制在约 300ms 内。 */
 export const PING_SAMPLES: number = 11;
 export const TRANSPORT_PREPARE_TIMEOUT_MS: number = 900;
+/** 起拍必须等队员完成时钟准备；总预算包含消息发送与来回采样。 */
+export const TRANSPORT_START_PREPARE_TIMEOUT_MS: number = 4000;

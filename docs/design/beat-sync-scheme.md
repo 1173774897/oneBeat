@@ -74,7 +74,7 @@ offset(t) ≈ skewRefOffsetMs + skewPpm * (t - skewRefAtMs) / 1e6
 
 ### 3.3 采样与重采样
 
-- `PING_SAMPLES = 11`：起拍前采足够多低时延样本，总耗时控制在 ~300ms 内。
+- `PING_SAMPLES = 11`：起拍前的完整采样次数。测量包含 RTT 和样本间隔，实际耗时随链路变化，不能假定必在约 300ms 内完成；也可能复用已在途的轻量同步。
 - `RESYNC_INTERVAL_MS = 5000`：行进中每 5s 重采样，抑制晶振与网络变化的长期漂移。
 - 网络质量分级：`rtt < 50` good / `< 150` fair / 其余 poor。
 
@@ -84,7 +84,11 @@ offset(t) ≈ skewRefOffsetMs + skewPpm * (t - skewRefAtMs) / 1e6
 
 ### 4.1 队长侧（`SessionController.ets`）
 
-队长在「改拍 / 恢复 / 起拍」时，先给所有队员发配置，再挑一个共享的未来下拍：
+首次开始和恢复先向已连接队员发送严格 `TRANSPORT_PREPARE`。收到每位队员明确的 `clockReady=true` 后，才选取 `now + TRANSPORT_PREROLL_MS`（650ms）的共同起点；准备最多 4 秒，失败或超时本轮不发布起拍，也不提前切入 countdown。退出、返回大厅或新的控制请求使旧准备失效；迟到的 READY 和发送结果不能复活旧请求。单人或没有已连接队员时直接继续。
+
+首次开始从 beat 0 起拍，恢复从 `ceil(beatIndex / beatsPerBar) * beatsPerBar` 起拍，两者都包含原有一小节倒数。严格 READY 证明时钟工作成功，不能保证未来控制包的投递期限或耳机声学状态。两端应同时更新到支持严格 ACK 的版本；旧队长不带严格标记的准备请求仍按原协议处理。
+
+行进中改配置仍沿用独立的重启路径，先给队员发配置，再选共享的未来下拍：
 
 ```text
 nextBarBeatIndex = (floor(beatIndex / beatsPerBar) + 1) * beatsPerBar
@@ -118,11 +122,11 @@ audioDelay = max(0, localStart - now - AUDIO_PREROLL_MS)   // AUDIO_PREROLL_MS =
 `stop / flush / start`。写回调持续输出：播放时填节拍内容，暂停时填 dither floor；
 控制命令只是在持续增长的提交帧坐标中安排一个 `targetFrame`，到达该帧时切换内容时间轴。
 
-650ms 的 preroll 用于首次启动时建立硬件时间戳，也给持续流模式留下足够的网络握手和已提交缓冲余量。
+650ms 的 preroll 是共享起点的提前预算。它不能保证任何网络延迟或输出补偿下都有足够余量；若实际剩余时间小于补偿加已提交队列，目标仍会被队列末端推迟。首次/恢复通过严格准备减少尚未就绪就消耗预算的问题，继续用 `StartTimingDiag` 检查是否仍有截断，调查见蓝牙延迟文档 §9.19。
 
 ### 4.3 共享暂停时刻
 
-暂停也不是收到消息后立即停止。队长先重采样时钟，再广播未来的
+暂停也不是收到消息后立即停止。队长先做有界时钟准备（最多 900ms，超时仍继续暂停），再广播未来的
 `pauseAtLeaderMonoMs = now + TRANSPORT_PAUSE_PREROLL_MS`。各设备将其换算为本地可闻时刻，
 并在下面的硬件帧边界把节拍内容切换为 dither floor：
 
@@ -546,6 +550,8 @@ targetFrame     = renderedFrames(now) + (hardwareStartAt - now) * SR / 1000
 
 ## 7. 行进中的相位锁定
 
+> 2026-10-15 实现核查：本节描述相位校正算法，但当前普通播放不能据此假定闭环已经运行。`audioClockLocked` 初始化/重置为 false，唯一置 true 的 `readAudioPlayheadMs()` 又被调用方 `measurePhaseErrorFrames()` 的 false 提前返回挡住；画面已改用共享墙钟，不再通过画面读取启动该状态。因此首拍偏移未必会在持续行进中自行收敛。此次只记录现状，未启用或修改相位校正；首次开始与同行进页恢复的调查见 [蓝牙延迟调查 §9.18](bt-latency-calibration-debug.md#918-双蓝牙首次行进有固定先后暂停恢复后对齐2026-10-15)。
+
 锁钟只定位**首拍**。行进中因晶振漂移、缓冲抖动，音频播放头会慢慢偏离墙钟时间轴。`measurePhaseErrorFrames()` 持续测量：
 
 ```text
@@ -592,6 +598,8 @@ expected   = nowMs - transportStartLocalMs                        // 理想播�
 | `TRANSPORT_PREROLL_MS` | 650 | 首次播放/恢复预留 |
 | `TRANSPORT_RESTART_PREROLL_MS` | 650 | 行进中改拍预留 |
 | `TRANSPORT_PAUSE_PREROLL_MS` | 650 | 共享暂停边界预留 |
+| `TRANSPORT_START_PREPARE_TIMEOUT_MS` | 4000 | 首次/恢复严格准备的总上限，成功后立即继续 |
+| `TRANSPORT_PREPARE_TIMEOUT_MS` | 900 | 暂停/现有配置重启准备的有界等待 |
 | `PING_SAMPLES` | 11 | 起拍前时钟采样次数 |
 | `RESYNC_INTERVAL_MS` | 5000 | 行进中重采样间隔 |
 | `COUNT_IN_BARS` | 1 | 准备拍小节数 |

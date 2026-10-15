@@ -1867,3 +1867,111 @@ ArkTS 编译与签名 HAP 构建成功（5.749 秒），包为 `entry/build/defa
 反向复现把本轮三处逻辑还原到临时副本，冷 PREPARED + routeDirty + flush 拒绝可稳定产生用户同文报错；该文件是逻辑回退副本，并非修改前保存的原始快照。最终测试运行的是工作区实际源码。
 
 普通播放 54 组目标帧、PCM 原点和 API 轨迹仍与 `56c9e55` 一致，配置、300 小节生命周期、双向路由重排、试音弹窗及 Session 路由隔离回归均通过；mic 产品入口/路由/权限退出验证通过。最终 ArkTS 编译和 signed HAP 构建成功（5.478 秒），包为 `entry/build/default/outputs/default/entry-default-signed.hap`，未安装到设备。本轮仍需真机复测出口切换后的首次试音、关闭重开与连续重播；软件 PCM 验证不代替耳机实际两声的声学验收。
+
+### 9.18 双蓝牙首次行进有固定先后，暂停恢复后对齐（2026-10-15）
+
+#### 9.18.1 用户现象与启动路径核查
+
+队长和队员均使用蓝牙耳机，各自完成打卡延迟测量后进入行进页。首次行进经常能听出轻微先后；用户补充确认：偏差在这一轮中持续，没有自行变小；**留在行进页暂停后继续**，第二次及之后能同步。本轮尚无该现象的新真机日志，以下机制复现属于源码模拟，不能直接认定为真机根因。
+
+成功保存打卡结果时，页面先调用 `keepLatencyCalibrationRendererAlive` 再返回；离页的 `stopLatencyCalibration` 看到保活标记后只暂停内容，不停止 native Renderer。因此不能把此次首次行进直接解释为耳机或 Renderer 从冷态启动。`startTransport` 和 `resumeTransport` 均先执行 `prepareConnectedMembersForTransport`，再发布 `now + 650ms` 的共享起点；健康音频流都走 `startAudioStream` 的持续流排程，重新读取同一份保存补偿。两者的拍号起点不同，但不是两套补偿公式。行进页已在开始前打开，也没有证据支持把 TRANSPORT 触发页面导航当成原因。
+
+准备握手当前只等待时钟交换，没有确认音频流排程余量：队员可复用已在途的 5 次轻量同步而非新做请求的 11 次；时钟交换失败仍回 READY；队长等 900ms 超时后也继续。这些是需要区分的现有行为，不代表本次已经发生了失败。
+
+#### 9.18.2 已复现的软件机制：目标被已提交队列推迟
+
+持续流的目标帧计算为：
+
+```text
+requestedFrame = round(playedFrame + (audibleAt − compensation − now) × 44100 / 1000)
+selectedFrame  = max(submittedFrames, requestedFrame)
+```
+
+当剩余时间不足以覆盖补偿与已提交队列时，原目标落在不可修改的 PCM 内，`max` 会把开始位置推迟到队列末端；共享 UI 时间线仍使用原来的起点。固定偏移因而可以一直持续到下一次重新排程。理论余量近似为 `remainingAudibleMs − compensationMs − queueEstimateMs`；队列估计不是实际声学输出延迟。
+
+`metronome-start-timing.cjs` 加载工作区真实 Engine、ClickSound、RhythmTimeline，经公共 `scheduleFromLeaderStart` 和实际 `handleWriteData` 检查输出 PCM。模拟中固定同一暖 Renderer、物理 start 次数 1、补偿 **300ms**、队列 **280ms**、共享提前量 **650ms**：
+
+| 模拟条件 | 首拍实际 PCM 相对原计划 |
+|---|---|
+| 首次处理晚到 120ms | 原请求帧 191835，提交末端 194040；推迟 2205 帧，即 **50ms** |
+| 同一 Renderer 暂停后恢复，处理及时 | 误差在 1 sample / 约 0.023ms 内 |
+| 请求及时，但队列为 400ms | 同样被推迟 **50ms** |
+| 定时回调晚 80ms，串行 Renderer 操作再等 40ms | 同样被推迟 **50ms**，两种等待可分开记录 |
+| 保留足够排程余量 | 无队列截断；timestamp 不可用时的原 fallback 也已覆盖 |
+
+这证明即使校准值、流身份、native start 次数都没变，也存在“首次整轮偏移、暂停恢复正常”的软件路径；**不证明用户真机发生了 120ms 晚到、280ms 队列或 50ms 偏差**。下一步先用日志判别，不盲改已保存补偿或统一加长等待。
+
+另发现普通播放的相位闭环启动状态存在断路：`audioClockLocked` 从 false 开始，唯一置 true 的 `readAudioPlayheadMs` 被 `measurePhaseErrorFrames` 的 false 提前返回挡住，画面也已不再读取音频 playhead。这解释了初始偏移为何可能不自行收敛，但不能据此判定初始偏移来自哪里。此次未启用该闭环，避免将调查扩大为全局播放行为变更。
+
+尚需区分的另外两项：生产 mapper 遇 raw frame 后退会重建 base，已有 `ProductionClockDiag stage=frame-map` 可观察；ClockSync 使用原始样本拟合，少量短窗口样本可能使实际使用的拟合 offset 与最终样本中值不同。此次未改 mapper 或时钟算法。
+
+#### 9.18.3 本轮代码仅增加定向诊断
+
+`MetronomeEngine.ets` 增加 `[StartTimingDiag]`，以本机 `seq / token` 串联每次排程：
+
+- `stage=schedule / timer`：收到排程后的剩余可听提前量、Renderer 是否运行、等待 Renderer 初始化的时间，以及定时器真正注册到触发的迟到量。
+- `stage=target`：`path=continuous / cold-provisional / cold-lock / cold-settle`；同一次原目标计算的 `requestedFrame / submittedAtEstimate / selectedFrame / committedFrame`、有正负的 `headroomMs`、非负 `clampMs`、`queueEstimateMs`、`timerLateMs / operationWaitMs`、补偿、流身份、物理 start 次数和 `audioClockLocked`。`targetPending` 表示这一 play 对象是否仍归当前排程所有；暂停等接管不能被误记为有效开始目标。
+- `stage=applied`：目标进入实际 PCM 写回调时的一次性记录。`estimatedFrameDeadlineDeltaMs` 只是回调提交时刻相对计划帧期限的差；系统仍有已排队 PCM，**它不是声学偏差实测，也不证明声音已播放**。
+
+目标计算直接缓存原有读取值，没有新增音频 timestamp、latency 或设备查询；目标公式、取整、`PendingAudioTransition` 的行为字段和 PCM 均未调整。新增日志会有正常的执行开销，不能据此宣称真机时序完全不受诊断影响。打卡排程也可能打印该前缀，可用 `compensationOverrideMs=0` 与正式行进区分。
+
+`SessionController.ets` 增加 `[TransportPrepareDiag]`：队长等待以 ready / timeout / cancelled / disconnected 哪种原因结束、耗时及未就绪数量；队员实际使用了多少样本、是否复用在途同步、成功/失败、同步前 offset、样本 offset 与实际使用 offset、RTT。未改准备协议、READY 发送条件、900ms 截止或 650ms 提前量。日志不包含成员名称、地址、组密码或认证数据。
+
+#### 9.18.4 验证与下一次真机取证
+
+`metronome-start-timing.cjs` 已通过：实际暖流 PCM 复现首轮 50ms 与同流恢复对齐，四阶段日志的身份、目标、余量、截断、定时器迟到及串行操作等待与实际执行一致。`transport-start-diagnostics.cjs` 已通过：运行真实准备方法，覆盖复用 5 次同步、失败仍 ACK、900ms 超时、不匹配的 READY、取消和断连。普通播放 **54 组**对照通过，保留原有日志及完整音频 API 轨迹，仅过滤新增诊断前缀。
+
+双向出口重排、两声试音 PCM、300 小节生命周期、配置、生产时钟诊断只读性及 Session 校准/路由隔离回归均通过。改动文件与新增测试的空白检查通过；原 `AudioCalibrationPage.ets` 未改。
+
+最终 ArkTS 编译与 signed HAP 构建成功（**6.508 秒**），包为 `entry/build/default/outputs/default/entry-default-signed.hap`，未安装到设备。本轮是诊断包，尚未声称消除了首次声学偏移。
+
+最小复测只做同一会话的一组对照：两端蓝牙与角色保持不变，正常完成各自打卡并保存，进入行进页，记录**首次开始 → 持续几拍确认先后 → 留在页面暂停 → 恢复开始**。两次之间不要重测校准、退出行进页或切换出口。请两端保留这一段完整日志，重点为 `[TransportPrepareDiag]`、`[StartTimingDiag]`、`[SyncDiag]`、`[ProductionClockDiag]`、`[ClockDiag]`、`[AudioRouteDiag]`，包含保存补偿值更便于对照。若第三机录音，继续按同一可识别强拍配对。
+
+判读顺序：若首轮 `clampMs>0`、恢复为 0 且流未变，优先修共享开始前的余量/准备机制；若无截断但准备时实际 offset 显著改变，查时钟同步；若目标、流与时钟均一致仍有声学差，则需要独立声学证据定位 native 出口状态。新日志让下一步可以选择有依据的修复方向，而非凭“第二次好”直接改耳机补偿。
+
+### 9.19 首轮队员被推迟 84.2ms：准备超时后仍发布起拍（2026-10-15）
+
+#### 9.19.1 真机对照确认了目标截断
+
+用户提供[队长与队员的本轮日志](/Users/lizhe/.codex/attachments/efa58456-a677-4a28-bf8a-a3f4dcca1b1d/已粘贴的文本.txt)，并确认听感仍为“首次有先后，恢复后对齐”，未明确哪端更晚。正式行进是两端 `seq=2` 的首次与 `seq=3` 的同行进页恢复；`seq=1 / compensationOverrideMs=0` 是之前的打卡排程，不能混为首次行进。
+
+| 端 / 轮次 | 补偿 D | 估帧时可听剩余时间 | 可写余量 headroom | 目标推迟 clamp | 队列估计 | 流 / 物理 start 次数 |
+|---|---:|---:|---:|---:|---:|---|
+| 队长首次 | 429ms | 627.0ms | 198.00ms | 0 | 0.0ms | 100265 / 4 |
+| 队员首次 | 391ms | 311.5ms | **−84.20ms** | **84.20ms** | 4.7ms | 100021 / 1 |
+| 队长恢复 | 429ms | 644.0ms | 179.66ms | 0 | 35.3ms | 100265 / 4 |
+| 队员恢复 | 391ms | 626.2ms | 235.19ms | 0 | 0.0ms | 100021 / 1 |
+
+首次队员的原始请求帧 **7012735** 已早于 submitted **7016448**，故被推后 **3713 帧 / 84.20ms**。其硬件目标 `34703349.5ms` 在估帧 `34703429.0ms` 时已过约 79.5ms，再加约 4.7ms 已提交队列，正好对应这次截断。恢复时目标未落入已提交区，没有这种额外推迟。这是本次真机已证实的排程缺陷，尚不能把 84.2ms 当成两耳实际声学误差的完整测量。
+
+用成员 `nowMonoMs + offsetMs` 转成队长时钟，两端进入 `schedule` 的时间差首轮约 **321.5ms**，恢复约 **11.8ms**。它包含发送、传输及本地消息处理，不等同纯网络单向时延；现有日志不足以唯一指定 TCP、P2P 唤醒或主线程中的哪一层。定时器迟到仅约 0–1ms，Renderer 串行操作等待为 0，不能把三百余毫秒归给这两个阶段。队员两轮排程 offset 从 87230327.47 变为 87230326.80，只差约 **0.67ms**，解释不了 84ms 截断。
+
+两轮各端 stream、epoch、base 和物理 start 次数均保持，不是暂停后换了 Renderer 或补偿：队长 epoch 1 / base 806618，队员 epoch 1 / base −16886。队长此前出口切换使物理 start 次数已为 4，`originProven=false`，不能为其构造可信 raw→声学时刻。
+
+#### 9.19.2 为什么尚未准备好就开始了
+
+首轮队长的 PREPARE 在 **901ms** 结束，原因是 `timeout / pending=1`，随后发布共享起点。队员实际 11 次采样耗时 **935ms**，直到自己的开始排程之后约 0.9 秒才输出准备成功；因此 TRANSPORT 已在准备尚未完成时被接受。恢复时队长 **87ms** 即以 ready 结束，队员复用 5 次在途采样、耗时 **53ms**，之后两端都有充足提前量。
+
+代码与日志一致：队员用 `void handleTransportPreparation()` 异步做采样，后续 TRANSPORT 可立即处理；队长旧 900ms 超时按成功等待一样放行。接收回调无需串行等待 PREPARE，因为那样会挡住完成采样必需的 PONG；正确的控制点是队长收到成功 READY 后才生成这轮共同起点。
+
+本轮也出现队员诊断 m 从 392.1ms 变为 297.8ms。它不是 base 重建：恢复时 `rawFrame − base = 7491616`，超过 submitted 7487488，旧 mapper 的上界 clamp 截去了 **4128 帧 / 约 93.6ms**，加两次 raw age 约 0.7ms 差异即得到约 94.3ms 的 m 差。不能把这部分当成硬件或保存补偿漂移。`stage=applied` 的 228.5ms / 18.8ms 同样是写回调相对计划帧期限的差，不能当作录音声学误差；`queueEstimateMs=0` 也不代表耳机没有延迟。
+
+#### 9.19.3 修复范围与验收边界
+
+本轮针对已证实的发布顺序修复：首次开始与恢复使用严格准备，成员明确报告时钟采样成功后，队长才生成 `now + 650ms` 的共同起点。严格准备最多等 4 秒；成功后立即继续，失败或超时则本轮不发布起拍。暂停保持原 900ms 有界等待与兜底，避免网络准备问题阻止停止播放。单人和无已连接队员不引入网络等待。
+
+协议在原 PREPARE / READY 上增加可选 `requireClockReady / clockReady`。严格请求只接受明确 true；失败或旧式 ACK 缺少成功标记都不能当成成功，因此本轮复测需两端更新。旧队长不带严格标记的请求保留原处理方式。多个成员必须全部成功；准备中成员退出取消本轮，下一次按实际连接集合重新准备。
+
+4 秒包含准备消息发送和采样等待：不再被一个未结束的 native send 挡在超时 Promise 之外。发送失败属于本轮失败，不能伪装成该成员退出后全部准备完成。新控制请求、返回大厅、断开会话均使旧请求失效；READY 刚 resolve 后的微任务间隙、旧 send 迟到失败，以及发布发送晚完成时都核对归属，不能恢复旧开始。准备失败前保留原 state、beatIndex、存储消息和暂停计时器。
+
+这不是把每次起拍固定再延后 4 秒，也不宣称 READY 等于音频硬件已完成声学准备。保存补偿、650ms 提前量、帧映射、Renderer、相位校正和既有拍号规则均保持。此次不同时引入普通开始的自动跨拍，先用同一组日志检验顺序修复是否足够；若成功 READY 后仍出现迟到截断，再单独设计原拍网格的补救。
+
+新包仍需两端同时更新，以同一会话复测**首次开始 → 留在行进页暂停 → 恢复开始**。软件验收重点是首轮准备以 ready 完成、队员成功在发布 TRANSPORT 前、双方 `clampMs=0`；最终仍以听感或同一强拍的独立声学记录判断是否对齐。
+
+#### 9.19.4 软件验证
+
+`transport-start-readiness.cjs` 运行真实 Controller 的两端方法，模拟首个 PREPARE 延迟 1300ms 送达、队员再测量 935ms，确认 900ms 不再放行，成功 READY 后才生成完整的 650ms 起点。另覆盖首次/恢复失败、旧式 ACK、4 秒总截止及未结束 native send、迟到 READY/reject、新请求归属、多成员全部成功、准备中断连、返回大厅/断开与 READY 微任务竞态、发布发送迟到后不恢复旧本机消息、单人及无队员，以及暂停仍在 900ms 后发布原共享暂停边界。诊断测试保留成功/失败与复用样本数的实际行为验证，两项均通过。
+
+普通播放 **54 组**目标帧、PCM 原点和音频 API 轨迹仍与 `56c9e55` 一致；实际 PCM 的起拍诊断、双向路由重排及写回调冻结恢复、Session 校准/路由隔离、会话清理及队员重新加入生命周期回归通过。相关代码、文档及新增测试空白检查通过。原 `AudioCalibrationPage.ets` 未改。
+
+最终 ArkTS 编译和 signed HAP 构建成功（**6.946 秒**），包为 `entry/build/default/outputs/default/entry-default-signed.hap`，未安装到设备。已经修复“未完成准备仍发布开始”的已确认路径；尚无本轮修复包的真机声学验收，不能据软件测试宣称所有首次蓝牙差异已消除。
