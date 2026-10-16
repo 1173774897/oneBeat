@@ -1,7 +1,8 @@
 import { common } from '@kit.AbilityKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { util } from '@kit.ArkTS';
-import { promptAction, router } from '@kit.ArkUI';
+import { router } from '@kit.ArkUI';
+import { isUserCancelled, logUserFailure, showUserNotice, userErrorMessage } from '../common/UserFeedback';
 import {
   ComicCharacter,
   CORAL,
@@ -24,7 +25,6 @@ import {
 } from '../store/EntitlementStore';
 import {
   emptyStoreProductPriceQueryResult,
-  formatStoreIapError,
   queryStoreProductPrices,
   storePriceUnavailableMessage,
   StoreProductPrice,
@@ -40,7 +40,7 @@ import {
   productTypeForStoreItem,
   queryRestorablePurchases
 } from '../store/IapPurchaseService';
-import { StoreBootstrap, StorePurchaseSubmission } from '../store/StoreModels';
+import { StoreBootstrap, StorePurchaseSubmission, StoreRedemptionResult } from '../store/StoreModels';
 
 interface StoreCharacter {
   key: string;
@@ -57,6 +57,15 @@ interface StoreScene {
   name: string;
   caption: string;
   productId: string;
+}
+
+class StorePurchaseError extends Error {
+  code: number;
+
+  constructor(message: string, code: number) {
+    super(message);
+    this.code = code;
+  }
 }
 
 const STORE_EXCLUSIVE_CHARACTERS: StoreCharacter[] = [
@@ -143,6 +152,8 @@ struct StorePage {
   @State redemptionCode: string = '';
   @State redemptionIdempotencyKey: string = '';
   @State redemptionStatus: string = '';
+  @State redemptionSucceeded: boolean = false;
+  @State redemptionSyncFailed: boolean = false;
   @State redemptionBusy: boolean = false;
   @State purchaseVisible: boolean = false;
   @State pendingType: string = '';
@@ -153,11 +164,27 @@ struct StorePage {
   @State productPrices: StoreProductPrice[] = [];
   @State productPriceEpoch: number = 0;
   @State serviceStatus: string = '';
+  @State storeActionStatus: string = '';
+  @State storeActionRecovery: string = '';
+  @State storeActionType: string = '';
   @State purchaseBusy: boolean = false;
+  private storeLifetimeEpoch: number = 0;
+  private storePageActive: boolean = true;
 
   aboutToAppear(): void {
+    this.storePageActive = true;
+    this.storeLifetimeEpoch++;
     initializeEntitlementCache();
     this.loadPurchases();
+  }
+
+  aboutToDisappear(): void {
+    this.storePageActive = false;
+    this.storeLifetimeEpoch++;
+  }
+
+  private isCurrentStorePage(epoch: number): boolean {
+    return this.storePageActive && this.storeLifetimeEpoch === epoch;
   }
 
   onPageShow(): void {
@@ -167,11 +194,15 @@ struct StorePage {
 
   onBackPress(): boolean {
     if (this.purchaseVisible) {
-      this.purchaseVisible = false;
+      if (!this.purchaseBusy) {
+        this.purchaseVisible = false;
+      }
       return true;
     }
     if (this.redemptionVisible) {
-      this.redemptionVisible = false;
+      if (!this.redemptionBusy || this.redemptionSucceeded) {
+        this.redemptionVisible = false;
+      }
       return true;
     }
     return false;
@@ -185,23 +216,11 @@ struct StorePage {
     return host as common.UIAbilityContext;
   }
 
-  private purchaseFailureMessage(error: Object, fallback: string = '购买未完成，请稍后重试'): string {
-    if (error instanceof Error && error.message.length > 0) {
-      return error.message;
-    }
-    const business = error as BusinessError;
-    const businessMessage = business.message !== undefined ? `${business.message}`.trim() : '';
-    if (businessMessage.length > 0) {
-      const code = business.code ?? 0;
-      return code !== 0 ? `${businessMessage}(${code})` : businessMessage;
-    }
-    return fallback;
-  }
-
   private async refreshStoreData(): Promise<void> {
+    const lifetime = this.storeLifetimeEpoch;
     const priceTask: Promise<StoreProductPriceQueryResult> = isStoreApiConfigured() ?
       queryStoreProductPrices(this.hostContext()).catch((err: Object) => {
-        console.error(`[StoreIap] StorePage price task rejected: ${formatStoreIapError(err)}`);
+        logUserFailure('store.price', err);
         return emptyStoreProductPriceQueryResult('unknown');
       }) :
       Promise.resolve(emptyStoreProductPriceQueryResult('none'));
@@ -211,7 +230,7 @@ struct StorePage {
     }
 
     if (!isStoreApiConfigured()) {
-      this.serviceStatus = '开发配置：请填写测试与生产 API 地址';
+      this.serviceStatus = '商店暂时不可用，请稍后重试';
     } else {
       try {
         let accessToken = currentStoreSessionToken();
@@ -233,17 +252,27 @@ struct StorePage {
           bootstrap = await fetchStoreBootstrap();
         }
         if (bootstrap !== null) {
+          if (!this.isCurrentStorePage(lifetime)) {
+            return;
+          }
           applyStoreBootstrap(bootstrap);
           this.loadPurchases();
           this.serviceStatus = '';
         }
-      } catch (_e) {
-        this.serviceStatus = '商店服务暂时不可用，已使用本机最近一次权益';
+      } catch (error) {
+        if (!this.isCurrentStorePage(lifetime)) {
+          return;
+        }
+        logUserFailure('store.refresh', error);
+        this.serviceStatus = '暂时无法连接商店，已保留现有权益';
       }
     }
 
     try {
       const priceResult = await priceTask;
+      if (!this.isCurrentStorePage(lifetime)) {
+        return;
+      }
       this.productPrices = priceResult.prices;
       this.productPriceEpoch++;
       if (priceResult.prices.length === 0 && this.serviceStatus.length === 0 && isStoreApiConfigured()) {
@@ -255,7 +284,10 @@ struct StorePage {
         console.info(`[StoreIap] StorePage loaded ${priceResult.prices.length} product price(s)`);
       }
     } catch (err) {
-      console.error(`[StoreIap] StorePage price apply failed: ${formatStoreIapError(err)}`);
+      if (!this.isCurrentStorePage(lifetime)) {
+        return;
+      }
+      logUserFailure('store.price', err);
       if (this.serviceStatus.length === 0) {
         this.serviceStatus = storePriceUnavailableMessage('unknown');
       }
@@ -312,7 +344,6 @@ struct StorePage {
       return;
     }
     this.selectedSceneKey = item.key;
-    promptAction.showToast({ message: `已切换到 ${item.name}` });
   }
 
   private ownedCharacterCount(): number {
@@ -346,7 +377,7 @@ struct StorePage {
   }
 
   private openCharacterPurchase(item: StoreCharacter): void {
-    if (this.hasCharacter(item.key)) {
+    if (this.purchaseBusy || this.redemptionBusy || this.hasCharacter(item.key)) {
       return;
     }
     this.pendingType = 'character';
@@ -354,27 +385,25 @@ struct StorePage {
     this.pendingName = item.name;
     this.pendingPrice = this.productPrice(item.productId);
     this.pendingProductId = item.productId;
+    this.resetPurchaseFeedback();
     this.purchaseVisible = true;
   }
 
   private openScenePurchase(item: StoreScene): void {
+    if (this.purchaseBusy || this.redemptionBusy) {
+      return;
+    }
     this.pendingType = 'scene';
     this.pendingKey = item.key;
     this.pendingName = item.name;
     this.pendingPrice = this.productPrice(item.productId);
     this.pendingProductId = item.productId;
+    this.resetPurchaseFeedback();
     this.purchaseVisible = true;
   }
 
   private openPassPurchase(): void {
-    if (this.passActive) {
-      const message = this.passSource === 'PASS_REDEMPTION' ?
-        '赠送月卡生效期间不能购买自动续费月卡' : '畅游月卡已生效';
-      promptAction.showToast({ message: message });
-      return;
-    }
-    if (!this.passIapPurchaseAllowed) {
-      promptAction.showToast({ message: '当前暂不能购买自动续费月卡' });
+    if (this.purchaseBusy || this.redemptionBusy) {
       return;
     }
     this.pendingType = 'pass';
@@ -382,6 +411,7 @@ struct StorePage {
     this.pendingName = '畅游月卡';
     this.pendingPrice = this.productPrice(PASS_PRODUCT_ID);
     this.pendingProductId = PASS_PRODUCT_ID;
+    this.resetPurchaseFeedback();
     this.purchaseVisible = true;
   }
 
@@ -408,8 +438,11 @@ struct StorePage {
     return matched;
   }
 
-  private async syncOwnedPurchase(accessToken: string, productId: string): Promise<boolean> {
+  private async syncOwnedPurchase(accessToken: string, productId: string, lifetime: number): Promise<boolean> {
     const purchases = this.restorablePurchases(await queryRestorablePurchases(this.hostContext()));
+    if (!this.isCurrentStorePage(lifetime)) {
+      return false;
+    }
     const scoped = this.purchasesForProduct(purchases, productId);
     if (scoped.length === 0) {
       return false;
@@ -417,76 +450,116 @@ struct StorePage {
     try {
       const verified = await verifyStorePurchase(accessToken, scoped[0]);
       applyStoreBootstrap(verified);
-      this.loadPurchases();
+      if (this.isCurrentStorePage(lifetime)) {
+        this.loadPurchases();
+      }
       return true;
     } catch (_verifyError) {
       const bootstrap = await restoreStorePurchases(accessToken, [scoped[0]]);
       applyStoreBootstrap(bootstrap);
-      this.loadPurchases();
+      if (this.isCurrentStorePage(lifetime)) {
+        this.loadPurchases();
+      }
       return true;
     }
   }
 
   private async confirmPurchase(): Promise<void> {
-    if (this.purchaseBusy || this.pendingProductId.length === 0) {
+    if (this.purchaseBusy || this.redemptionBusy || this.pendingProductId.length === 0 ||
+      (this.pendingType === 'pass' && this.passPurchaseRestriction().length > 0)) {
       return;
     }
-    this.purchaseVisible = false;
     this.purchaseBusy = true;
-    this.serviceStatus = '正在连接华为支付并核验订单…';
+    const lifetime = this.storeLifetimeEpoch;
+    const productId = this.pendingProductId;
+    const isPass = this.pendingType === 'pass';
+    this.storeActionType = 'purchase';
+    this.storeActionStatus = '正在完成购买…';
+    this.storeActionRecovery = '';
     try {
       const accessToken = await ensureStoreSession(this.hostContext(), true);
+      if (!this.isCurrentStorePage(lifetime)) {
+        return;
+      }
       // Recheck the server immediately before opening Huawei checkout. Cached UI
       // state may predate a code redemption on another device.
       const bootstrap = await fetchStoreBootstrap(accessToken);
+      if (!this.isCurrentStorePage(lifetime)) {
+        return;
+      }
       if (bootstrap === null || bootstrap.developerPayload === undefined || bootstrap.developerPayload.length === 0) {
         throw new Error('服务端未返回购买绑定信息');
       }
       applyStoreBootstrap(bootstrap);
       this.loadPurchases();
-      if (this.pendingType === 'pass' && (!bootstrap.pass.iapPurchaseAllowed || bootstrap.pass.active)) {
-        throw new Error(bootstrap.pass.source === 'PASS_REDEMPTION' ?
-          '赠送月卡生效期间不能购买自动续费月卡' : '畅游月卡已生效');
+      if (isPass && (!bootstrap.pass.iapPurchaseAllowed || bootstrap.pass.active)) {
+        this.storeActionStatus = '';
+        this.purchaseVisible = true;
+        return;
       }
       try {
         const purchase = await createStorePurchase(
           this.hostContext(),
-          this.pendingProductId,
-          productTypeForStoreItem(this.pendingType === 'pass'),
+          productId,
+          productTypeForStoreItem(isPass),
           bootstrap.developerPayload
         );
         const verified = await verifyStorePurchase(accessToken, purchase);
         applyStoreBootstrap(verified);
+        // Paid orders still reach verification if the page leaves during native
+        // checkout; only this page's state and completion notice are discarded.
+        if (!this.isCurrentStorePage(lifetime)) {
+          return;
+        }
         this.loadPurchases();
         this.serviceStatus = '';
-        promptAction.showToast({ message: '购买成功，权益已到账' });
+        this.storeActionStatus = '';
+        this.purchaseVisible = false;
+        showUserNotice('购买成功，权益已到账', 'store.purchase');
       } catch (purchaseError) {
+        if (!this.isCurrentStorePage(lifetime)) {
+          return;
+        }
         const iapError = purchaseError as BusinessError;
         if (iapError.code !== IAP_ERROR_ALREADY_OWNED) {
-          if (purchaseError instanceof Error) {
-            throw purchaseError;
-          }
-          throw new Error('购买未完成，请稍后重试');
+          // ArkTS only throws Error classes; retain the SDK code while keeping
+          // untrusted native/server prose out of the page's error contract.
+          throw new StorePurchaseError(userErrorMessage(purchaseError, '购买未完成，请重试；已支付可恢复购买'),
+            iapError.code ?? 0);
         }
-        this.serviceStatus = '华为账号已拥有该商品，正在同步权益…';
-        const synced = await this.syncOwnedPurchase(accessToken, this.pendingProductId);
+        this.storeActionStatus = '正在同步已购权益…';
+        const synced = await this.syncOwnedPurchase(accessToken, productId, lifetime);
+        if (!this.isCurrentStorePage(lifetime)) {
+          return;
+        }
         if (!synced) {
           throw new Error('华为账号已拥有该商品，请稍后点击「恢复购买」同步权益');
         }
         this.serviceStatus = '';
-        promptAction.showToast({ message: '已同步华为账号中的购买记录' });
+        this.storeActionStatus = '';
+        this.purchaseVisible = false;
+        showUserNotice('已同步华为账号中的购买记录', 'store.purchase');
       }
     } catch (e) {
-      const detail = this.purchaseFailureMessage(e);
-      this.serviceStatus = detail.length > 0 ?
-        detail : '购买未完成或验单失败，可稍后点击“恢复购买”重试';
-      promptAction.showToast({ message: this.purchaseFailureMessage(e) });
+      if (!this.isCurrentStorePage(lifetime)) {
+        return;
+      }
+      if (isUserCancelled(e)) {
+        this.storeActionStatus = '';
+        this.purchaseVisible = false;
+        return;
+      }
+      logUserFailure('store.purchase', e);
+      this.storeActionStatus = userErrorMessage(e, '购买未完成，请重试；已支付可恢复购买');
+      this.storeActionRecovery = 'purchase';
     } finally {
-      this.purchaseBusy = false;
+      if (this.isCurrentStorePage(lifetime)) {
+        this.purchaseBusy = false;
+      }
     }
   }
 
-  private async synchronizePurchasesBeforeRedemption(accessToken: string): Promise<void> {
+  private async synchronizePurchasesBeforeRedemption(accessToken: string, lifetime: number): Promise<void> {
     // Huawei cannot query all subscriptions by OneBeat user ID. Restore the
     // purchases visible on this device before asking the server to grant a pass.
     // queryPurchases may throw BusinessError (not instanceof Error); that must not
@@ -497,10 +570,15 @@ struct StorePage {
     } catch (_queryError) {
       purchases = [];
     }
+    if (!this.isCurrentStorePage(lifetime)) {
+      return;
+    }
     try {
       const bootstrap = await restoreStorePurchases(accessToken, purchases);
       applyStoreBootstrap(bootstrap);
-      this.loadPurchases();
+      if (this.isCurrentStorePage(lifetime)) {
+        this.loadPurchases();
+      }
     } catch (restoreError) {
       if (purchases.length === 0) {
         if (restoreError instanceof Error) {
@@ -511,19 +589,115 @@ struct StorePage {
       // Stale or unverifiable local JWS should not prevent a code redemption attempt.
       const bootstrap = await restoreStorePurchases(accessToken, []);
       applyStoreBootstrap(bootstrap);
+      if (this.isCurrentStorePage(lifetime)) {
+        this.loadPurchases();
+      }
+    }
+  }
+
+  private startAnotherRedemption(): void {
+    if (this.redemptionBusy || this.purchaseBusy) {
+      return;
+    }
+    this.redemptionSucceeded = false;
+    this.redemptionSyncFailed = false;
+    this.redemptionCode = '';
+    this.redemptionIdempotencyKey = '';
+    this.redemptionStatus = '';
+  }
+
+  private updateRedemptionCode(value: string): void {
+    // Removing the input after success can deliver a final change callback.
+    // Only an actual editable draft change may clear its operation and feedback.
+    if (this.redemptionBusy || this.redemptionSucceeded || value === this.redemptionCode) {
+      return;
+    }
+    this.redemptionCode = value;
+    this.redemptionIdempotencyKey = '';
+    this.redemptionStatus = '';
+  }
+
+  private showRedemptionSuccess(result: StoreRedemptionResult): void {
+    this.redemptionSucceeded = true;
+    this.redemptionSyncFailed = false;
+    this.redemptionCode = '';
+    this.redemptionIdempotencyKey = '';
+    const expires = this.passDate(result.pass.expiresAt ?? result.grantEndsAt);
+    this.redemptionStatus = expires.length > 0 ? `已兑换 · 有效至 ${expires}` : '已兑换，畅游月卡已到账';
+    // The committed response owns the pass result. Item rights still require a
+    // complete bootstrap; inventing one here would erase existing purchases.
+    this.passActive = result.pass.active;
+    this.passStatus = result.pass.status ?? '';
+    this.passExpiresAt = result.pass.expiresAt ?? result.grantEndsAt;
+    this.passSource = result.pass.source ?? '';
+    this.passAutoRenewing = result.pass.autoRenewing;
+    this.passIapPurchaseAllowed = result.pass.iapPurchaseAllowed;
+  }
+
+  private async refreshRedemptionEntitlements(accessToken: string, lifetime: number): Promise<void> {
+    try {
+      const bootstrap = await fetchStoreBootstrap(accessToken);
+      if (bootstrap === null) {
+        throw new Error('兑换后权益快照暂不可用');
+      }
+      if (!this.isCurrentStorePage(lifetime)) {
+        return;
+      }
+      applyStoreBootstrap(bootstrap);
       this.loadPurchases();
+      this.serviceStatus = '';
+      this.redemptionSyncFailed = false;
+    } catch (error) {
+      if (this.isCurrentStorePage(lifetime)) {
+        logUserFailure('store.redemption.refresh', error);
+        // A failed follow-up GET cannot turn a committed grant into a failed
+        // redemption or encourage another POST for the same benefit.
+        this.redemptionSyncFailed = true;
+      }
+    }
+  }
+
+  private async retryRedemptionEntitlements(): Promise<void> {
+    if (!this.redemptionSucceeded || this.redemptionBusy || this.purchaseBusy) {
+      return;
+    }
+    this.redemptionBusy = true;
+    const lifetime = this.storeLifetimeEpoch;
+    try {
+      const accessToken = await ensureStoreSession(this.hostContext(), true);
+      if (this.isCurrentStorePage(lifetime)) {
+        await this.refreshRedemptionEntitlements(accessToken, lifetime);
+      }
+    } catch (error) {
+      if (this.isCurrentStorePage(lifetime)) {
+        this.redemptionSyncFailed = true;
+        if (!isUserCancelled(error)) {
+          logUserFailure('store.redemption.refresh', error);
+        }
+      }
+    } finally {
+      if (this.isCurrentStorePage(lifetime)) {
+        this.redemptionBusy = false;
+      }
     }
   }
 
   private async submitRedemption(): Promise<void> {
-    if (this.redemptionBusy || this.redemptionCode.trim().length === 0) {
+    if (this.redemptionSucceeded || this.redemptionBusy || this.purchaseBusy || this.redemptionCode.trim().length === 0) {
       return;
     }
     this.redemptionBusy = true;
+    const lifetime = this.storeLifetimeEpoch;
     this.redemptionStatus = '正在核对账号权益…';
     try {
       const accessToken = await ensureStoreSession(this.hostContext(), true);
-      await this.synchronizePurchasesBeforeRedemption(accessToken);
+      if (!this.isCurrentStorePage(lifetime)) {
+        return;
+      }
+      await this.synchronizePurchasesBeforeRedemption(accessToken, lifetime);
+      if (!this.isCurrentStorePage(lifetime)) {
+        return;
+      }
       if (this.passActive && this.passSource === 'PASS_IAP') {
         throw new Error('华为自动续费月卡仍在生效，暂时不能领取赠送月卡');
       }
@@ -536,35 +710,48 @@ struct StorePage {
         idempotencyKey: this.redemptionIdempotencyKey,
         code: this.redemptionCode.trim()
       });
-      const bootstrap = await fetchStoreBootstrap(accessToken);
-      if (bootstrap !== null) {
-        applyStoreBootstrap(bootstrap);
-        this.loadPurchases();
+      if (!this.isCurrentStorePage(lifetime)) {
+        return;
       }
-      this.redemptionCode = '';
-      this.redemptionIdempotencyKey = '';
-      this.redemptionStatus = `领取成功，赠送月卡可用至 ${this.passDate(result.pass.expiresAt ?? '')}`;
-      promptAction.showToast({ message: '口令兑换成功，畅游月卡已到账' });
+      this.showRedemptionSuccess(result);
+      await this.refreshRedemptionEntitlements(accessToken, lifetime);
     } catch (e) {
-      const detail = this.purchaseFailureMessage(e, '兑换未完成，请稍后重试');
-      this.redemptionStatus = detail;
-      promptAction.showToast({ message: detail });
+      if (!this.isCurrentStorePage(lifetime)) {
+        return;
+      }
+      if (isUserCancelled(e)) {
+        this.redemptionStatus = '';
+        return;
+      }
+      logUserFailure('store.redemption', e);
+      this.redemptionStatus = userErrorMessage(e, '兑换未完成，请检查账号和网络后重试');
     } finally {
-      this.redemptionBusy = false;
+      if (this.isCurrentStorePage(lifetime)) {
+        this.redemptionBusy = false;
+      }
     }
   }
 
   private async restorePurchases(): Promise<void> {
-    if (this.purchaseBusy) {
+    if (this.purchaseBusy || this.redemptionBusy) {
       return;
     }
     this.purchaseBusy = true;
-    this.serviceStatus = '正在从华为账号恢复购买记录…';
+    const lifetime = this.storeLifetimeEpoch;
+    this.storeActionType = 'restore';
+    this.storeActionStatus = '正在恢复购买…';
+    this.storeActionRecovery = '';
     try {
       const accessToken = await ensureStoreSession(this.hostContext(), true);
+      if (!this.isCurrentStorePage(lifetime)) {
+        return;
+      }
       const purchases = this.restorablePurchases(await queryRestorablePurchases(this.hostContext()));
+      if (!this.isCurrentStorePage(lifetime)) {
+        return;
+      }
       let bootstrap: StoreBootstrap | null = null;
-      let lastFailureMessage: string = '';
+      let failedCount: number = 0;
       if (purchases.length > 0) {
         try {
           bootstrap = await restoreStorePurchases(accessToken, purchases);
@@ -574,19 +761,18 @@ struct StorePage {
             try {
               await verifyStorePurchase(accessToken, purchases[i]);
               syncedCount++;
-            } catch (verifyError) {
-              lastFailureMessage = this.purchaseFailureMessage(verifyError);
+            } catch (_verifyError) {
               try {
                 await restoreStorePurchases(accessToken, [purchases[i]]);
                 syncedCount++;
               } catch (restoreError) {
-                lastFailureMessage = this.purchaseFailureMessage(restoreError);
+                failedCount++;
+                logUserFailure('store.restore.item', restoreError);
               }
             }
           }
           if (syncedCount === 0) {
-            throw new Error(lastFailureMessage.length > 0 ?
-              lastFailureMessage : '恢复购买失败，请稍后重试');
+            throw new Error('恢复失败，请检查账号和网络后重试');
           }
           bootstrap = await fetchStoreBootstrap(accessToken);
         }
@@ -599,18 +785,32 @@ struct StorePage {
       }
       if (bootstrap !== null) {
         applyStoreBootstrap(bootstrap);
+        if (!this.isCurrentStorePage(lifetime)) {
+          return;
+        }
         this.loadPurchases();
+        this.serviceStatus = '';
       }
-      this.serviceStatus = '';
-      const toastMessage = purchases.length > 0 ?
-        '购买记录已恢复' : '已与服务端同步账号权益';
-      promptAction.showToast({ message: toastMessage });
+      if (!this.isCurrentStorePage(lifetime)) {
+        return;
+      }
+      this.storeActionStatus = failedCount > 0 ? '部分权益已同步，其余购买记录请稍后重试' : '权益已同步';
+      this.storeActionRecovery = failedCount > 0 ? 'restore' : '';
     } catch (e) {
-      const detail = this.purchaseFailureMessage(e);
-      this.serviceStatus = detail.length > 0 ? detail : '恢复购买失败，请确认华为账号与网络状态后重试';
-      promptAction.showToast({ message: detail.length > 0 ? detail : '恢复购买失败，请稍后重试' });
+      if (!this.isCurrentStorePage(lifetime)) {
+        return;
+      }
+      if (isUserCancelled(e)) {
+        this.storeActionStatus = '';
+        return;
+      }
+      logUserFailure('store.restore', e);
+      this.storeActionStatus = userErrorMessage(e, '恢复失败，请检查账号和网络后重试');
+      this.storeActionRecovery = 'restore';
     } finally {
-      this.purchaseBusy = false;
+      if (this.isCurrentStorePage(lifetime)) {
+        this.purchaseBusy = false;
+      }
     }
   }
 
@@ -676,6 +876,9 @@ struct StorePage {
       }
       return expires.length > 0 ? `可使用至 ${expires}` : '付费角色与场景';
     }
+    if (expires.length > 0) {
+      return `已于 ${expires} 到期`;
+    }
     return '付费角色、场景与 PRO 定制鼓机';
   }
 
@@ -684,6 +887,20 @@ struct StorePage {
       return this.passSource === 'PASS_REDEMPTION' ? '赠送生效中' : '已开通';
     }
     return '查看方案  ›';
+  }
+
+  private passPurchaseRestriction(): string {
+    if (this.passActive) {
+      return this.passSource === 'PASS_REDEMPTION' ?
+        '赠送月卡生效期间不能购买自动续费月卡' : '畅游月卡已生效';
+    }
+    return this.passIapPurchaseAllowed ? '' : '当前暂不能购买自动续费月卡，请稍后重试';
+  }
+
+  private resetPurchaseFeedback(): void {
+    this.storeActionType = 'purchase';
+    this.storeActionStatus = '';
+    this.storeActionRecovery = '';
   }
 
   @Builder
@@ -708,10 +925,11 @@ struct StorePage {
             .border({ width: 1.5, color: INK }).borderRadius(5).shadow(CONTROL_SHADOW)
             .padding({ left: 12, right: 12 }).maxLength(64)
             .enabled(!this.redemptionBusy)
-            .onChange((value: string) => {
-              this.redemptionCode = value;
-              this.redemptionIdempotencyKey = '';
-            })
+            .onChange((value: string) => this.updateRedemptionCode(value))
+          if (this.redemptionStatus.length > 0) {
+            Text(this.redemptionStatus).fontSize(11).fontWeight(FontWeight.Bold)
+              .fontColor('#645E55').lineHeight(17).width('100%')
+          }
           Button(this.redemptionBusy ? '兑换中…' : '立即兑换', { type: ButtonType.Normal })
             .width('100%').height(46).padding(0).fontSize(15).fontWeight(900).fontColor(INK)
             .backgroundColor(CORAL).border({ width: 1.5, color: INK }).borderRadius(5)
@@ -725,13 +943,46 @@ struct StorePage {
           .padding({ top: 20, bottom: 20 }).backgroundColor(PAPER)
           .border({ width: 1.2, color: INK }).borderRadius(5).shadow(CONTROL_SHADOW)
       }
-      if (this.redemptionStatus.length > 0) {
+      if (!this.redemptionAvailable && this.redemptionStatus.length > 0) {
         Text(this.redemptionStatus).fontSize(11).fontWeight(FontWeight.Bold)
           .fontColor('#645E55').lineHeight(17).width('100%')
       }
     }.width('100%').padding({ left: 16, right: 16, top: 16, bottom: 18 })
     .backgroundColor(LILAC).border({ width: 2, color: INK }).borderRadius(8)
     .shadow({ radius: INK_SHADOW_RADIUS, offsetX: 5, offsetY: 6, color: INK })
+  }
+
+  @Builder
+  private redemptionResultCard() {
+    Column({ space: 12 }) {
+      Text('✓').fontSize(36).fontWeight(900).fontColor('#08827B')
+      Text('兑换成功').fontSize(28).fontWeight(900).fontStyle(FontStyle.Italic).fontColor(INK)
+      Text('赠送畅游月卡已领取').fontSize(16).fontWeight(900).fontColor(INK)
+      Text(this.redemptionStatus).fontSize(14).fontWeight(800).lineHeight(22)
+        .fontColor('#08827B').textAlign(TextAlign.Center).width('100%')
+      Text('到期后结束，不自动续费').fontSize(12).fontColor('#645E55')
+      if (this.redemptionBusy) {
+        Text('正在更新小铺权益…').fontSize(12).fontColor('#645E55')
+      } else if (this.redemptionSyncFailed) {
+        Text('月卡已领取，权益列表暂未更新，可重试更新。').fontSize(12).lineHeight(19)
+          .fontColor('#645E55').textAlign(TextAlign.Center).width('100%')
+        Button('重试更新权益', { type: ButtonType.Normal }).width('100%').height(42)
+          .fontSize(14).fontWeight(900).fontColor(INK).backgroundColor(LILAC)
+          .border({ width: 1.5, color: INK }).borderRadius(6)
+          .enabled(!this.purchaseBusy).onClick(() => void this.retryRedemptionEntitlements())
+      }
+      Button('返回小铺', { type: ButtonType.Normal }).width('100%').height(46)
+        .fontSize(16).fontWeight(900).fontColor(INK).backgroundColor(CORAL)
+        .border({ width: 1.5, color: INK }).borderRadius(6).shadow(CONTROL_SHADOW)
+        .onClick(() => { this.redemptionVisible = false; })
+      if (this.redemptionAvailable) {
+        Button('兑换其他口令', { type: ButtonType.Normal }).width('100%').height(36)
+          .fontSize(13).fontWeight(800).fontColor(INK).backgroundColor('#00000000')
+          .enabled(!this.redemptionBusy && !this.purchaseBusy).onClick(() => this.startAnotherRedemption())
+      }
+    }.width('100%').padding(20).backgroundColor('#FFF9EE')
+      .border({ width: 2, color: INK }).borderRadius(8)
+      .shadow({ radius: INK_SHADOW_RADIUS, offsetX: 5, offsetY: 6, color: INK })
   }
 
   @Builder
@@ -799,7 +1050,11 @@ struct StorePage {
     Scroll() {
       Column({ space: 24 }) {
         Row() {
-          Text('‹').fontSize(32).width(34).onClick(() => this.redemptionVisible = false)
+          Text('‹').fontSize(32).width(34).onClick(() => {
+            if (!this.redemptionBusy || this.redemptionSucceeded) {
+              this.redemptionVisible = false;
+            }
+          })
           Column({ space: 0 }) {
             Text('口令兑换').fontSize(30).fontWeight(900).fontStyle(FontStyle.Italic)
             Text('SECRET PASS').fontSize(9).fontWeight(900).letterSpacing(2)
@@ -811,10 +1066,14 @@ struct StorePage {
             Text('兑').fontSize(17).fontWeight(900).rotate({ angle: 7 })
           }.width(52).height(44)
         }.width('100%')
-        this.redemptionHero()
-        this.redemptionCard()
-        Text('口令区分具体字符，请按活动公布的原文输入。')
-          .width('100%').fontSize(10).fontColor('#6B655D').textAlign(TextAlign.Center)
+        if (this.redemptionSucceeded) {
+          this.redemptionResultCard()
+        } else {
+          this.redemptionHero()
+          this.redemptionCard()
+          Text('口令区分具体字符，请按活动公布的原文输入。')
+            .width('100%').fontSize(10).fontColor('#6B655D').textAlign(TextAlign.Center)
+        }
       }
       .width('100%')
       .padding({
@@ -917,11 +1176,7 @@ struct StorePage {
         .padding(0).fontSize(10.5 * this.passBannerScale()).fontWeight(900).fontColor(PAPER)
         .backgroundColor('#00000000').borderRadius(18)
         .position({ x: PASS_BANNER_ACTION_X, y: PASS_BANNER_ACTION_Y })
-        .onClick(() => {
-          if (this.passIapPurchaseAllowed && !this.passActive) {
-            this.openPassPurchase();
-          }
-        })
+        .onClick(() => this.openPassPurchase())
     }
     .width('100%')
     .constraintSize({ maxWidth: PASS_BANNER_MAX_WIDTH })
@@ -1119,20 +1374,55 @@ struct StorePage {
           .fontSize(11).fontWeight(900).fontColor(PAPER).backgroundColor(INK)
           .padding({ left: 9, right: 9, top: 4, bottom: 4 }).rotate({ angle: -3 })
           .shadow(CONTROL_SHADOW)
-        Text(this.pendingName).fontSize(27).fontWeight(900).fontStyle(FontStyle.Italic)
-        Text(this.pendingType === 'pass' ? '开通后可使用当前及后续上架的所有角色、场景和 pro 鼓机。' :
-          '购买后会加入“我的”，可在角色选择页使用。')
-          .fontSize(13).fontWeight(FontWeight.Bold).lineHeight(20).width('100%')
-        Text(this.pendingPrice).fontSize(22).fontWeight(900).fontColor(CORAL)
+        Text(this.storeActionType === 'restore' ? '恢复购买' : this.pendingName)
+          .fontSize(27).fontWeight(900).fontStyle(FontStyle.Italic)
+        if (this.storeActionType !== 'restore') {
+          Text(this.pendingType === 'pass' ? '开通后可使用当前及后续上架的所有角色、场景和 pro 鼓机。' :
+            '购买后会加入“我的”，可在小铺和队伍中使用。')
+            .fontSize(13).fontWeight(FontWeight.Bold).lineHeight(20).width('100%')
+          Text(this.pendingPrice).fontSize(22).fontWeight(900).fontColor(CORAL)
+        }
+        if (this.pendingType === 'pass' && this.storeActionType !== 'restore') {
+          Text(this.passDescription()).fontSize(12).fontWeight(FontWeight.Bold).width('100%')
+          Text(this.passActive && this.passSource === 'PASS_REDEMPTION' ? '赠送月卡到期后结束，不自动续费。' :
+            '本方案按月自动续费，可在华为账号的订阅管理中取消；取消后本期仍可使用。')
+            .fontSize(11).fontColor('#6B655D').lineHeight(17).width('100%')
+          if (this.passPurchaseRestriction().length > 0) {
+            Text(this.passPurchaseRestriction()).fontSize(12).fontWeight(FontWeight.Bold).width('100%')
+          }
+        }
+        if (this.storeActionStatus.length > 0) {
+          Text(this.storeActionStatus).fontSize(12).fontWeight(FontWeight.Bold).width('100%')
+        }
         Row({ space: 9 }) {
-          Button('再想想', { type: ButtonType.Normal }).layoutWeight(1).height(42).fontSize(13).fontWeight(900)
+          Button(this.storeActionType === 'restore' ? '关闭' : '再想想', { type: ButtonType.Normal })
+            .layoutWeight(1).height(42).fontSize(13).fontWeight(900)
             .fontColor(INK).backgroundColor(PAPER).border({ width: 1.5, color: INK }).borderRadius(5).shadow(CONTROL_SHADOW)
+            .enabled(!this.purchaseBusy)
             .onClick(() => this.purchaseVisible = false)
-          Button('确认购买', { type: ButtonType.Normal }).layoutWeight(1.3).height(42).fontSize(13).fontWeight(900)
-            .fontColor(INK).backgroundColor(CORAL).border({ width: 1.5, color: INK }).borderRadius(5).shadow(CONTROL_SHADOW)
-            .enabled(!this.purchaseBusy).onClick(() => void this.confirmPurchase())
+          if (this.storeActionType === 'restore') {
+            if (this.storeActionRecovery === 'restore') {
+              Button('重试恢复', { type: ButtonType.Normal }).layoutWeight(1.3).height(42).fontSize(13).fontWeight(900)
+                .fontColor(INK).backgroundColor(CORAL).border({ width: 1.5, color: INK }).borderRadius(5)
+                .shadow(CONTROL_SHADOW).enabled(!this.purchaseBusy)
+                .onClick(() => void this.restorePurchases())
+            }
+          } else {
+            Button(this.pendingType === 'pass' && this.passPurchaseRestriction().length > 0 ? '暂不可购买' :
+              (this.storeActionRecovery === 'purchase' ? '重新购买' : '确认购买'),
+              { type: ButtonType.Normal }).layoutWeight(1.3).height(42).fontSize(13).fontWeight(900)
+              .fontColor(INK).backgroundColor(CORAL).border({ width: 1.5, color: INK }).borderRadius(5).shadow(CONTROL_SHADOW)
+              .enabled(!this.purchaseBusy &&
+                (this.pendingType !== 'pass' || this.passPurchaseRestriction().length === 0))
+              .onClick(() => void this.confirmPurchase())
+          }
         }.width('100%')
-        Text('最终权益以华为支付结果与 OneBeat 服务端验单结果为准。')
+        if (this.storeActionRecovery === 'purchase') {
+          Button('恢复购买', { type: ButtonType.Normal }).width('100%').height(34).fontSize(12).fontWeight(900)
+            .fontColor(INK).backgroundColor(PAPER).border({ width: 1, color: INK }).borderRadius(5)
+            .enabled(!this.purchaseBusy).onClick(() => void this.restorePurchases())
+        }
+        Text('支付后权益未到账，可在“我的”中点击“恢复购买”。')
           .fontSize(9).fontColor('#6B655D').width('100%')
       }.width('88%').padding(17).backgroundColor('#FFF1D7')
       .border({ width: 2.5, color: INK }).borderRadius(8)
@@ -1185,6 +1475,9 @@ struct StorePage {
               .fontSize(15).fontWeight(900).fontColor(INK).backgroundColor(PAPER)
               .border({ width: 1.5, color: INK }).borderRadius(7).enabled(!this.purchaseBusy)
               .onClick(() => void this.restorePurchases())
+            if (this.storeActionType === 'restore' && !this.purchaseVisible && this.storeActionStatus.length > 0) {
+              Text(this.storeActionStatus).fontSize(12).fontWeight(FontWeight.Bold).width('100%')
+            }
           }
           Row() {
             Text('COLLECT MORE WEIRDOS\nFOR A BRIGHTER RHYTHM.')

@@ -286,9 +286,7 @@ export function buildDrumPattern(styleKey: string, variant: number, beatsPerBar:
         buildStyleDrumPattern(styleKey, variant, beatsPerBar, beatUnit)));
 
   if (fillIndex >= 0) {
-    const fillBeats = styleKey === 'jazz' ? jazzFillWindowBeats(fillIndex) :
-      styleFillWindowBeats(styleKey, fillIndex);
-    const fillTickStart = Math.max(0, beatsPerBar - fillBeats) * DEFAULT_TICKS_PER_BEAT;
+    const fillTickStart = presetFillStartBeat(styleKey, fillIndex, beatsPerBar) * DEFAULT_TICKS_PER_BEAT;
     for (let i = events.length - 1; i >= 0; i--) {
       if (events[i].tick >= fillTickStart) {
         events.splice(i, 1);
@@ -304,6 +302,24 @@ export function buildDrumPattern(styleKey: string, variant: number, beatsPerBar:
     events.sort((a: SequencerEvent, b: SequencerEvent) => a.tick - b.tick);
   }
   return new SequencerPattern(DEFAULT_TICKS_PER_BEAT, beatsPerBar, events);
+}
+
+function presetFillStartBeat(styleKey: string, fillIndex: number, beatsPerBar: number): number {
+  const fillBeats = styleKey === 'jazz' ? jazzFillWindowBeats(fillIndex) :
+    styleFillWindowBeats(styleKey, fillIndex);
+  return Math.max(0, beatsPerBar - fillBeats);
+}
+
+/** A scheduled custom fill owns the whole bar, including rests; presets replace only their final window. */
+export function sectionFillStartBeat(program: DrumProgram, section: DrumSection): number {
+  if (section.customFill !== undefined && section.customFill !== null && Array.isArray(section.customFill.events)) {
+    return 0;
+  }
+  if (section.customFillRows !== undefined && section.customFillRows.length > 0) {
+    return 0;
+  }
+  return section.fillIndex < 0 ? program.beatsPerBar :
+    presetFillStartBeat(program.styleKey, section.fillIndex, program.beatsPerBar);
 }
 
 /** Resolve a full audible bar without converting its events through the editor's visible grid. */

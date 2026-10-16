@@ -1,6 +1,5 @@
 import { common } from '@kit.AbilityKit';
 import { authentication } from '@kit.AccountKit';
-import { BusinessError } from '@kit.BasicServicesKit';
 import { util } from '@kit.ArkTS';
 import { authenticateHuawei } from './StoreApi';
 import { invalidateStoreBootstrapRefresh } from './StoreBootstrapRefresh';
@@ -78,14 +77,9 @@ export async function ensureStoreSession(
   request.state = state;
 
   const controller = new authentication.AuthenticationController(context);
-  let response: authentication.LoginWithHuaweiIDResponse;
-  try {
-    response = await controller.executeRequest(request) as authentication.LoginWithHuaweiIDResponse;
-  } catch (err) {
-    const error = err as BusinessError;
-    const code = error.code ?? 0;
-    throw new Error(code !== 0 ? `华为账号登录失败(${code})` : '华为账号登录失败');
-  }
+  // Preserve the native code so callers can distinguish explicit cancellation
+  // from an account failure without interpreting the SDK's localized message.
+  const response = await controller.executeRequest(request) as authentication.LoginWithHuaweiIDResponse;
 
   if (response.state !== state || response.data === undefined) {
     throw new Error('华为账号登录结果无效，请重试');

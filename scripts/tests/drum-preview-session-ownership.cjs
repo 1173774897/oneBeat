@@ -95,6 +95,7 @@ function harness({ sampleBankClass, engineOptions = {} } = {}) {
     '../network/p2p/WifiP2pManager': { WifiP2pManager: class { async teardown() {} } },
     '../network/p2p/BleRoomDiscovery': { BleRoomDiscovery: class { async stopLeaderAdvertising() {} } },
     '../network/p2p/P2pInvitation': {},
+    '../common/UserFeedback': { showUserNotice() {}, logUserFailure() {} },
     '../common/Constants': { PROTOCOL_VERSION: 6 },
     '../common/MonotonicClock': { MonotonicClock: { nowMs: () => h.now } },
     '../common/MeterModel': { defaultBeatPointStates: count => Array(count).fill('normal') },

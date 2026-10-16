@@ -2,6 +2,7 @@ import { common } from '@kit.AbilityKit';
 import { router } from '@kit.ArkUI';
 import { scanCore, scanBarcode } from '@kit.ScanKit';
 import { AppSession, MemberJoinStage } from '../app/AppSession';
+import { isUserCancelled, logUserFailure, userErrorMessage } from '../common/UserFeedback';
 import { joinCodeFromPayload, parseJoinQrPayload } from '../network/join/JoinQrPayload';
 import { P2pRoomInvitation } from '../network/p2p/P2pInvitation';
 import {
@@ -10,6 +11,7 @@ import {
   ensureBluetoothDiscoveryPermission,
   ensureCameraPermission,
   ensureTeamNetworkPermissions,
+  hasTeamNetworkPermissions,
   isBluetoothDiscoveryAvailable,
   openWirelessSettings,
   teamNetworkAccessUnavailableHint,
@@ -29,12 +31,15 @@ struct MemberJoinPage {
   @State displayName: string = 'Member';
   @State joinCode: string = '';
   @State status: string = '';
-  @State bluetoothAck: boolean = false;
   @State joining: boolean = false;
+  @State scanning: boolean = false;
   @State wirelessSettingsAvailable: boolean = false;
   private initializationToken: number = 0;
+  private joinRequestToken: number = 0;
+  private pageActive: boolean = true;
 
   aboutToAppear(): void {
+    this.pageActive = true;
     const params = router.getParams() as Record<string, string>;
     if (params !== undefined && params['displayName'] !== undefined && params['displayName'].length > 0) {
       this.displayName = params['displayName'];
@@ -47,6 +52,12 @@ struct MemberJoinPage {
     void this.initialize();
   }
 
+  aboutToDisappear(): void {
+    this.pageActive = false;
+    this.initializationToken++;
+    this.joinRequestToken++;
+  }
+
   private persistDisplayName(): void {
     const trimmed = this.displayName.trim();
     if (trimmed.length > 0) {
@@ -56,10 +67,10 @@ struct MemberJoinPage {
 
   private async initialize(): Promise<void> {
     const initializationToken = ++this.initializationToken;
-    this.status = '请先打开系统 Wi-Fi；手输加入码时还需要打开蓝牙';
+    this.status = '';
     try {
       await AppSession.reset();
-      if (initializationToken !== this.initializationToken) {
+      if (!this.pageActive || initializationToken !== this.initializationToken) {
         return;
       }
       const session = await AppSession.prepareMember(this.displayName);
@@ -67,7 +78,7 @@ struct MemberJoinPage {
         return;
       }
       const ctx = getContext(this) as common.UIAbilityContext;
-      const granted = await ensureTeamNetworkPermissions(ctx);
+      const granted = await hasTeamNetworkPermissions(ctx);
       if (!this.canWarmUpDiscovery(session, initializationToken)) {
         return;
       }
@@ -82,8 +93,9 @@ struct MemberJoinPage {
         this.status = teamNetworkAccessUnavailableHint();
       }
     } catch (err) {
-      if (initializationToken === this.initializationToken && !this.joining) {
-        this.status = `准备加入失败：${(err as Error).message}`;
+      logUserFailure('join-prepare', err);
+      if (this.pageActive && initializationToken === this.initializationToken && !this.joining) {
+        this.status = userErrorMessage(err, '暂时无法准备加入，请重试');
       }
     }
   }
@@ -91,7 +103,8 @@ struct MemberJoinPage {
   private canWarmUpDiscovery(session: AppSession, initializationToken: number): boolean {
     // A join only needs the old session's teardown barrier. Its permission and
     // discovery work must not wait for, or be overwritten by, background warmup.
-    return initializationToken === this.initializationToken && !this.joining && AppSession.get() === session;
+    return this.pageActive && initializationToken === this.initializationToken &&
+      !this.joining && AppSession.get() === session;
   }
 
   build() {
@@ -166,11 +179,11 @@ struct MemberJoinPage {
               .shadow(CONTROL_SHADOW)
               .rotate({ angle: 3 })
           }.width('100%')
-          Text('请先打开 Wi-Fi。扫码无需蓝牙发现权限，对准队长邀请二维码即可。')
+          Text('扫码需要相机和 Wi-Fi')
             .fontSize(12)
             .fontColor('#66615A')
             .width('100%')
-          Button('打开相机扫码  ›')
+          Button(this.scanning ? '正在扫码…' : '打开相机扫码  ›')
             .backgroundColor(CORAL)
             .fontColor(INK)
             .fontSize(18)
@@ -180,7 +193,7 @@ struct MemberJoinPage {
             .shadow(CONTROL_SHADOW)
             .height(52)
             .width('100%')
-            .enabled(this.bluetoothAck && !this.joining)
+            .enabled(!this.joining && !this.scanning)
             .onClick(() => {
               void this.scanJoin();
             })
@@ -201,7 +214,7 @@ struct MemberJoinPage {
         Column({ space: 10 }) {
           Text('方式 B').fontSize(10).fontWeight(900).fontColor('#66615A').width('100%')
           Text('输入 6 位加入码').fontSize(19).fontWeight(900).fontStyle(FontStyle.Italic).width('100%')
-          Text('需要打开蓝牙，用于查找附近广播该加入码的队长。')
+          Text('加入码需要蓝牙发现')
             .fontSize(12)
             .fontColor('#66615A')
             .width('100%')
@@ -228,7 +241,7 @@ struct MemberJoinPage {
             .shadow(CONTROL_SHADOW)
             .height(52)
             .width('100%')
-            .enabled(this.bluetoothAck && !this.joining && this.joinCode.length === 6)
+            .enabled(!this.joining && !this.scanning && this.joinCode.length === 6)
             .onClick(() => {
               void this.joinWithCode(this.joinCode);
             })
@@ -239,31 +252,6 @@ struct MemberJoinPage {
         .border({ width: 1.5, color: INK })
         .borderRadius(7)
         .shadow(CARD_SHADOW)
-
-        Column({ space: 7 }) {
-          Text('蓝牙耳机同步提醒').fontSize(12).fontWeight(900).fontColor('#884400').width('100%')
-          Text('外放或有线耳机同步效果最佳。这里说明的是蓝牙耳机延迟，与上方“蓝牙用于找房间”不是同一用途。')
-            .fontSize(11)
-            .fontColor('#70420F')
-            .lineHeight(17)
-            .width('100%')
-          Row({ space: 8 }) {
-            Checkbox({ name: 'bt_ack', group: 'disclaimer' })
-              .select(this.bluetoothAck)
-              .onChange((value: boolean) => {
-                this.bluetoothAck = value;
-              })
-            Text('我已知晓，继续加入')
-              .fontSize(13)
-              .fontWeight(FontWeight.Bold)
-          }.width('100%')
-        }
-        .width('100%')
-        .padding(11)
-        .backgroundColor('#FFF0D8')
-        .border({ width: 1, color: '#B66B18' })
-        .borderRadius(6)
-        .shadow(CONTROL_SHADOW)
 
         if (this.status.length > 0) {
           Text(this.status)
@@ -295,19 +283,39 @@ struct MemberJoinPage {
   }
 
   private async ensureP2pReady(): Promise<boolean> {
+    const requestToken = this.joinRequestToken;
     const ctx = getContext(this) as common.UIAbilityContext;
     const granted = await ensureTeamNetworkPermissions(ctx);
+    if (!this.isCurrentJoin(requestToken)) {
+      return false;
+    }
     if (!granted) {
       this.status = teamNetworkPermissionDeniedHint();
       return false;
     }
-    if (!(await verifyTeamNetworkAccess())) {
+    const accessible = await verifyTeamNetworkAccess();
+    if (!this.isCurrentJoin(requestToken)) {
+      return false;
+    }
+    if (!accessible) {
       this.wirelessSettingsAvailable = true;
       this.status = teamNetworkAccessUnavailableHint();
       return false;
     }
     this.wirelessSettingsAvailable = false;
     return true;
+  }
+
+  private isCurrentJoin(requestToken: number, session?: AppSession): boolean {
+    // A response from a retired room cannot replace the current room's status.
+    return this.pageActive && requestToken === this.joinRequestToken &&
+      (session === undefined || AppSession.get() === session);
+  }
+
+  private showJoinFailure(error: Object, fallback: string): void {
+    const message = userErrorMessage(error, fallback);
+    this.status = message;
+    this.wirelessSettingsAvailable = message.indexOf('Wi-Fi') >= 0;
   }
 
   private updateJoinProgress(stage: MemberJoinStage): void {
@@ -321,35 +329,63 @@ struct MemberJoinPage {
   }
 
   private async joinInvitation(invitation: P2pRoomInvitation): Promise<void> {
+    if (this.joining || this.scanning) {
+      return;
+    }
     this.initializationToken++;
+    const requestToken = ++this.joinRequestToken;
     this.joining = true;
+    let joiningSession: AppSession | undefined = undefined;
     try {
       if (!(await this.ensureP2pReady())) {
         return;
       }
       const session = await AppSession.prepareMember(this.displayName);
-      session.controller.bluetoothAcknowledged = this.bluetoothAck;
+      joiningSession = session;
+      if (!this.isCurrentJoin(requestToken, session)) {
+        return;
+      }
       this.status = '正在扫描附近 P2P 设备并连接队长…';
-      await session.memberJoinWithInvitation(invitation, (stage) => { this.updateJoinProgress(stage); });
+      await session.memberJoinWithInvitation(invitation, (stage) => {
+        if (this.isCurrentJoin(requestToken, session)) {
+          this.updateJoinProgress(stage);
+        }
+      });
+      if (!this.isCurrentJoin(requestToken, session)) {
+        return;
+      }
       this.persistDisplayName();
       this.status = '已同步时钟，正在进入…';
-      router.replaceUrl({ url: 'pages/LeaderLobbyPage', params: { reuse: '1' } });
+      await router.replaceUrl({ url: 'pages/LeaderLobbyPage', params: { reuse: '1' } });
     } catch (err) {
-      this.status = `加入失败：${(err as Error).message}`;
+      logUserFailure('join-invitation', err);
+      if (this.isCurrentJoin(requestToken, joiningSession)) {
+        this.showJoinFailure(err, '加入失败，请重试或重新扫码');
+      }
     } finally {
-      this.joining = false;
+      if (this.isCurrentJoin(requestToken)) {
+        this.joining = false;
+      }
     }
   }
 
   private async joinWithCode(code: string): Promise<void> {
+    if (this.joining || this.scanning) {
+      return;
+    }
     this.initializationToken++;
+    const requestToken = ++this.joinRequestToken;
     this.joining = true;
+    let joiningSession: AppSession | undefined = undefined;
     try {
       if (!(await this.ensureP2pReady())) {
         return;
       }
       const ctx = getContext(this) as common.UIAbilityContext;
       const bluetoothGranted = await ensureBluetoothDiscoveryPermission(ctx);
+      if (!this.isCurrentJoin(requestToken)) {
+        return;
+      }
       if (!bluetoothGranted) {
         this.status = bluetoothPermissionDeniedHint();
         return;
@@ -359,25 +395,53 @@ struct MemberJoinPage {
         return;
       }
       const session = await AppSession.prepareMember(this.displayName);
-      session.controller.bluetoothAcknowledged = this.bluetoothAck;
+      joiningSession = session;
+      if (!this.isCurrentJoin(requestToken, session)) {
+        return;
+      }
       this.status = '正在通过蓝牙查找附近房间…';
       await session.memberJoinByCode(code, () => {
-        this.status = '已找到队伍，正在请求连接队长…';
-      }, (stage) => { this.updateJoinProgress(stage); });
+        if (this.isCurrentJoin(requestToken, session)) {
+          this.status = '已找到队伍，正在请求连接队长…';
+        }
+      }, (stage) => {
+        if (this.isCurrentJoin(requestToken, session)) {
+          this.updateJoinProgress(stage);
+        }
+      });
+      if (!this.isCurrentJoin(requestToken, session)) {
+        return;
+      }
       this.persistDisplayName();
       this.status = '已同步时钟，正在进入…';
-      router.replaceUrl({ url: 'pages/LeaderLobbyPage', params: { reuse: '1' } });
+      await router.replaceUrl({ url: 'pages/LeaderLobbyPage', params: { reuse: '1' } });
     } catch (err) {
-      this.status = `加入失败：${(err as Error).message}`;
+      logUserFailure('join-code', err);
+      if (this.isCurrentJoin(requestToken, joiningSession)) {
+        this.showJoinFailure(err, '加入失败，请重试或改用扫码');
+      }
     } finally {
-      this.joining = false;
+      if (this.isCurrentJoin(requestToken)) {
+        this.joining = false;
+      }
     }
   }
 
   private async scanJoin(): Promise<void> {
+    if (this.joining || this.scanning) {
+      return;
+    }
+    this.initializationToken++;
+    const requestToken = ++this.joinRequestToken;
+    this.scanning = true;
+    this.status = '';
+    this.wirelessSettingsAvailable = false;
     try {
       const ctx = getContext(this) as common.UIAbilityContext;
       const cameraOk = await ensureCameraPermission(ctx);
+      if (!this.isCurrentJoin(requestToken)) {
+        return;
+      }
       if (!cameraOk) {
         this.status = cameraPermissionDeniedHint();
         return;
@@ -386,13 +450,26 @@ struct MemberJoinPage {
         scanTypes: [scanCore.ScanType.QR_CODE]
       };
       const result = await scanBarcode.startScanForResult(ctx, options);
+      if (!this.isCurrentJoin(requestToken)) {
+        return;
+      }
       const payload = parseJoinQrPayload(result.originalValue);
       const code = joinCodeFromPayload(payload);
       this.joinCode = code;
       this.status = `已识别加入码 ${code}，正在扫描附近 P2P 设备…`;
+      this.scanning = false;
       await this.joinInvitation(payload);
     } catch (err) {
-      this.status = `扫码失败：${(err as Error).message}`;
+      if (!isUserCancelled(err)) {
+        logUserFailure('join-scan', err);
+        if (this.isCurrentJoin(requestToken)) {
+          this.showJoinFailure(err, '扫码失败，请重试或输入加入码');
+        }
+      }
+    } finally {
+      if (this.isCurrentJoin(requestToken)) {
+        this.scanning = false;
+      }
     }
   }
 }

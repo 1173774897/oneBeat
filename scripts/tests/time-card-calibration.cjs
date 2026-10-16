@@ -102,6 +102,7 @@ function harness(options = {}) {
     },
     '../app/AppSession': { AppSession: { get: () => sessionAvailable ? session : undefined } },
     '../common/MonotonicClock': { MonotonicClock: { nowMs: () => now } },
+    '../common/UserFeedback': { showUserNotice: message => toasts.push(message), logUserFailure() {} },
     '../store/AudioLatencyPersistence': {
       getCalibrationMs: () => persistedMs,
       async saveCalibrationMs(value) {
@@ -772,7 +773,8 @@ async function saveWithFreshResultTouch(h) {
     assert.deepEqual(lostSession.writes, []);
     if (lostAt === 'before-retry') {
       assert.equal(lostSession.page.tapCount, 1, 'A failed retry request must preserve the outgoing card');
-      assert.ok(lostSession.toasts.some(message => message.includes('会话已结束')));
+      assert.match(lostSession.page.operationError, /会话已结束/);
+      assert.deepEqual(lostSession.toasts, [], 'A local retry failure must not duplicate feedback in a toast');
     } else {
       assert.ok(lostSession.page.missReason.includes('会话已结束'), 'A lost mid-exchange session must explain how to recover');
     }
@@ -820,6 +822,34 @@ async function saveWithFreshResultTouch(h) {
   await previewing;
   assert.deepEqual(leaving.toasts, [], 'A stale preview error must not show a toast on the next page');
   assert.equal(leaving.timers.size, 0);
+
+
+  const unavailableStart = harness({ noSession: true });
+  await unavailableStart.page.startMeasurement();
+  assert.match(unavailableStart.page.operationError, /会话已结束/);
+  assert.deepEqual(unavailableStart.toasts, []);
+  const currentPreviewFailure = deferred();
+  const failingPreview = harness({ preview: currentPreviewFailure });
+  await collectCompleteRun(failingPreview);
+  const measuredResult = failingPreview.page.resultMs;
+  const failedPreviewTask = failingPreview.page.startResultPreview(0, '校准前');
+  currentPreviewFailure.reject(new Error('native secret payload'));
+  await failedPreviewTask;
+  assert.equal(failingPreview.page.operationError, '试听未能开始，请重试');
+  assert.equal(failingPreview.page.phase, 'result');
+  assert.equal(failingPreview.page.resultMs, measuredResult, 'Preview failure must preserve the measured card');
+  assert.deepEqual(failingPreview.toasts, []);
+  const saveFailure = deferred();
+  const failingSave = harness({ save: saveFailure });
+  await collectCompleteRun(failingSave);
+  failingSave.advanceBy(2000);
+  const failedSaveTask = failingSave.page.finishAndSave();
+  saveFailure.reject(new Error('native secret payload'));
+  await failedSaveTask;
+  assert.equal(failingSave.page.operationError, '保存失败，请重试');
+  assert.equal(failingSave.page.saving, false);
+  assert.equal(failingSave.persistedMs(), 72);
+  assert.deepEqual(failingSave.toasts, []);
 
   console.log('PASS: whole-card calibration preserves 32 timestamped punches, requires reviewed results and fresh save gestures, and rejects stale or off-page work');
 })().catch(error => { console.error(error); process.exitCode = 1; });

@@ -1,4 +1,4 @@
-import { promptAction, router } from '@kit.ArkUI';
+import { router } from '@kit.ArkUI';
 import { AppSession } from '../app/AppSession';
 import {
   CORAL,
@@ -14,6 +14,7 @@ import { isProDrumMachineAccessible } from '../store/EntitlementStore';
 import { EditableBpm } from '../components/EditableBpm';
 import { EditableMeter, MeterEditorOverlay } from '../components/EditableMeter';
 import { beatUnitLabel } from '../common/MeterModel';
+import { logUserFailure, showUserNotice, userErrorMessage } from '../common/UserFeedback';
 import { DEFAULT_TICKS_PER_BEAT, SequencerEvent } from '../audio/RhythmTimeline';
 import {
   buildSectionPattern,
@@ -85,6 +86,7 @@ const DRUM_EDITOR_SUBDIVISION_GAP: number = 6;
 const DRUM_EDITOR_OFF_GRID_SIZE: number = 10;
 const DRUM_EDITOR_OFF_GRID_HIT_SIZE: number = 18;
 const DRUM_SECTION_PLAYING_COLOR: string = '#EDE4FA';
+const DRUM_PHRASE_PLAYING_COLOR: string = '#FFF0B8';
 const DRUM_SONG_PREVIEW_PROGRESS_MS: number = 16;
 const DRUM_SONG_PREVIEW_UPDATE_DELAY_MS: number = 150;
 
@@ -105,6 +107,7 @@ struct DrumMachinePage {
   @State editorStepVelocities: number[][] = [];
   @State previewTarget: string = '';
   @State playingSongSection: number = -1;
+  @State playingSongIsFill: boolean = false;
   @State editorPlayheadBeats: number = -1;
   @State editorTrackRowHeight: number = DRUM_EDITOR_ROW_HEIGHT;
   @State saving: boolean = false;
@@ -118,6 +121,8 @@ struct DrumMachinePage {
   @State overwriteDialogVisible: boolean = false;
   @State meterEditorVisible: boolean = false;
   @State saveName: string = '';
+  @State saveNameError: string = '';
+  @State songPreviewMessage: string = '';
   @State savedPrograms: SavedDrumProgram[] = [];
   @StorageLink('safeAreaTop') topSafeInset: number = 0;
   @StorageLink('safeAreaBottom') bottomSafeInset: number = 0;
@@ -138,10 +143,14 @@ struct DrumMachinePage {
   private editorPreviewTimerId: number = -1;
   private editorPreviewRevision: number = 0;
   private editorPreviewCycle: number = -1;
+  private bpmUpdateRevision: number = 0;
+  private pageLifetimeRevision: number = 0;
 
   aboutToAppear(): void {
+    this.pageLifetimeRevision++;
+    this.saving = false;
     if (!isProDrumMachineAccessible()) {
-      promptAction.showToast({ message: 'PRO 定制鼓机包含在畅游月卡中' });
+      showUserNotice('PRO 定制鼓机包含在畅游月卡中', 'drum.entitlement');
       router.back();
       return;
     }
@@ -212,15 +221,17 @@ struct DrumMachinePage {
   private openSaveDialog(): void {
     this.dropdownTarget = '';
     this.saveName = `我的节奏 ${this.savedPrograms.length + 1}`;
+    this.saveNameError = '';
     this.saveDialogVisible = true;
   }
 
   private confirmNamedSave(): void {
     const name = this.saveName.trim();
     if (name.length === 0) {
-      promptAction.showToast({ message: '请填写节奏名称' });
+      this.saveNameError = '请输入名称';
       return;
     }
+    this.saveNameError = '';
     for (let i = 0; i < this.savedPrograms.length; i++) {
       if (this.savedPrograms[i].name === name) {
         this.saveDialogVisible = false;
@@ -253,7 +264,7 @@ struct DrumMachinePage {
     AppStorage.setOrCreate('myDrumProgram', program);
     this.saveDialogVisible = false;
     this.overwriteDialogVisible = false;
-    promptAction.showToast({ message: replaced ? '已更新我的节奏' : '已保存到我的节奏' });
+    showUserNotice(replaced ? '已更新我的节奏' : '已保存到我的节奏', 'drum.save');
   }
 
   private returnToRename(): void {
@@ -270,7 +281,6 @@ struct DrumMachinePage {
     }
     this.savedPrograms = next;
     AppStorage.setOrCreate('savedDrumPrograms', JSON.stringify(next));
-    promptAction.showToast({ message: '已删除这个节奏' });
   }
 
   private loadSavedProgram(saved: SavedDrumProgram): void {
@@ -287,7 +297,6 @@ struct DrumMachinePage {
     this.contextStates = [];
     this.storeCurrentContext();
     this.rememberEditedTempoAndMeter();
-    promptAction.showToast({ message: `已载入 ${saved.name}` });
     if (wasPreviewing) {
       void this.refreshActivePreview();
     }
@@ -303,6 +312,8 @@ struct DrumMachinePage {
   }
 
   aboutToDisappear(): void {
+    this.pageLifetimeRevision++;
+    this.bpmUpdateRevision++;
     this.stopActivePreview();
   }
 
@@ -621,7 +632,6 @@ struct DrumMachinePage {
 
   private addSection(): void {
     if (this.sections.length >= 8) {
-      promptAction.showToast({ message: '最多编排 8 个段落' });
       return;
     }
     const id = String.fromCharCode(65 + this.sections.length);
@@ -638,7 +648,6 @@ struct DrumMachinePage {
 
   private deleteSection(index: number): void {
     if (this.sections.length <= 1) {
-      promptAction.showToast({ message: '至少保留一个段落' });
       return;
     }
     const next: DrumSection[] = [];
@@ -1059,10 +1068,11 @@ struct DrumMachinePage {
           this.updateEditorPreviewProgress();
         }
       }, DRUM_EDITOR_PREVIEW_FRAME_MS);
-    } catch (_e) {
+    } catch (error) {
       if (revision === this.editorPreviewRevision && this.previewTarget === 'editor') {
         this.stopActivePreview(true);
-        promptAction.showToast({ message: '试听启动失败' });
+        logUserFailure('drum.preview.editor', error);
+        showUserNotice('试听启动失败', 'drum.preview.editor');
       }
     }
   }
@@ -1134,7 +1144,6 @@ struct DrumMachinePage {
     this.replaceSection(this.selectedSection, section);
     this.closeEditor();
     this.notifySectionEdited(this.selectedSection);
-    promptAction.showToast({ message: this.editorMode === 0 ? '节奏型已编辑' : '加花已编辑' });
   }
 
   private cancelSectionPreviewStop(): void {
@@ -1169,6 +1178,7 @@ struct DrumMachinePage {
       this.songPreviewProgressTimerId = -1;
     }
     this.playingSongSection = -1;
+    this.playingSongIsFill = false;
     this.songPreviewTransportRevision = undefined;
     this.songPreviewHasPlayed = false;
   }
@@ -1210,10 +1220,12 @@ struct DrumMachinePage {
       this.cancelSongPreviewUpdate();
       this.stopSongPreviewProgress();
       this.previewTarget = '';
+      this.songPreviewMessage = '';
       return DRUM_SONG_PREVIEW_PROGRESS_MS;
     }
     if (snapshot === undefined || !snapshot.running) {
       this.playingSongSection = -1;
+      this.playingSongIsFill = false;
       return DRUM_SONG_PREVIEW_PROGRESS_MS;
     }
     // Queued PCM may still belong to an older plan. The engine reports its
@@ -1224,6 +1236,7 @@ struct DrumMachinePage {
     }
     this.playingSongSection = position === undefined ? -1 :
       this.sectionPlaybackKeys.indexOf(position.sectionKey);
+    this.playingSongIsFill = position?.isFill === true;
     const boundaryDelayMs = position?.nextBoundaryDelayMs;
     return boundaryDelayMs !== undefined && Number.isFinite(boundaryDelayMs) ?
       Math.max(1, Math.min(DRUM_SONG_PREVIEW_PROGRESS_MS, boundaryDelayMs)) : DRUM_SONG_PREVIEW_PROGRESS_MS;
@@ -1237,6 +1250,11 @@ struct DrumMachinePage {
       this.songPreviewUpdateTimerId = -1;
     }
     AppSession.get()?.invalidateDrumPreviewUpdate();
+  }
+
+  private isSongPhrasePlaying(sectionIndex: number, isFill: boolean): boolean {
+    return this.previewTarget === 'song' && this.playingSongSection === sectionIndex &&
+      this.playingSongIsFill === isFill;
   }
 
   private queueSongPreviewUpdate(): void {
@@ -1289,12 +1307,23 @@ struct DrumMachinePage {
     if (session?.isDrumPreviewReady() !== true) {
       return;
     }
+    const ownerRevision = session.getDrumPreviewRequestRevision();
     try {
-      await session.updateDrumPreviewProgram(serializeDrumProgram(this.currentProgram()), this.playbackSectionKeys());
-    } catch (_e) {
-      if (revision === this.songPreviewUpdateRevision && this.previewTarget === 'song' &&
+      const applied = await session.updateDrumPreviewProgram(
+        serializeDrumProgram(this.currentProgram()), this.playbackSectionKeys());
+      if (applied && revision === this.songPreviewUpdateRevision && this.previewTarget === 'song' &&
+        AppSession.get() === session && ownerRevision === session.getDrumPreviewRequestRevision() &&
         session.isDrumPreviewReady()) {
-        promptAction.showToast({ message: '试听更新失败，继续播放原编排' });
+        this.songPreviewMessage = '';
+      }
+    } catch (error) {
+      if (revision === this.songPreviewUpdateRevision && this.previewTarget === 'song' &&
+        AppSession.get() === session && ownerRevision === session.getDrumPreviewRequestRevision() &&
+        session.isDrumPreviewReady()) {
+        logUserFailure('drum.preview.update', error);
+        // Keep this beside playback until a newer edit really reaches the same
+        // audition owner; the visible arrangement may differ from its audio.
+        this.songPreviewMessage = '修改未进入试听，正在播放上一版';
       }
     }
   }
@@ -1304,6 +1333,7 @@ struct DrumMachinePage {
       this.cancelSectionPreviewStop();
       AppSession.get()?.stopDrumPreview();
       this.previewTarget = '';
+      this.songPreviewMessage = '';
       return false;
     }
     if (this.previewTarget.length > 0) {
@@ -1314,6 +1344,7 @@ struct DrumMachinePage {
     const sectionKeys = target === 'song' ? this.playbackSectionKeys() : undefined;
     try {
       this.previewTarget = target;
+      this.songPreviewMessage = '';
       await this.startPreviewPlayback(program, looping, 0, sectionKeys);
       const current = revision === this.sectionPreviewRevision && this.previewTarget === target &&
         AppSession.get()?.isDrumPreviewActive() === true;
@@ -1324,10 +1355,11 @@ struct DrumMachinePage {
         this.startSongPreviewProgress();
       }
       return current;
-    } catch (_e) {
+    } catch (error) {
       if (revision === this.sectionPreviewRevision && this.previewTarget === target) {
         this.previewTarget = '';
-        promptAction.showToast({ message: '试听启动失败' });
+        logUserFailure('drum.preview.start', error);
+        showUserNotice('试听启动失败', 'drum.preview.start');
       }
       return false;
     }
@@ -1383,6 +1415,7 @@ struct DrumMachinePage {
     this.cancelSectionPreviewStop();
     AppSession.get()?.stopDrumPreview();
     this.previewTarget = '';
+    this.songPreviewMessage = '';
   }
 
   private async restartSongPreview(): Promise<void> {
@@ -1397,15 +1430,18 @@ struct DrumMachinePage {
       await this.startPreviewPlayback(program, true, 0, sectionKeys);
       if (revision === this.sectionPreviewRevision && this.previewTarget === 'song') {
         if (AppSession.get()?.isDrumPreviewActive() === true) {
+          this.songPreviewMessage = '';
           this.startSongPreviewProgress();
         } else {
           this.previewTarget = '';
         }
       }
-    } catch (_e) {
+    } catch (error) {
       if (revision === this.sectionPreviewRevision && this.previewTarget === 'song') {
         this.previewTarget = '';
-        promptAction.showToast({ message: '切换试听失败' });
+        this.songPreviewMessage = '';
+        logUserFailure('drum.preview.switch', error);
+        showUserNotice('切换试听失败', 'drum.preview.switch');
       }
     }
   }
@@ -1455,17 +1491,13 @@ struct DrumMachinePage {
       if (revision === this.sectionPreviewRevision && this.previewTarget === target) {
         this.armSectionPreviewStop(target, this.sectionPreviewBarCount(section, withFill));
       }
-    } catch (_e) {
+    } catch (error) {
       if (revision === this.sectionPreviewRevision && this.previewTarget === target) {
         this.previewTarget = '';
-        promptAction.showToast({ message: '切换试听失败' });
+        logUserFailure('drum.preview.switch', error);
+        showUserNotice('切换试听失败', 'drum.preview.switch');
       }
     }
-  }
-
-  private saveLocal(): void {
-    AppStorage.setOrCreate('myDrumProgram', serializeDrumProgram(this.currentProgram()));
-    promptAction.showToast({ message: '已保存编排' });
   }
 
   private isLeader(): boolean {
@@ -1477,10 +1509,7 @@ struct DrumMachinePage {
     if (controller === undefined || !controller.isLeader) {
       return;
     }
-    await controller.updateBpm(controller.bpm + delta);
-    this.bpm = controller.bpm;
-    this.rememberEditedTempoAndMeter();
-    void this.refreshActivePreview();
+    await this.setBpm(controller.bpm + delta);
   }
 
   private async setBpm(value: number): Promise<void> {
@@ -1488,17 +1517,30 @@ struct DrumMachinePage {
     if (controller === undefined || !controller.isLeader) {
       return;
     }
-    await controller.updateBpm(value);
-    this.bpm = controller.bpm;
-    this.rememberEditedTempoAndMeter();
-    void this.refreshActivePreview();
+    const revision = ++this.bpmUpdateRevision;
+    try {
+      await controller.updateBpm(value);
+      if (revision !== this.bpmUpdateRevision || AppSession.get()?.controller !== controller) {
+        return;
+      }
+      this.bpm = controller.bpm;
+      this.rememberEditedTempoAndMeter();
+      void this.refreshActivePreview();
+    } catch (error) {
+      if (revision === this.bpmUpdateRevision && AppSession.get()?.controller === controller) {
+        logUserFailure('drum.bpm', error);
+        showUserNotice(userErrorMessage(error, '速度调整失败，请重试'), 'drum.bpm');
+      }
+    }
   }
 
   private async applyToTeam(): Promise<void> {
-    const controller = AppSession.get()?.controller;
-    if (controller === undefined || !controller.isLeader || this.saving) {
+    const session = AppSession.get();
+    if (session === undefined || !session.controller.isLeader || this.saving) {
       return;
     }
+    const controller = session.controller;
+    const lifetime = this.pageLifetimeRevision;
     this.saving = true;
     try {
       const raw = serializeDrumProgram(this.currentProgram());
@@ -1506,15 +1548,28 @@ struct DrumMachinePage {
       if (controller.rhythm >= 0 && controller.rhythm <= 2) {
         AppStorage.setOrCreate('lastBasicRhythm', controller.rhythm);
       }
-      AppSession.get()?.stopDrumPreview();
+      session.stopDrumPreview();
       await controller.updateMeter(this.beatsPerBar, this.beatUnit);
+      if (lifetime !== this.pageLifetimeRevision || AppSession.get() !== session || session.controller !== controller) {
+        return;
+      }
       await controller.updateDrumProgram(raw);
-      promptAction.showToast({ message: '鼓机编排已应用到队伍' });
+      // Applying spans network awaits; only the page and session that started
+      // it may publish its result or navigate away from the current screen.
+      if (lifetime !== this.pageLifetimeRevision || AppSession.get() !== session || session.controller !== controller) {
+        return;
+      }
+      showUserNotice('鼓机编排已应用到队伍', 'drum.apply');
       router.back();
-    } catch (_e) {
-      promptAction.showToast({ message: '应用失败，请重试' });
+    } catch (error) {
+      if (lifetime === this.pageLifetimeRevision && AppSession.get() === session && session.controller === controller) {
+        logUserFailure('drum.apply', error);
+        showUserNotice(userErrorMessage(error, '应用失败，请重试'), 'drum.apply');
+      }
     } finally {
-      this.saving = false;
+      if (lifetime === this.pageLifetimeRevision) {
+        this.saving = false;
+      }
     }
   }
 
@@ -1634,6 +1689,9 @@ struct DrumMachinePage {
           Text('×').fontSize(20).fontWeight(900).fontColor('#D83A2E').lineHeight(22)
         }.width(28).height(28).padding(0).backgroundColor('#FFF1E8')
           .border({ width: 1, color: INK }).borderRadius(5).shadow(CONTROL_SHADOW)
+          .enabled(this.sections.length > 1)
+          .opacity(this.sections.length > 1 ? 1 : 0.4)
+          .accessibilityText(this.sections.length > 1 ? `删除段落 ${this.sections[index].id}` : '至少保留一个段落')
           .onClick(() => this.requestDeleteSection(index))
         Text(this.isSectionExpanded(index) ? '⌃' : '⌄').fontSize(22).width(30).textAlign(TextAlign.Center)
           .accessibilityText(`${this.isSectionExpanded(index) ? '收起' : '展开'}段落 ${this.sections[index].id}`)
@@ -1650,7 +1708,7 @@ struct DrumMachinePage {
               Text(this.dropdownTarget === `menu-pattern-${index}` ? '⌃' : '⌄').fontSize(15)
             }.width('100%')
           }.id(`dm-pattern-${index}`).layoutWeight(1).height(34).padding({ left: 8, right: 7 })
-          .fontColor(INK).backgroundColor(PAPER)
+          .fontColor(INK).backgroundColor(this.isSongPhrasePlaying(index, false) ? DRUM_PHRASE_PLAYING_COLOR : PAPER)
           .border({ width: 1, color: INK }).borderRadius(5).shadow(CONTROL_SHADOW)
           .onClick(() => this.openDropdownFromAnchor(`menu-pattern-${index}`, `dm-pattern-${index}`, 126))
           Button(this.previewTarget === `pattern-${index}` ? '停止' : '试听', { type: ButtonType.Normal })
@@ -1680,7 +1738,7 @@ struct DrumMachinePage {
               Text(this.dropdownTarget === `menu-fill-${index}` ? '⌃' : '⌄').fontSize(15)
             }.width('100%')
           }.id(`dm-fill-${index}`).layoutWeight(1).height(34).padding({ left: 8, right: 7 })
-          .fontColor(INK).backgroundColor(PAPER)
+          .fontColor(INK).backgroundColor(this.isSongPhrasePlaying(index, true) ? DRUM_PHRASE_PLAYING_COLOR : PAPER)
           .border({ width: 1, color: INK }).borderRadius(5).shadow(CONTROL_SHADOW)
           .onClick(() => this.openDropdownFromAnchor(`menu-fill-${index}`, `dm-fill-${index}`, 126))
           Button(this.previewTarget === `fill-${index}` ? '停止' : '试听', { type: ButtonType.Normal })
@@ -1752,11 +1810,19 @@ struct DrumMachinePage {
           Text('×').fontSize(27).fontWeight(900).onClick(() => this.saveDialogVisible = false)
         }.width('100%')
         Divider().strokeWidth(1).color('#CEC4B6')
-        Text('给这套鼓机编排起一个名字').fontSize(13).fontWeight(FontWeight.Bold).width('100%')
-        TextInput({ text: this.saveName, placeholder: '例如：夜跑推进' })
-          .height(44).fontSize(15).fontColor(INK).backgroundColor(PAPER)
-          .border({ width: 1.5, color: INK }).borderRadius(5).shadow(CONTROL_SHADOW).maxLength(16)
-          .onChange((value: string) => this.saveName = value)
+        Column({ space: 4 }) {
+          TextInput({ text: this.saveName, placeholder: '节奏名称，例如：夜跑推进' })
+            .height(44).fontSize(15).fontColor(INK).backgroundColor(PAPER)
+            .border({ width: 1.5, color: this.saveNameError.length > 0 ? '#B32E23' : INK })
+            .borderRadius(5).shadow(CONTROL_SHADOW).maxLength(16)
+            .onChange((value: string) => {
+              this.saveName = value;
+              this.saveNameError = '';
+            })
+          if (this.saveNameError.length > 0) {
+            Text(this.saveNameError).width('100%').fontSize(12).lineHeight(16).fontColor('#B32E23')
+          }
+        }.width('100%')
         Row({ space: 9 }) {
           Button('取消', { type: ButtonType.Normal }).layoutWeight(1).height(42).fontSize(13).fontWeight(900)
             .fontColor(INK).backgroundColor(PAPER).border({ width: 1.5, color: INK }).borderRadius(5).shadow(CONTROL_SHADOW)
@@ -1777,10 +1843,7 @@ struct DrumMachinePage {
   private overwriteDialogOverlay() {
     Stack({ alignContent: Alignment.Center }) {
       Column({ space: 12 }) {
-        Text('同名警告').fontSize(12).fontWeight(900).fontColor(PAPER).backgroundColor(INK)
-          .padding({ left: 9, right: 9, top: 4, bottom: 4 }).rotate({ angle: -3 })
-          .shadow(CONTROL_SHADOW)
-        Text('这个名字已经存在').fontSize(25).fontWeight(900).fontStyle(FontStyle.Italic).width('100%')
+        Text('覆盖已有节奏？').fontSize(25).fontWeight(900).fontStyle(FontStyle.Italic).width('100%')
         Text(`继续保存会覆盖「${this.saveName.trim()}」的原有编排。`)
           .fontSize(13).fontWeight(FontWeight.Bold).lineHeight(20).width('100%')
         Divider().strokeWidth(1).color('#C8BFB1')
@@ -2010,10 +2073,9 @@ struct DrumMachinePage {
             Text('选择风格').fontSize(16).fontWeight(900)
             Blank()
             Row({ space: 3 }) {
-              Text('横滑查看更多').fontSize(10).fontWeight(FontWeight.Bold)
-              Text('→').fontSize(16).fontWeight(900)
-            }.height(26).padding({ left: 9, right: 8 }).backgroundColor(LILAC)
-            .border({ width: 1, color: INK }).borderRadius(13).shadow(CONTROL_SHADOW)
+              Text('横滑查看更多').fontSize(10).fontColor('#655E55')
+              Text('→').fontSize(16).fontWeight(900).fontColor('#655E55')
+            }
           }.width('100%')
           Scroll() {
             Row({ space: 8 }) {
@@ -2080,6 +2142,9 @@ struct DrumMachinePage {
           }, (section: DrumSection) => `${section.id}-${section.patternIndex}-${section.repeats}-${section.fillEvery}`)
           Button('+ 新增段落', { type: ButtonType.Normal }).width('100%').height(46).fontSize(17).fontWeight(900)
             .fontColor(INK).backgroundColor(LILAC).border({ width: 1.5, color: INK }).borderRadius(6).shadow(CONTROL_SHADOW)
+            .enabled(this.sections.length < 8)
+            .opacity(this.sections.length < 8 ? 1 : 0.4)
+            .accessibilityText(this.sections.length < 8 ? '新增段落' : '最多编排 8 个段落')
             .onClick(() => this.addSection())
           Row({ space: 8 }) {
             Button({ type: ButtonType.Normal }) {
@@ -2098,8 +2163,9 @@ struct DrumMachinePage {
               .fontColor(INK).fontWeight(900).backgroundColor(CORAL).border({ width: 1.5, color: INK }).borderRadius(6).shadow(CONTROL_SHADOW)
               .enabled(!this.saving).onClick(() => { void this.applyToTeam(); })
           }.width('100%')
-          Text('节奏、加花与段落会作为轻量事件同步；每台设备使用本地鼓组采样播放。')
-            .fontSize(10).fontColor('#686158').width('100%')
+          if (this.previewTarget === 'song' && this.songPreviewMessage.length > 0) {
+            Text(this.songPreviewMessage).width('100%').fontSize(12).lineHeight(18).fontColor('#B32E23')
+          }
           Divider().strokeWidth(1).color('#D4CBBE')
           Row() {
             Text('我的节奏').fontSize(16).fontWeight(900)

@@ -59,6 +59,14 @@ export async function ensureTeamNetworkPermissions(context: common.UIAbilityCont
   return await requestPermissions(context, missing);
 }
 
+/** Background discovery may prewarm only with existing consent; joining owns the system prompt. */
+export async function hasTeamNetworkPermissions(context: common.UIAbilityContext): Promise<boolean> {
+  const atManager = abilityAccessCtrl.createAtManager();
+  const tokenId = context.applicationInfo.accessTokenId;
+  const missing = await collectMissingPermissions(atManager, tokenId, TEAM_NETWORK_USER_PERMISSIONS);
+  return missing.length === 0;
+}
+
 export async function ensureBluetoothDiscoveryPermission(context: common.UIAbilityContext): Promise<boolean> {
   const atManager = abilityAccessCtrl.createAtManager();
   const tokenId = context.applicationInfo.accessTokenId;
@@ -81,9 +89,9 @@ export function isTeamWifiActive(): boolean {
 
 export function teamNetworkAccessUnavailableHint(): string {
   if (!canIUse('SystemCapability.Communication.WiFi.P2P')) {
-    return '当前设备不支持 Wi-Fi P2P，无法使用多人练习。';
+    return '当前设备不支持多人组队，可使用单人练习';
   }
-  return '请先打开 Wi-Fi，点此可前往系统设置；不需要连接同一路由器。';
+  return '请先打开 Wi-Fi，再重试';
 }
 
 export function isBluetoothDiscoveryAvailable(): boolean {
@@ -115,7 +123,7 @@ export function bluetoothPermissionDeniedHint(): string {
 }
 
 export function cameraPermissionDeniedHint(): string {
-  return '扫码加入需要「相机」权限，请在系统弹窗中允许或到应用设置中开启。';
+  return '扫码需要相机权限，请在设置中允许；也可以输入加入码。';
 }
 
 export async function ensureMicrophonePermission(context: common.UIAbilityContext): Promise<boolean> {

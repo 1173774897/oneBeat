@@ -13,7 +13,8 @@ function request(sections, styleKey = 'rock') {
     keys: sections.map(section => section.key),
     raw: catalog.serializeDrumProgram({ styleKey, beatsPerBar: 4, beatUnit: 4,
       sections: sections.map((section, index) => ({ id: String.fromCharCode(65 + index),
-        patternIndex: 0, repeats: section.repeats, fillIndex: 0, fillEvery: 0,
+        patternIndex: 0, repeats: section.repeats, fillIndex: section.fillIndex ?? 0,
+        fillEvery: section.fillEvery ?? 0, customFill: section.customFill, customFillRows: section.customFillRows,
         customPattern: { subdivision: 4, events: [
           { tick: 0, sampleKey: 'kick', velocity: section.velocity },
           ...(section.beatVelocity === undefined ? [] : [{ tick: 480, sampleKey: 'kick', velocity: section.beatVelocity }])
@@ -37,17 +38,17 @@ function write(h, frames, advance = true) {
 }
 
 async function start(sections = initial(), options = {}) {
-  const h = harness({ engineOptions: { compensationMs: 0, physicalLatencyMs: 0 } });
+  const h = harness({ engineOptions: { compensationMs: 0, physicalLatencyMs: 0, ...options.engineOptions } });
   h.session.keepRendererAliveForSession = true;
   const originalRender = h.engine.renderBar.bind(h.engine);
   h.engine.renderBar = (...args) => {
     assert.notEqual(h.inWrite, true, 'PCM preparation must never run inside writeData');
     return originalRender(...args);
   };
-  const plan = request(sections);
+  const plan = request(sections, options.styleKey ?? 'rock');
   const operation = h.session.previewDrumProgram(plan.raw, options.looping ?? true, 120, 4, 0,
     options.attach === false ? undefined : plan.keys);
-  h.loads[0].resolve(bank(20000));
+  h.loads[0].resolve(options.bank ?? bank(20000));
   await operation;
   await h.fireDueTimers();
   const transition = h.engine.pendingAudioTransition;
@@ -60,11 +61,23 @@ async function start(sections = initial(), options = {}) {
   return h;
 }
 
-function position(h, key, repeatIndex) {
+function position(h, key, repeatIndex, isFill) {
   const current = h.engine.getDrumPreviewPosition();
   assert.ok(current, 'The audible local song must expose its applied logical position');
   assert.equal(current.sectionKey, key);
   assert.equal(current.repeatIndex, repeatIndex);
+  if (isFill !== undefined) assert.equal(current.isFill, isFill, 'The audible phrase must match its rendered replacement window');
+}
+
+function phraseBank() {
+  return new Map(catalog.DRUM_TRACKS.map(track => [track.key,
+    new Int16Array([track.key === 'kick' ? 20000 : 10000]).buffer]));
+}
+
+function presentFrame(h, frame) {
+  const at = h.audibleAtFrame(frame);
+  assert.ok(at >= h.now - 0.0001, 'Presentation probes must advance the native clock monotonically');
+  h.advanceClock(at - h.now);
 }
 
 function nextBar(h) {
@@ -600,7 +613,167 @@ async function testTransientNativeCounterRegression() {
   assert.equal(h.starts.length, 1);
 }
 
+function testCatalogFillWindows() {
+  for (const style of catalog.DRUM_STYLES) for (const beatsPerBar of [1, 3, 4, 7]) {
+    for (const beatUnit of [2, 4, 8, 16]) for (let fillIndex = 0; fillIndex < 3; fillIndex++) {
+      const program = { styleKey: style.key, beatsPerBar, beatUnit };
+      const section = { fillIndex };
+      const length = style.key === 'jazz' ? (fillIndex === 2 ? 2 : 1) :
+        (fillIndex === 0 || (style.key === 'trap' && fillIndex === 1) ? 1 : 2);
+      assert.equal(catalog.sectionFillStartBeat(program, section), Math.max(0, beatsPerBar - length),
+        'A preset phrase owns only its replacement window in denominator beats');
+      assert.equal(catalog.sectionFillStartBeat(program, { ...section,
+        customFill: { subdivision: 3, events: [] } }), 0,
+      'An intentionally silent custom fill still replaces the entire bar');
+      assert.equal(catalog.sectionFillStartBeat(program, { ...section, customFillRows: [''] }), 0,
+        'Legacy custom fill rows also own their complete bar');
+    }
+  }
+}
+
+async function testAudibleFillWindows() {
+  for (const variant of [
+    { styleKey: 'rock', fillIndex: 0, startBeat: 3 },
+    { styleKey: 'rock', fillIndex: 1, startBeat: 2 },
+    { styleKey: 'jazz', fillIndex: 1, startBeat: 3 },
+    { styleKey: 'jazz', fillIndex: 2, startBeat: 2 },
+    { styleKey: 'trap', fillIndex: 1, startBeat: 3 },
+    { styleKey: 'rock', fillIndex: 0, startBeat: 0,
+      customFill: { subdivision: 3, events: [{ tick: 0, sampleKey: 'kick', velocity: 0.9 }] } },
+    { styleKey: 'rock', fillIndex: 0, startBeat: 0, customFillRows: ['1000000000000000'] },
+    { styleKey: 'rock', fillIndex: 0, startBeat: 0, customFill: { subdivision: 4, events: [] } }
+  ]) {
+    const sections = [{ key: 'key-a', repeats: 2, velocity: 0.2, fillEvery: 2, ...variant }];
+    const h = await start(sections, { styleKey: variant.styleKey, bank: phraseBank() });
+    const before = continuity(h);
+    const origin = h.engine.transportStartLocalMs;
+    const first = h.engine.audioTimelineLeadFrames;
+    const expected = h.engine.drumPreviewPlan.newest.plan.sequence[1];
+    const fillSource = variant.startBeat * RATE / 2;
+    const pcm = write(h, 3 * BAR, false);
+    h.inWrite = undefined;
+    assert.equal(pcm[BAR - 1 + fillSource], expected.samples[fillSource],
+      'The fill boundary must be measured against the actual scheduled PCM');
+    position(h, 'key-a', 0, false);
+    presentFrame(h, first + BAR + 1);
+    position(h, 'key-a', 1, variant.startBeat === 0);
+    if (variant.startBeat > 0) {
+      presentFrame(h, first + BAR + fillSource - 1);
+      position(h, 'key-a', 1, false);
+      const deadline = h.engine.getDrumPreviewPosition().nextBoundaryDelayMs;
+      assert.ok(deadline > 0 && deadline <= 2.01 * 1000 / RATE,
+        'The adaptive deadline must include the intra-bar phrase transition');
+      presentFrame(h, first + BAR + fillSource + 1);
+      position(h, 'key-a', 1, true);
+    }
+    presentFrame(h, first + 2 * BAR + 1);
+    position(h, 'key-a', 0, false);
+    assert.equal(h.engine.transportStartLocalMs, origin);
+    assertUninterrupted(h, before);
+    h.session.stopDrumPreview();
+    assert.equal(h.engine.getDrumPreviewPosition(), undefined);
+  }
+  const h = await start([{ key: 'key-a', repeats: 1, velocity: 0.2, fillEvery: 0,
+    customFill: { subdivision: 4, events: [{ tick: 0, sampleKey: 'kick', velocity: 0.9 }] } }]);
+  const first = h.engine.audioTimelineLeadFrames;
+  write(h, 2 * BAR, false);
+  h.inWrite = undefined;
+  presentFrame(h, first + BAR - 1);
+  position(h, 'key-a', 0, false);
+}
+
+async function testQueuedFillMetadataAndFallback() {
+  for (const custom of [false, true]) for (const fallback of [false, true]) {
+    const sections = [{ key: 'key-a', repeats: 2, velocity: 0.2, fillEvery: 1, fillIndex: 0 }];
+    const h = await start(sections, { bank: phraseBank() });
+    const before = continuity(h);
+    const first = h.engine.audioTimelineLeadFrames;
+    const oldBar = h.engine.activeBar;
+    const revised = sections.map(section => ({ ...section, fillIndex: 1,
+      ...(custom ? { customFill: { subdivision: 4, events: [{ tick: 0, sampleKey: 'kick', velocity: 0.9 }] } } : {}) }));
+    assert.equal(await update(h, revised), true);
+    const remainder = write(h, BAR - h.engine.audioFrameCursor, false);
+    assert.deepEqual(Array.from(remainder), Array.from(oldBar.samples.subarray(1)),
+      'Changing a fill cannot replace any remaining PCM in the current bar');
+    const next = write(h, 2 * BAR, false);
+    h.inWrite = undefined;
+    assert.equal(next[custom ? 0 : RATE], custom ? 18000 : 19500,
+      'The revised fill must be present in the real next-bar PCM');
+    if (fallback) h.renderer.getAudioTimestampInfoSync = () => { throw new Error('Native timestamp unavailable'); };
+    presentFrame(h, first + RATE + RATE / 4);
+    position(h, 'key-a', 0, false);
+    presentFrame(h, first + 3 * RATE / 2 + 1);
+    position(h, 'key-a', 0, true);
+    presentFrame(h, first + BAR + 1);
+    position(h, 'key-a', 1, custom);
+    if (!custom) {
+      presentFrame(h, first + BAR + RATE - 1);
+      position(h, 'key-a', 1, false);
+      presentFrame(h, first + BAR + RATE + 1);
+      position(h, 'key-a', 1, true);
+    }
+    assertUninterrupted(h, before);
+  }
+}
+
+async function testFillFrameCorrections() {
+  for (const correction of [-4410, 2205]) {
+    const h = await start([{ key: 'key-a', repeats: 2, velocity: 0.2, fillEvery: 1, fillIndex: 0 }],
+      { bank: phraseBank() });
+    const before = continuity(h);
+    const origin = h.engine.transportStartLocalMs;
+    h.engine.phaseCorrectionFrames = correction;
+    const submitted = h.engine.audioSubmittedFrames;
+    const pcm = write(h, BAR + Math.abs(correction) + 64, false);
+    h.inWrite = undefined;
+    const fillOffset = pcm.findIndex(value => value === 7600);
+    assert.equal(fillOffset, 3 * RATE / 2 - 1 + correction,
+      'The fixture must locate the real first fill onset after inserted/dropped source frames');
+    presentFrame(h, submitted + fillOffset - 1);
+    position(h, 'key-a', 0, false);
+    const deadline = h.engine.getDrumPreviewPosition().nextBoundaryDelayMs;
+    assert.ok(deadline > 0 && deadline <= 2.01 * 1000 / RATE,
+      'Phase corrections must move the phrase deadline with the emitted PCM');
+    presentFrame(h, submitted + fillOffset + 1);
+    position(h, 'key-a', 0, true);
+    assert.equal(h.engine.transportStartLocalMs, origin);
+    assertUninterrupted(h, before);
+  }
+}
+
+async function testRecoveredFillPhase() {
+  for (const routeRephase of [false, true]) for (const sourceBeat of [2, 3]) {
+    const h = await start([{ key: 'key-a', repeats: 2, velocity: 0.2, fillEvery: 1, fillIndex: 0 }],
+      { bank: phraseBank() });
+    const before = continuity(h);
+    const origin = h.engine.transportStartLocalMs;
+    const target = h.engine.audioSubmittedFrames + 2205;
+    const transition = { kind: 'play', token: h.engine.runToken, targetFrame: target,
+      beatIndex: sourceBeat, countInBeats: 0, outputLatencyMs: 0, routeRephase,
+      preserveActiveSequence: true, timelineElapsedFrames: sourceBeat * RATE / 2 };
+    h.engine.scheduleRunningTransition(transition);
+    write(h, target - h.engine.audioSubmittedFrames, false);
+    const expected = h.engine.activeBar.samples[sourceBeat * RATE / 2];
+    const pcm = write(h, BAR, false);
+    h.inWrite = undefined;
+    assert.equal(pcm[0], expected, 'Recovery must really emit the selected mid-bar source PCM');
+    presentFrame(h, target + 1);
+    position(h, 'key-a', 0, sourceBeat === 3);
+    if (sourceBeat === 2) {
+      presentFrame(h, target + RATE / 2 - 1);
+      position(h, 'key-a', 0, false);
+      presentFrame(h, target + RATE / 2 + 1);
+      position(h, 'key-a', 0, true);
+    }
+    presentFrame(h, target + (4 - sourceBeat) * RATE / 2 + 1);
+    position(h, 'key-a', 1, false);
+    assert.equal(h.engine.transportStartLocalMs, origin);
+    assertUninterrupted(h, before);
+  }
+}
+
 async function main() {
+  testCatalogFillWindows();
   await testNextBoundaryAndLogicalIdentity();
   await testStructureChanges();
   await testLatestWinsAndFailure();
@@ -615,7 +788,11 @@ async function main() {
   await testPersistentNativeOriginRegressions();
   await testPersistentNativeOriginRegressions(882);
   await testTransientNativeCounterRegression();
-  console.log('PASS whole-song live drum update: actual next-boundary PCM, stable section/repeat mapping, structural edits, latest async/staged plan, cached sounds, failure continuity, owner cancellation, callback-safe rendering, shared defer, route and ordinary recovery position');
+  await testAudibleFillWindows();
+  await testQueuedFillMetadataAndFallback();
+  await testFillFrameCorrections();
+  await testRecoveredFillPhase();
+  console.log('PASS whole-song live drum update: actual next-boundary PCM, audible preset/custom fill windows, frequency/loop, queued fill edits and fallback, corrected-frame phrase deadlines, stable section/repeat mapping, structural edits, latest async/staged plan, cached sounds, failure continuity, owner cancellation, callback-safe rendering, shared defer, route and ordinary recovery position');
 }
 
 main().catch(error => { console.error(error); process.exitCode = 1; });

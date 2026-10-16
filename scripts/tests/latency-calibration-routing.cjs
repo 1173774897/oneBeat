@@ -119,6 +119,7 @@ function harness(initialWireless = true, leader = true) {
     '../network/p2p/WifiP2pManager': { WifiP2pManager: class { async teardown() {} } },
     '../network/p2p/BleRoomDiscovery': { BleRoomDiscovery: class { async stopLeaderAdvertising() {} } },
     '../network/p2p/P2pInvitation': {},
+    '../common/UserFeedback': { showUserNotice: message => toasts.push(message), logUserFailure() {} },
     '../common/Constants': { PROTOCOL_VERSION: 6 },
     '../common/MonotonicClock': { MonotonicClock: { nowMs: () => now } },
     '../common/MeterModel': { defaultBeatPointStates: () => [] },
@@ -255,7 +256,7 @@ function assertNoMicBoundary(h, before, label) {
   };
   currentFailure.emit('2:1', false);
   await new Promise(resolve => setImmediate(resolve));
-  assert.deepEqual(currentFailure.toasts, ['current output failed']);
+  assert.deepEqual(currentFailure.toasts, ['声音输出切换失败，请暂停后重试']);
 
   const replacedDuringReturn = harness();
   replacedDuringReturn.session.metronome.scheduleCalibrationSignal = async () => {

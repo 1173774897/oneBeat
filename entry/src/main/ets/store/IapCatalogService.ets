@@ -56,7 +56,7 @@ export function storePriceUnavailableMessage(reason: StorePriceUnavailableReason
     return '请先在系统「设置」登录华为账号，返回小铺后将自动刷新价格';
   }
   if (reason === 'product_catalog') {
-    return '华为商店商品信息暂未就绪，请更新应用或稍后再试';
+    return '商品信息暂时不可用，请更新应用或稍后重试';
   }
   if (reason === 'unknown') {
     return '商品价格暂时不可用，请检查网络后重试';

@@ -159,7 +159,6 @@ export class SessionController {
   joinCode: string = '';
   bleInviteAvailable: boolean = false;
   displayName: string = 'Player';
-  bluetoothAcknowledged: boolean = false;
   /** 仅队长一人在场，不依赖 P2P / 队员加入 */
   soloTeam: boolean = false;
 
@@ -199,8 +198,8 @@ export class SessionController {
     if (!this.isLeader || !isValidMeter(beatsPerBar, beatUnit)) {
       return;
     }
-    // This draft is intentionally session-local: first entry follows the lobby,
-    // but later entries in the same team lifecycle preserve explicit PRO edits.
+    // Keep unapplied PRO edits within this team. When PRO is active, subsequent
+    // live tempo/meter changes replace only the corresponding cached fields.
     this.proDrumEditorSettings = {
       beatsPerBar: beatsPerBar,
       beatUnit: beatUnit,
@@ -794,6 +793,9 @@ export class SessionController {
     if (!this.isLeader) { return; }
     const restartRunningTransport = this.state === 'playing' || this.state === 'countdown';
     this.bpm = Math.max(40, Math.min(240, next));
+    if (this.rhythm === 3 && this.proDrumEditorSettings !== undefined) {
+      this.proDrumEditorSettings.bpm = this.bpm;
+    }
     if (!restartRunningTransport) {
       await this.broadcastSnapshot();
       return;
@@ -842,6 +844,10 @@ export class SessionController {
     const previousBeatCount = this.beatPointStates.length;
     this.beatsPerBar = beats;
     this.beatUnit = unit;
+    if (this.rhythm === 3 && this.proDrumEditorSettings !== undefined) {
+      this.proDrumEditorSettings.beatsPerBar = beats;
+      this.proDrumEditorSettings.beatUnit = unit;
+    }
     this.beatPointStates = normalizeBeatPointStates(this.beatPointStates, beats);
     if (this.rhythm === 2) {
       for (let i = previousBeatCount; i < this.beatPointStates.length; i++) {

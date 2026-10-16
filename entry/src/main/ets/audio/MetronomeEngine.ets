@@ -13,7 +13,8 @@ import {
 import {
   buildProgramSequence,
   DrumProgram,
-  parseDrumProgram
+  parseDrumProgram,
+  sectionFillStartBeat
 } from './DrumMachineCatalog';
 import { DrumSampleBank } from './DrumSampleBank';
 import { BeatPointState, defaultBeatPointStates, normalizeBeatPointStates } from '../common/MeterModel';
@@ -172,10 +173,14 @@ interface RenderedBar {
   beatsPerBar: number;
 }
 
-/** Stable local editor identity; repeatIndex is zero-based and independent of A/B display labels. */
-export interface DrumPreviewPosition {
+interface DrumPreviewBarPosition {
   sectionKey: string;
   repeatIndex: number;
+}
+
+/** Stable local editor identity and the phrase currently presented by the local renderer. */
+export interface DrumPreviewPosition extends DrumPreviewBarPosition {
+  isFill: boolean;
   nextBoundaryDelayMs?: number;
 }
 
@@ -186,7 +191,8 @@ interface DrumPreviewPlan {
   sequence: RenderedBar[];
   sectionKeys: string[];
   sectionStarts: number[];
-  positions: DrumPreviewPosition[];
+  positions: DrumPreviewBarPosition[];
+  fillStartFrames: number[];
 }
 
 interface DrumPreviewActivation {
@@ -206,8 +212,10 @@ interface DrumPreviewPlanContext {
   newest: DrumPreviewActivation;
   rendered: DrumPreviewActivation;
   renderedBar: number;
+  renderedFill: boolean;
   boundaryFrames: Float64Array;
   boundaryBars: Float64Array;
+  boundaryFills: Float64Array;
   boundaryRendererEpochs: Float64Array;
   boundaryPhysicalStarts: Float64Array;
   boundaryHead: number;
@@ -784,8 +792,10 @@ export class MetronomeEngine {
     this.drumPreviewPlan = {
       bpm: this.bpm, beatsPerBar: program.beatsPerBar, beatUnit: program.beatUnit,
       armed: true, started: false, initialBeatOffset: 0, newest: activation, rendered: activation, renderedBar: 0,
+      renderedFill: false,
       boundaryFrames: new Float64Array(DRUM_PREVIEW_BOUNDARY_CAPACITY),
       boundaryBars: new Float64Array(DRUM_PREVIEW_BOUNDARY_CAPACITY),
+      boundaryFills: new Float64Array(DRUM_PREVIEW_BOUNDARY_CAPACITY),
       boundaryRendererEpochs: new Float64Array(DRUM_PREVIEW_BOUNDARY_CAPACITY),
       boundaryPhysicalStarts: new Float64Array(DRUM_PREVIEW_BOUNDARY_CAPACITY),
       boundaryHead: 0, boundaryCount: 0
@@ -849,7 +859,9 @@ export class MetronomeEngine {
     if (context === undefined || context.armed || !this.running) {
       return undefined;
     }
-    let bar = this.drumPreviewLogicalBar(context);
+    const logicalBeat = this.drumPreviewLogicalBeat(context);
+    let bar = logicalBeat < 0 ? -1 : Math.floor(logicalBeat / context.beatsPerBar);
+    let isFill = false;
     let nextBoundaryDelayMs: number | undefined = undefined;
     const presentedFrame = this.drumPreviewPresentedFrame();
     if (presentedFrame !== undefined) {
@@ -860,6 +872,7 @@ export class MetronomeEngine {
         return undefined;
       }
       bar = context.boundaryBars[boundary];
+      isFill = context.boundaryFills[boundary] === 1;
       nextBoundaryDelayMs = this.drumPreviewNextBoundaryDelay(context, presentedFrame);
     }
     if (bar < 0) {
@@ -872,7 +885,14 @@ export class MetronomeEngine {
     if (position === undefined) {
       return undefined;
     }
-    const result: DrumPreviewPosition = { sectionKey: position.sectionKey, repeatIndex: position.repeatIndex };
+    if (presentedFrame === undefined) {
+      const fillStart = activation.plan.fillStartFrames[index];
+      const sourceFrame = (logicalBeat % context.beatsPerBar) * activation.plan.sequence[index].samplesPerBeat;
+      isFill = fillStart >= 0 && sourceFrame >= fillStart;
+    }
+    const result: DrumPreviewPosition = {
+      sectionKey: position.sectionKey, repeatIndex: position.repeatIndex, isFill: isFill
+    };
     if (nextBoundaryDelayMs !== undefined) {
       result.nextBoundaryDelayMs = nextBoundaryDelayMs;
     }
@@ -891,7 +911,8 @@ export class MetronomeEngine {
     }
     const keys: string[] = [];
     const starts: number[] = [];
-    const positions: DrumPreviewPosition[] = [];
+    const positions: DrumPreviewBarPosition[] = [];
+    const fillStartBeats: number[] = [];
     for (let section = 0; section < program.sections.length; section++) {
       const key = sectionKeys[section];
       if (key.length === 0 || keys.indexOf(key) >= 0) {
@@ -901,12 +922,20 @@ export class MetronomeEngine {
       starts.push(positions.length);
       for (let repeat = 0; repeat < program.sections[section].repeats; repeat++) {
         positions.push({ sectionKey: key, repeatIndex: repeat });
+        const definition = program.sections[section];
+        const withFill = definition.fillEvery > 0 && (repeat + 1) % definition.fillEvery === 0;
+        fillStartBeats.push(withFill ? sectionFillStartBeat(program, definition) : -1);
       }
     }
     if (positions.length !== sequence.length) {
       throw new Error('整曲试听小节计划不完整');
     }
-    return { raw, program, bank, sequence, sectionKeys: keys, sectionStarts: starts, positions };
+    const fillStartFrames: number[] = [];
+    for (let index = 0; index < sequence.length; index++) {
+      fillStartFrames.push(fillStartBeats[index] < 0 ? -1 :
+        Math.round(fillStartBeats[index] * sequence[index].samplesPerBeat));
+    }
+    return { raw, program, bank, sequence, sectionKeys: keys, sectionStarts: starts, positions, fillStartFrames };
   }
 
   private drumPreviewNextIndices(before: DrumPreviewPlan, after: DrumPreviewPlan): number[] {
@@ -935,13 +964,18 @@ export class MetronomeEngine {
     return indices;
   }
 
-  private drumPreviewLogicalBar(context: DrumPreviewPlanContext): number {
+  private drumPreviewLogicalBeat(context: DrumPreviewPlanContext): number {
     const snapshot = this.getVisualSnapshot();
     if (!snapshot.running || snapshot.countIn || snapshot.mainPlayheadMs < 0) {
       return -1;
     }
     const beatMs = 60000 / Math.max(1, context.bpm);
-    return Math.floor((snapshot.mainPlayheadMs / beatMs + context.initialBeatOffset) / context.beatsPerBar);
+    return snapshot.mainPlayheadMs / beatMs + context.initialBeatOffset;
+  }
+
+  private drumPreviewLogicalBar(context: DrumPreviewPlanContext): number {
+    const beat = this.drumPreviewLogicalBeat(context);
+    return beat < 0 ? -1 : Math.floor(beat / context.beatsPerBar);
   }
 
   private drumPreviewActivationAt(context: DrumPreviewPlanContext, bar: number): DrumPreviewActivation {
@@ -1139,12 +1173,16 @@ export class MetronomeEngine {
     return Number.isFinite(next) ? (next - frame) * 1000 / SAMPLE_RATE : undefined;
   }
 
-  private recordDrumPreviewBoundary(context: DrumPreviewPlanContext): void {
+  private recordDrumPreviewBoundary(context: DrumPreviewPlanContext, fill?: boolean, frame?: number): void {
     // Preallocated numeric anchors record actual submitted frames, including
     // source-frame insertion/drop. They retain no PCM and allocate nothing in writeData.
     const index = context.boundaryHead;
-    context.boundaryFrames[index] = this.audioSubmittedFrames;
+    const fillStart = context.rendered.plan.fillStartFrames[this.activeSequenceIndex];
+    const isFill = fill ?? (fillStart >= 0 && this.audioFrameCursor >= fillStart);
+    context.renderedFill = isFill;
+    context.boundaryFrames[index] = frame ?? this.audioSubmittedFrames;
     context.boundaryBars[index] = context.renderedBar;
+    context.boundaryFills[index] = isFill ? 1 : 0;
     context.boundaryRendererEpochs[index] = this.rendererEpoch;
     context.boundaryPhysicalStarts[index] = this.rendererPhysicalStartCount;
     context.boundaryHead = (index + 1) % DRUM_PREVIEW_BOUNDARY_CAPACITY;
@@ -2405,6 +2443,17 @@ export class MetronomeEngine {
       }
 
       const copyFrames = Math.min(bar.frameCount - this.audioFrameCursor, outputLimit - outputCursor);
+      const preview = this.drumPreviewPlan;
+      if (preview !== undefined && !preview.armed && !preview.renderedFill &&
+        this.activeSequence === preview.rendered.plan.sequence) {
+        const fillStart = preview.rendered.plan.fillStartFrames[this.activeSequenceIndex];
+        if (fillStart >= 0 && fillStart < this.audioFrameCursor + copyFrames) {
+          // Anchor the first submitted fill frame after any source-frame correction.
+          // A threshold skipped by a drop begins at the next surviving source sample.
+          this.recordDrumPreviewBoundary(preview, true,
+            this.audioSubmittedFrames + Math.max(0, fillStart - this.audioFrameCursor));
+        }
+      }
       output.set(bar.samples.subarray(this.audioFrameCursor, this.audioFrameCursor + copyFrames), outputCursor);
       outputCursor += copyFrames;
       this.audioFrameCursor += copyFrames;

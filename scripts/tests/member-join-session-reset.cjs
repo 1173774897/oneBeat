@@ -41,6 +41,10 @@ function compile(source) {
 }
 const compiledSession = compile(sessionBusinessSource);
 const compiledPage = compile(pageBusinessSource);
+const compiledFeedback = compile(fs.readFileSync('entry/src/main/ets/common/UserFeedback.ets', 'utf8')
+  .replace(/^import[^;]+;\s*/gm, ''));
+assert.doesNotMatch(pageSource, /bluetoothAck|bluetoothAcknowledged|bt_ack|我已知晓|蓝牙耳机同步提醒/,
+  'Neither joining method should depend on the removed headset acknowledgement');
 
 function deferred() {
   let resolve;
@@ -68,16 +72,35 @@ function harness(options = {}) {
       constructor(id, leader, displayName) { Object.assign(this, { id, leader, displayName }); }
     },
     getContext: () => ({}),
-    ensureTeamNetworkPermissions: () => {
+    hasTeamNetworkPermissions: () => {
       permissionCalls++;
       return permissionCalls === 1 && options.warmupPermission
-        ? options.warmupPermission.promise : Promise.resolve(true);
+        ? options.warmupPermission.promise : Promise.resolve(options.networkPreviouslyGranted !== false);
     },
+    ensureTeamNetworkPermissions: async () => { trace.push('request-network-permission'); return true; },
     verifyTeamNetworkAccess: () => {
       accessCalls++;
       return accessCalls === 1 && options.warmupAccess
         ? options.warmupAccess.promise : Promise.resolve(true);
     },
+    MonotonicClock: { nowMs: () => Date.now() },
+    promptAction: { showToast() { assert.fail('Join failures belong to the local status'); } },
+    ensureCameraPermission: async () => options.cameraGranted !== false,
+    cameraPermissionDeniedHint: () => '扫码需要相机权限；也可以输入加入码',
+    scanCore: { ScanType: { QR_CODE: 0 } },
+    scanBarcode: {
+      async startScanForResult() {
+        trace.push('scan');
+        if (options.scanGate) await options.scanGate.promise;
+        if (options.scanError) throw options.scanError;
+        return { originalValue: 'invitation' };
+      }
+    },
+    parseJoinQrPayload: () => {
+      if (options.qrError) throw options.qrError;
+      return { code: '123456' };
+    },
+    joinCodeFromPayload: invitation => invitation.code,
     ensureBluetoothDiscoveryPermission: async () => true,
     isBluetoothDiscoveryAvailable: () => true,
     teamNetworkAccessUnavailableHint: () => 'Wi-Fi unavailable',
@@ -108,6 +131,9 @@ function harness(options = {}) {
       return member;
     }
   };
+  vm.runInNewContext(compiledFeedback, context);
+  Object.assign(context, context.exports);
+  context.exports = {};
   vm.runInNewContext(compiledSession, context);
   const AppSession = context.exports.AppSession;
   context.AppSession = AppSession;
@@ -125,7 +151,6 @@ function harness(options = {}) {
   vm.runInNewContext(compiledPage, context);
   const page = new context.exports.MemberJoinPage();
   page.displayName = '测试队员';
-  page.bluetoothAck = true;
   return { page, AppSession, oldSession, cleanup, join, members, routes, trace };
 }
 
@@ -151,7 +176,7 @@ function joinPage(h, method) {
       'Initialization and join must share a single in-flight cleanup');
     assert.equal(pending.members.length, 1, 'Initialization must not replace the member created by join');
     assert.equal(pending.AppSession.get().controller.displayName, '测试队员');
-    assert.equal(pending.AppSession.get().controller.bluetoothAcknowledged, true);
+    assert.equal(pending.AppSession.get().controller.bluetoothAcknowledged, undefined);
     pending.join.resolve();
     await Promise.all([initialization, joining]);
     assert.deepEqual(pending.routes, ['pages/LeaderLobbyPage']);
@@ -187,7 +212,8 @@ function joinPage(h, method) {
     failed.cleanup.resolve();
     await failed.page.initialize();
     assert.equal(failed.members.length, 0, 'Failed cleanup must retain the previous session for retry');
-    assert.match(failed.page.status, /准备加入失败：旧 P2P 清理失败/);
+    assert.equal(failed.page.status, '暂时无法准备加入，请重试',
+      'Native cleanup details must not leak into the preparation status');
     assert.equal(failed.AppSession.retiringSession, failed.oldSession);
     const retry = joinPage(failed, method);
     await flush();
@@ -200,5 +226,84 @@ function joinPage(h, method) {
     assert.equal(failed.AppSession.retiringSession, undefined);
   }
 
-  console.log('PASS: actual member-page joins wait for old-session cleanup, reuse one prepared member, bypass pending discovery prewarm, reject stale status updates and retry failed cleanup');
+  for (const scanError of [
+    { code: 1000500002, message: 'The user canceled the barcode scanning.' },
+    { code: 1000500001, message: 'native scanner implementation details' },
+    { message: 'The user canceled the barcode scanning.' }
+  ]) {
+    const h = harness({ scanError });
+    h.page.status = '上一次错误';
+    await h.page.scanJoin();
+    assert.equal(h.page.scanning, false);
+    assert.equal(h.page.status, scanError.code === 1000500002 ? '' : '扫码失败，请重试或输入加入码',
+      'Only the documented ScanKit cancellation code should silently clear the active scan');
+    assert.equal(h.routes.length, 0);
+  }
+
+  for (const [reason, expected] of [
+    ['双方版本不一致，请更新 OneBeat 后重试', '双方版本不一致，请更新 OneBeat 后重试'],
+    ['邀请认证信息不完整', '邀请信息不完整，请重新扫描队长二维码'],
+    ['邀请已过期，请让队长重新创建队伍', '邀请已过期，请让队长重新创建队伍']
+  ]) {
+    const h = harness({ qrError: new Error(reason) });
+    await h.page.scanJoin();
+    assert.equal(h.page.status, expected);
+    assert.equal(h.page.scanning, false);
+  }
+
+  const permission = harness({ cameraGranted: false });
+  await permission.page.scanJoin();
+  assert.match(permission.page.status, /输入加入码/);
+  assert.equal(permission.trace.includes('scan'), false, 'Denied camera permission must not start scanning');
+
+  const withoutConsent = harness({ networkPreviouslyGranted: false });
+  withoutConsent.cleanup.resolve();
+  await withoutConsent.page.initialize();
+  assert.equal(withoutConsent.trace.includes('discovery'), false);
+  assert.equal(withoutConsent.trace.includes('request-network-permission'), false,
+    'Opening the joining page must not request network permission before an actual join');
+
+  const scanGate = deferred();
+  const hidden = harness({ scanGate });
+  const scanning = hidden.page.scanJoin();
+  await flush();
+  hidden.page.aboutToDisappear();
+  const hiddenStatus = hidden.page.status;
+  scanGate.resolve();
+  await scanning;
+  assert.equal(hidden.page.status, hiddenStatus, 'A departed page must ignore the native scan response');
+  assert.equal(hidden.trace.some(item => item.startsWith('connect-')), false);
+
+  const active = harness();
+  active.cleanup.resolve();
+  await active.page.initialize();
+  const joining = active.page.joinWithCode('123456');
+  await flush();
+  await active.page.joinWithCode('123456');
+  assert.equal(active.trace.filter(item => item === 'connect-code').length, 1,
+    'Repeated joins must share the current visible operation');
+  active.page.aboutToDisappear();
+  const activeStatus = active.page.status;
+  active.join.reject(new Error('native socket error'));
+  await joining;
+  assert.equal(active.page.status, activeStatus, 'A late join failure must not replace departed-page status');
+  assert.equal(active.routes.length, 0);
+
+  for (const method of ['joinInvitation', 'joinWithCode']) {
+    const replaced = harness();
+    replaced.cleanup.resolve();
+    await replaced.page.initialize();
+    const pending = joinPage(replaced, method);
+    await flush();
+    const previousStatus = replaced.page.status;
+    replaced.AppSession.instance = { controller: {} };
+    replaced.join.reject(new Error('old room native failure'));
+    await pending;
+    assert.equal(replaced.page.status, previousStatus,
+      'An old room cannot publish a failure after the shared session has changed');
+    assert.equal(replaced.page.joining, false, 'A superseded room must still release its page-owned busy flag');
+    assert.deepEqual(replaced.routes, []);
+  }
+
+  console.log('PASS: member joins retain reset barriers and progress, remove headset gates, map failures, silence documented scanner cancellation and reject departed-page callbacks');
 })().catch(error => { console.error(error); process.exitCode = 1; });

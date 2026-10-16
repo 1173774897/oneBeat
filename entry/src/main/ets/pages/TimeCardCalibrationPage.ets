@@ -1,6 +1,7 @@
-import { router, promptAction } from '@kit.ArkUI';
+import { router } from '@kit.ArkUI';
 import { AppSession } from '../app/AppSession';
 import { MonotonicClock } from '../common/MonotonicClock';
+import { logUserFailure, showUserNotice } from '../common/UserFeedback';
 import { saveCalibrationMs } from '../store/AudioLatencyPersistence';
 import { BLUE, CARD_SHADOW, CONTROL_SHADOW, CORAL, INK, LILAC, PAPER, TEAL, WHITE } from '../components/ComicKit';
 
@@ -131,6 +132,8 @@ struct TimeCardCalibrationPage {
   @State touchHeld: boolean = false;
   @State previewPulse: number = 0;
   @State previewLabel: string = '';
+  @State operationError: string = '';
+  @State measurementDetailsExpanded: boolean = false;
   @State saving: boolean = false;
   @State resultActionsReady: boolean = false;
   @State countdownNumber: number = 0;
@@ -377,6 +380,7 @@ struct TimeCardCalibrationPage {
     if (this.btAudioActive) {
       return;
     }
+    this.operationError = '';
     if (this.phaseIsActive() || this.phase === 'changing') {
       this.failMeasurement('蓝牙耳机已断开，请重新连接后再测');
       return;
@@ -420,7 +424,7 @@ struct TimeCardCalibrationPage {
       return;
     }
     if (!this.btAudioActive) {
-      promptAction.showToast({ message: '请先连接蓝牙耳机，再开始打卡' });
+      this.operationError = '请先连接蓝牙耳机，再开始打卡';
       return;
     }
     const session = AppSession.get();
@@ -429,10 +433,12 @@ struct TimeCardCalibrationPage {
         this.failMeasurement('会话已结束，请返回大厅重新进入');
         return;
       }
-      promptAction.showToast({ message: '当前没有可用会话，请从队伍大厅进入' });
+      this.operationError = '会话已结束，请返回大厅重新进入';
       return;
     }
     const token = ++this.runToken;
+    this.operationError = '';
+    this.measurementDetailsExpanded = false;
     this.clearTimers();
     this.publishCalibrationActivity(true);
     this.phase = 'arming';
@@ -455,7 +461,8 @@ struct TimeCardCalibrationPage {
       this.armMissTimer(this.measurementStartAtMs + FIRST_TAP_LATE_MS, token);
     } catch (err) {
       if (this.pageActive && token === this.runToken) {
-        this.failMeasurement(`音频启动失败：${(err as Error).message}`);
+        logUserFailure('calibration.start', err);
+        this.failMeasurement('音频启动失败，请稍后重试');
       }
     }
   }
@@ -469,14 +476,15 @@ struct TimeCardCalibrationPage {
       return;
     }
     if (!this.btAudioActive) {
-      promptAction.showToast({ message: '请先重新连接蓝牙耳机' });
+      this.operationError = '请先重新连接蓝牙耳机';
       return;
     }
     if (AppSession.get() === undefined) {
-      promptAction.showToast({ message: '当前会话已结束，请返回大厅重新进入' });
+      this.operationError = '会话已结束，请返回大厅重新进入';
       return;
     }
     const token = ++this.runToken;
+    this.operationError = '';
     this.clearTimers();
     this.publishCalibrationActivity(false);
     AppSession.get()?.pauseLatencyCalibration();
@@ -741,6 +749,7 @@ struct TimeCardCalibrationPage {
     const token = ++this.runToken;
     this.clearTimers();
     this.missReason = reason;
+    this.operationError = '';
     this.phase = 'missed';
     this.retryReady = false;
     this.publishCalibrationActivity(false);
@@ -766,11 +775,12 @@ struct TimeCardCalibrationPage {
       return;
     }
     if (!this.btAudioActive) {
-      promptAction.showToast({ message: '蓝牙耳机已断开，本次结果没有保存' });
+      this.operationError = '蓝牙耳机已断开，本次结果未保存，请重新测量';
       return;
     }
     const token = this.runToken;
     const result = this.resultMs;
+    this.operationError = '';
     this.saving = true;
     this.clearPreviewTimers();
     AppSession.get()?.pauseLatencyCalibration();
@@ -783,11 +793,12 @@ struct TimeCardCalibrationPage {
       session?.metronome.refreshOutputCalibration();
       session?.keepLatencyCalibrationRendererAlive();
       session?.markLatencyCalibrationRoute(true);
-      promptAction.showToast({ message: `已保存 ${result} ms，请保持当前耳机连接` });
+      showUserNotice('已保存并生效', 'calibration.save');
       router.back();
     } catch (err) {
       if (this.pageActive && token === this.runToken) {
-        promptAction.showToast({ message: `保存失败：${(err as Error).message}` });
+        logUserFailure('calibration.save', err);
+        this.operationError = '保存失败，请重试';
       }
     } finally {
       if (this.pageActive) {
@@ -801,13 +812,15 @@ struct TimeCardCalibrationPage {
       return;
     }
     if (!this.btAudioActive) {
-      promptAction.showToast({ message: '当前没有检测到蓝牙耳机输出' });
+      this.operationError = '耳机已断开，请重新连接并测量';
       return;
     }
     const session = AppSession.get();
     if (session === undefined) {
+      this.operationError = '会话已结束，请返回大厅重新进入';
       return;
     }
+    this.operationError = '';
     this.clearPreviewTimers();
     const token = this.previewToken;
     const run = this.runToken;
@@ -834,7 +847,8 @@ struct TimeCardCalibrationPage {
       if (this.pageActive && token === this.previewToken && run === this.runToken && this.phase === 'result') {
         this.clearPreviewTimers();
         session.pauseLatencyCalibration();
-        promptAction.showToast({ message: `试听启动失败：${(err as Error).message}` });
+        logUserFailure('calibration.preview', err);
+        this.operationError = '试听未能开始，请重试';
       }
     }
   }
@@ -1044,7 +1058,7 @@ struct TimeCardCalibrationPage {
       Text(this.tapCount > 0 ? `保留了 ${this.tapCount} 个已打孔 · 本次未完成 32 次` : '这张时间卡还没有打孔')
         .fontSize(12).fontColor('#625B53').width('100%')
       Text(this.errorAdvice()).fontSize(13).lineHeight(20).width('100%')
-      Text('本次不计算、不保存，已保存的校准不会被覆盖。')
+      Text('本次未保存，不影响已有校准。')
         .fontSize(11).lineHeight(17).fontColor('#625B53').width('100%')
     }.width('100%').padding(13).backgroundColor('#FFF0B8')
       .border({ width: 1.5, color: INK }).borderRadius(8).shadow(CARD_SHADOW)
@@ -1070,12 +1084,22 @@ struct TimeCardCalibrationPage {
         Text(this.previewLabel.length > 0 ? `${this.previewLabel}试听中` : '试听时，对比声音与亮灯是否同步')
           .fontSize(11).fontWeight(800).fontColor('#625B53').layoutWeight(1)
       }.width('100%')
-      Text('这个数值包含耳机播放链路和你的跟拍触摸差值，保存后作为本机播放补偿。')
-        .fontSize(11).lineHeight(18).fontColor('#625B53').textAlign(TextAlign.Center)
-      Text(this.btAudioActive ? '保存后请保持当前耳机连接；断开、重连或切换后推荐重测。' : '耳机已断开，请重新连接并测量。')
-        .fontSize(12).lineHeight(19).fontWeight(800).fontColor(INK).width('100%')
-        .padding(11).backgroundColor(this.btAudioActive ? '#FFF0B8' : '#FFE4DE')
-        .border({ width: 1.5, color: INK }).borderRadius(7)
+      Text('本次跟拍测得的本机补偿').fontSize(11).fontColor('#625B53')
+      Button(this.measurementDetailsExpanded ? '收起测量说明 ∧' : '测量说明 ∨', { type: ButtonType.Normal })
+        .fontSize(12).fontWeight(800).fontColor(INK).backgroundColor(Color.Transparent)
+        .height(32).onClick(() => { this.measurementDetailsExpanded = !this.measurementDetailsExpanded; })
+      if (this.measurementDetailsExpanded) {
+        Text('这个数值包含耳机播放链路和你的跟拍触摸差值，保存后作为本机播放补偿。保持当前耳机连接；断开、重连或切换后推荐重测。')
+          .fontSize(11).lineHeight(18).fontColor('#625B53').width('100%')
+          .padding(11).backgroundColor('#FFF0B8').borderRadius(7)
+      }
+      if (!this.btAudioActive && this.operationError.length === 0) {
+        Text('耳机已断开，请重新连接并测量。').fontSize(12).lineHeight(19).fontWeight(800)
+          .fontColor(CORAL).width('100%')
+      }
+      if (this.operationError.length > 0) {
+        Text(this.operationError).fontSize(12).lineHeight(19).fontColor(CORAL).width('100%')
+      }
     }.width('100%')
   }
 
@@ -1120,21 +1144,26 @@ struct TimeCardCalibrationPage {
   @Builder
   private startOrRetryActions() {
     Column({ space: 10 }) {
+      if (this.operationError.length > 0) {
+        Text(this.operationError).fontSize(12).lineHeight(19).fontColor(CORAL).width('100%')
+      }
       if (this.phase === 'intro') {
         Button('开始打卡', { type: ButtonType.Normal }).width('100%').height(54)
           .fontSize(21).fontWeight(900).fontStyle(FontStyle.Italic).fontColor(INK)
           .backgroundColor(CORAL).border({ width: 1.5, color: INK }).borderRadius(7).shadow(CONTROL_SHADOW)
           .enabled(this.btAudioActive).onClick(() => { void this.startMeasurement(); })
-        Text(this.btAudioActive ? '只听耳机，不跟着画面预判节拍' : '请先连接蓝牙耳机')
-          .fontSize(11).fontColor('#625B53')
+        if (!this.btAudioActive && this.operationError.length === 0) {
+          Text('请先连接蓝牙耳机').fontSize(11).fontColor('#625B53')
+        }
       } else {
         Button(this.phase === 'changing' ? '正在换入空白卡…' : '重新听一小节，再打卡', { type: ButtonType.Normal })
           .width('100%').height(54).fontSize(18).fontWeight(900).fontColor(INK)
           .backgroundColor(CORAL).border({ width: 1.5, color: INK }).borderRadius(7).shadow(CONTROL_SHADOW)
           .enabled(this.retryReady && !this.touchHeld && this.btAudioActive)
           .onClick(() => { this.retryMeasurement(); })
-        Text(this.btAudioActive ? '换一张空白卡，从头开始' : '请先重新连接耳机')
-          .fontSize(11).fontColor('#625B53')
+        if (!this.btAudioActive && this.operationError.length === 0) {
+          Text('请先重新连接耳机').fontSize(11).fontColor('#625B53')
+        }
       }
     }.width('100%').padding({ left: PAGE_SIDE_PADDING, right: PAGE_SIDE_PADDING,
       top: CONTENT_ACTIONS_GAP, bottom: 18 + this.bottomSafeInset })

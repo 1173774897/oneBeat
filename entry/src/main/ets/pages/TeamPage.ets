@@ -388,7 +388,7 @@ struct TeamPage {
         .clip(true)
         .onClick(() => this.joinTeam())
 
-        Text('请先打开系统 Wi-Fi；手输加入码还需打开蓝牙。扫码加入建议保持蓝牙开启。')
+        Text('扫码或输入加入码，和队长一起出发。')
           .fontSize(11)
           .fontColor('#66615A')
           .lineHeight(17)

@@ -313,7 +313,7 @@ export struct RandomCharacterFilm {
     if (this.selectionPending || this.aligningResult || RANDOM_CHARACTER_KEYS.indexOf(this.resolvedAvatarKey) < 0) {
       return '正在同步…';
     }
-    return this.revealReady ? '剪影已同步' : '正在同步全队…';
+    return this.revealReady ? '已选定' : '正在同步全队…';
   }
 
   @Builder

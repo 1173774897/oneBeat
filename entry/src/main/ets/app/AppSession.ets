@@ -17,7 +17,8 @@ import { PROTOCOL_VERSION } from '../common/Constants';
 import { MonotonicClock } from '../common/MonotonicClock';
 import { defaultBeatPointStates } from '../common/MeterModel';
 import { SessionBackgroundKeeper } from '../session/SessionBackgroundKeeper';
-import { promptAction, router } from '@kit.ArkUI';
+import { router } from '@kit.ArkUI';
+import { logUserFailure, showUserNotice } from '../common/UserFeedback';
 import {
   TransportPausePayload,
   TransportPayload,
@@ -127,10 +128,10 @@ export class AppSession {
         // Route repair is local to this device. Do not publish a TRANSPORT or
         // change the leader's clock: all members keep the same beat timeline.
         void this.metronome.rescheduleForOutputRouteChange().catch((err: Error) => {
-          console.warn(`[RouteRephaseDiag] stage=failed reason=${err.message}`);
+          logUserFailure('audio-route-repair', err);
           if (AppSession.instance === this &&
             AppStorage.get<number>('audioOutputRouteEpoch') === routeEpoch && this.metronome.isRunning()) {
-            promptAction.showToast({ message: err.message });
+            showUserNotice('声音输出切换失败，请暂停后重试', 'audio-route-repair');
           }
         });
       } else if (active && !this.micCalibrationActive && !routeProbeActive) {
@@ -360,11 +361,12 @@ export class AppSession {
     } catch (err) {
       console.warn(`Remote disband navigation failed: ${(err as Error).message}`);
     }
+    if (AppSession.instance !== undefined && AppSession.instance !== this) {
+      return;
+    }
     const reason = this.controller.getRemoteSessionEndReason();
-    promptAction.showToast({
-      message: reason === 'leader_exit' ? '队长已退出，队伍已解散' :
-        '与队长的连接已断开，已退出队伍'
-    });
+    showUserNotice(reason === 'leader_exit' ? '队长已退出，队伍已解散' :
+      '与队长的连接已断开，已退出队伍', 'remote-session-end');
   }
 
   syncEngineFromSession(): void {

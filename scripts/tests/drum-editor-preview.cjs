@@ -66,7 +66,12 @@ function harness() {
   const calls = [];
   const audioActions = [];
   const toasts = [];
+  const failures = [];
   const storageWrites = [];
+  const teamMeterCalls = [];
+  const teamProgramCalls = [];
+  const teamMeterResponses = [];
+  const teamProgramResponses = [];
   const timers = new Map();
   const archivedTimers = new Map();
   const responses = [];
@@ -85,9 +90,31 @@ function harness() {
   let usePositionOverride = false;
   let snapshotProvider;
   let virtualTime = 0;
+  let persistenceTime;
+  let backCount = 0;
+  let sessionOverride;
   const readSnapshot = () => snapshotProvider === undefined ? snapshot : snapshotProvider(virtualTime);
   let snapshot = { running: true, countIn: false, mainPlayheadMs: -350 };
   const session = {
+    controller: {
+      isLeader: true,
+      bpm: 120,
+      beatsPerBar: 4,
+      beatUnit: 4,
+      drumProgram: '',
+      getProDrumEditorSettings() { return undefined; },
+      rememberProDrumEditorSettings() {},
+      async updateMeter(beats, unit) {
+        teamMeterCalls.push([beats, unit]);
+        const response = teamMeterResponses.shift();
+        if (response !== undefined) await response.promise;
+      },
+      async updateDrumProgram(raw) {
+        teamProgramCalls.push(raw);
+        const response = teamProgramResponses.shift();
+        if (response !== undefined) await response.promise;
+      }
+    },
     async previewDrumProgram(raw, looping, bpm, beats, positionBeats = 0, sectionKeys) {
       const request = ++previewRequest;
       previewActive = true;
@@ -122,8 +149,8 @@ function harness() {
       const revision = ++updateRevision;
       updateCalls.push({ program: JSON.parse(raw), sectionKeys: [...sectionKeys], revision });
       const response = updateResponses.shift();
-      if (response !== undefined) await response.promise;
-      return previewActive && previewReady && revision === updateRevision;
+      const prepared = response === undefined ? true : await response.promise;
+      return prepared !== false && previewActive && previewReady && revision === updateRevision;
     },
     getDrumPreviewPosition() {
       const snapshot = readSnapshot();
@@ -136,8 +163,14 @@ function harness() {
       let bar = Math.floor(snapshot.mainPlayheadMs / barMs) % total;
       for (let i = 0; i < appliedPlan.program.sections.length; i++) {
         if (bar < appliedPlan.program.sections[i].repeats) {
+          const section = appliedPlan.program.sections[i];
+          const barPositionMs = snapshot.mainPlayheadMs % barMs;
+          const useFill = section.fillEvery > 0 && (bar + 1) % section.fillEvery === 0;
+          const fillStartMs = useFill ? catalog.sectionFillStartBeat(appliedPlan.program, section) *
+            60000 / appliedPlan.bpm : barMs;
+          const isFill = useFill && barPositionMs >= fillStartMs;
           return { sectionKey: appliedPlan.sectionKeys[i], repeatIndex: bar,
-            nextBoundaryDelayMs: barMs - (snapshot.mainPlayheadMs % barMs) };
+            isFill, nextBoundaryDelayMs: (useFill && !isFill ? fillStartMs : barMs) - barPositionMs };
         }
         bar -= appliedPlan.program.sections[i].repeats;
       }
@@ -154,16 +187,24 @@ function harness() {
   const { DrumMachinePage } = load(businessSource, {
     '@kit.ArkUI': {
       promptAction: { showToast: ({ message }) => toasts.push(message) },
-      router: { back() {} }
+      router: { back() { backCount++; } }
     },
-    '../app/AppSession': { AppSession: { get: () => sessionAvailable ? session : undefined } },
+    '../app/AppSession': { AppSession: { get: () => sessionAvailable ? sessionOverride ?? session : undefined } },
     '../components/ComicKit': {},
     '../store/EntitlementStore': { isProDrumMachineAccessible: () => true },
     '../common/MeterModel': meter,
+    '../common/UserFeedback': {
+      showUserNotice: message => toasts.push(message),
+      logUserFailure: scope => failures.push(scope),
+      userErrorMessage: (_error, fallback) => fallback
+    },
     '../audio/DrumMachineCatalog': catalog,
     '../audio/RhythmTimeline': timeline
   }, {
-    Date: { now() { throw new Error('Audition progress must use the transport snapshot, never Date.now()'); } },
+    Date: { now() {
+      if (persistenceTime === undefined) throw new Error('Audition progress must use the transport snapshot, never Date.now()');
+      return persistenceTime;
+    } },
     AppStorage: { setOrCreate: (...args) => storageWrites.push(plain(args)), get() { return ''; } },
     Scroller: class {
       offset = 0;
@@ -186,7 +227,11 @@ function harness() {
     customFillRows: Array.from({ length: catalog.DRUM_TRACKS.length }, (_, i) => i === 1 ? '0000000000001111' : '0000000000000000')
   }];
   return {
-    page, calls, audioActions, responses, updateCalls, updateResponses, toasts, timers, archivedTimers, storageWrites,
+    page, session, calls, audioActions, responses, updateCalls, updateResponses, toasts, failures, timers, archivedTimers, storageWrites,
+    teamMeterCalls, teamProgramCalls, teamMeterResponses, teamProgramResponses,
+    backCount: () => backCount,
+    replaceSession: () => { sessionOverride = { ...session, controller: { ...session.controller } }; },
+    setPersistenceTime: value => { persistenceTime = value; },
     stopCount: () => stopCount,
     getSnapshot: () => plain(readSnapshot()),
     setSessionAvailable: value => { sessionAvailable = value; },
@@ -453,6 +498,58 @@ async function testSongSectionProgress() {
   assert.equal(compound.timers.size, 0);
 }
 
+async function testSongPhraseProgress() {
+  const h = harness();
+  const p = songProgressFixture(h);
+  p.sections = [
+    { id: 'A', patternIndex: 0, repeats: 2, fillIndex: 0, fillEvery: 2 },
+    { id: 'B', patternIndex: 0, repeats: 1, fillIndex: 0, fillEvery: 1,
+      customFill: { subdivision: 3, events: [{ tick: 0, sampleKey: 'snare', velocity: 0.7 }] } }
+  ];
+  await p.togglePreview();
+  assert.equal(p.isSongPhrasePlaying(0, false), false, 'Preroll has no active dropdown');
+  for (const [time, section, fill] of [[0, 0, false], [1999.99, 0, false], [2000, 0, false],
+    [3499.99, 0, false], [3500, 0, true], [3999.99, 0, true],
+    [4000, 1, true], [5999.99, 1, true], [6000, 0, false]]) {
+    h.tick({ mainPlayheadMs: time });
+    assert.equal(p.playingSongSection, section);
+    for (let index = 0; index < p.sections.length; index++) {
+      assert.equal(p.isSongPhrasePlaying(index, false), index === section && !fill,
+        `${time} ms: only the audible main phrase may highlight its dropdown`);
+      assert.equal(p.isSongPhrasePlaying(index, true), index === section && fill,
+        `${time} ms: preset fill starts on the final beat, custom fill owns the whole bar`);
+    }
+  }
+  p.sections[0].fillEvery = 0;
+  p.sections[0].fillIndex = 2;
+  h.tick({ mainPlayheadMs: 3499 });
+  assert.equal(p.isSongPhrasePlaying(0, false), true);
+  h.tick({ mainPlayheadMs: 3500 });
+  assert.equal(p.isSongPhrasePlaying(0, true), true,
+    'Unapplied frequency/fill edits cannot change the highlight for already queued audio');
+  p.openEditor(1, 0);
+  h.tick({ mainPlayheadMs: 3800 });
+  assert.equal(p.isSongPhrasePlaying(0, true), true, 'Background song highlighting survives draft navigation');
+  p.closeEditor();
+  assert.equal(h.calls.length, 1, 'Dropdown highlighting cannot schedule or restart sound');
+  for (const invalid of [{ running: false }, { countIn: true }, { mainPlayheadMs: -350 }]) {
+    h.tick({ mainPlayheadMs: 3500, ...invalid });
+    assert.equal(p.isSongPhrasePlaying(0, false), false);
+    assert.equal(p.isSongPhrasePlaying(0, true), false);
+  }
+  h.tick({ mainPlayheadMs: 3500 });
+  const queuedPaint = h.archivedTimers.get(p.songPreviewProgressTimerId);
+  await p.togglePreview();
+  queuedPaint.callback();
+  assert.equal(p.playingSongIsFill, false);
+  assert.equal(p.isSongPhrasePlaying(0, false), false);
+  assert.equal(p.isSongPhrasePlaying(0, true), false, 'Stop clears both dropdown highlights permanently');
+  p.previewTarget = 'fill-0';
+  p.playingSongSection = 0;
+  p.playingSongIsFill = true;
+  assert.equal(p.isSongPhrasePlaying(0, true), false, 'Standalone audition must not borrow whole-song highlight state');
+}
+
 async function testSongSectionProgressRaces() {
   for (const staleFails of [false, true]) {
     const h = harness();
@@ -667,11 +764,30 @@ async function testLiveUpdateFailureAndCancellation() {
   h.runTimeouts(150);
   current.reject(new Error('Current live update unavailable'));
   await settle();
-  assert.deepEqual(h.toasts, ['试听更新失败，继续播放原编排']);
+  assert.deepEqual(h.toasts, [], 'Live-update failure belongs beside the audition controls, without a toast');
+  assert.equal(p.songPreviewMessage, '修改未进入试听，正在播放上一版');
+  assert.deepEqual(h.failures, ['drum.preview.update'], 'Only the current failed edit produces diagnostics');
   assert.equal(p.previewTarget, 'song');
   assert.equal(p.playingSongSection, 1);
   assert.equal(h.calls.length, 1, 'A failed update must leave the original playback running');
   assert.equal(h.stopCount(), 0);
+  const retry = deferred();
+  h.updateResponses.push(retry);
+  p.updateFill(1, 1);
+  h.runTimeouts(150);
+  assert.equal(p.songPreviewMessage, '修改未进入试听，正在播放上一版',
+    'A pending edit cannot claim that the newer visible arrangement is already audible');
+  retry.resolve(false);
+  await settle();
+  assert.equal(p.songPreviewMessage, '修改未进入试听，正在播放上一版',
+    'An unaccepted update must retain the previous-audio explanation');
+  p.updateFill(1, 2);
+  h.runTimeouts(150);
+  await settle();
+  assert.equal(p.songPreviewMessage, '', 'A successful current update clears the previous-audio explanation');
+  p.songPreviewMessage = '修改未进入试听，正在播放上一版';
+  await p.togglePreview();
+  assert.equal(p.songPreviewMessage, '', 'Stopping audition clears its local feedback');
   p.aboutToDisappear();
 
   for (const exit of [q => q.togglePreview(), q => q.aboutToDisappear(), async q => {
@@ -691,6 +807,184 @@ async function testLiveUpdateFailureAndCancellation() {
     assert.equal(next.updateCalls.length, 0, 'Stop, editor handoff and page exit must cancel queued whole-song updates');
     assert.equal(q.songPreviewUpdateTimerId, -1);
   }
+}
+
+async function testLiveUpdateNoticeOwnership() {
+  for (const staleFails of [false, true]) {
+    const h = harness();
+    const p = songProgressFixture(h);
+    await p.togglePreview();
+    h.tick({ mainPlayheadMs: 2500 });
+    const old = deferred();
+    const current = deferred();
+    h.updateResponses.push(old, current);
+    p.updatePattern(1, 1);
+    h.runTimeouts(150);
+    p.updatePattern(1, 2);
+    h.runTimeouts(150);
+    current.reject(new Error('Current edit failed'));
+    await settle();
+    assert.equal(p.songPreviewMessage, '修改未进入试听，正在播放上一版');
+    if (staleFails) old.reject(new Error('Older edit failed later'));
+    else old.resolve();
+    await settle();
+    assert.equal(p.songPreviewMessage, '修改未进入试听，正在播放上一版',
+      'An older failure or success cannot replace the latest edit feedback');
+    assert.deepEqual(h.failures, ['drum.preview.update']);
+    assert.deepEqual(h.toasts, []);
+    p.aboutToDisappear();
+    assert.equal(p.songPreviewMessage, '', 'Leaving the page clears old-audio feedback');
+  }
+
+  for (const failed of [false, true]) {
+    const h = harness();
+    const p = songProgressFixture(h);
+    await p.togglePreview();
+    h.tick({ mainPlayheadMs: 2500 });
+    const update = deferred();
+    h.updateResponses.push(update);
+    p.updatePattern(1, 1);
+    h.runTimeouts(150);
+    h.setPreviewActive(false);
+    h.setPreviewActive(true);
+    h.setPreviewReady(true);
+    if (failed) update.reject(new Error('Former audition owner failed'));
+    else update.resolve();
+    await settle();
+    assert.equal(p.songPreviewMessage, '', 'A different audition owner cannot inherit an old request failure');
+    assert.deepEqual(h.failures, []);
+    assert.deepEqual(h.toasts, []);
+    p.aboutToDisappear();
+  }
+}
+
+async function testLocalSaveAndEditingFeedback() {
+  const h = harness();
+  const p = h.page;
+  h.setPersistenceTime(1000);
+  p.openSaveDialog();
+  p.saveName = '   ';
+  p.confirmNamedSave();
+  assert.equal(p.saveNameError, '请输入名称');
+  assert.equal(p.saveDialogVisible, true);
+  assert.equal(p.overwriteDialogVisible, false);
+  assert.deepEqual(h.storageWrites, [], 'An empty name cannot persist or dismiss the save field');
+  assert.deepEqual(h.toasts, [], 'Name validation must remain beside its field');
+  p.saveName = ' 夜跑 ';
+  p.confirmNamedSave();
+  assert.equal(p.saveNameError, '');
+  assert.equal(p.savedPrograms[0].name, '夜跑');
+  assert.equal(p.saveDialogVisible, false);
+  assert.deepEqual(h.toasts, ['已保存到我的节奏'], 'Persistence has one lightweight result notice');
+  const original = p.savedPrograms[0].program;
+  const writesBeforeOverwrite = h.storageWrites.length;
+  p.updateRepeats(0, 1);
+  p.openSaveDialog();
+  p.saveName = '夜跑';
+  p.confirmNamedSave();
+  assert.equal(p.overwriteDialogVisible, true, 'A duplicate name still requires explicit overwrite confirmation');
+  assert.equal(p.saveDialogVisible, false);
+  assert.equal(h.storageWrites.length, writesBeforeOverwrite);
+  assert.equal(p.savedPrograms[0].program, original, 'Showing confirmation must preserve the existing arrangement');
+  p.returnToRename();
+  assert.equal(p.saveDialogVisible, true);
+  assert.equal(p.overwriteDialogVisible, false);
+  p.confirmNamedSave();
+  p.persistNamedSave(true);
+  assert.equal(p.savedPrograms.length, 1);
+  assert.notEqual(p.savedPrograms[0].program, original);
+  assert.deepEqual(h.toasts, ['已保存到我的节奏', '已更新我的节奏']);
+
+  h.toasts.length = 0;
+  const saved = p.savedPrograms[0];
+  p.sections[0].repeats = 1;
+  p.loadSavedProgram(saved);
+  assert.notEqual(p.sections[0].repeats, 1, 'Loading still changes the visible arrangement');
+  p.deleteSavedProgram(saved.id);
+  assert.equal(p.savedPrograms.length, 0, 'Deleting still updates the saved list');
+  p.openEditor(0, 0);
+  p.toggleStep(0, 1);
+  const draft = plain(p.editorEvents);
+  p.saveEditor();
+  assert.equal(p.editorVisible, false);
+  assert.deepEqual(plain(p.sections[0].customPattern.events), draft);
+  assert.deepEqual(h.toasts, [], 'Visible load/delete/editor-apply changes must not add success notices');
+
+  while (p.sections.length < 8) p.addSection();
+  const upper = plain(p.sections);
+  p.addSection();
+  assert.deepEqual(plain(p.sections), upper, 'The upper bound must leave eight sections intact');
+  while (p.sections.length > 1) p.deleteSection(0);
+  const lower = plain(p.sections);
+  p.deleteSection(0);
+  assert.deepEqual(plain(p.sections), lower, 'The lower bound must preserve the final section');
+  assert.deepEqual(h.toasts, [], 'Boundary controls communicate their disabled state without notices');
+}
+
+async function testTeamApplyFeedbackOwnership() {
+  for (const stage of ['meter', 'program']) {
+    for (const transition of ['leave', 'replace']) {
+      for (const failed of [false, true]) {
+        const h = harness();
+        const p = h.page;
+        const result = deferred();
+        (stage === 'meter' ? h.teamMeterResponses : h.teamProgramResponses).push(result);
+        const applying = p.applyToTeam();
+        await settle();
+        assert.equal(p.saving, true);
+        await p.applyToTeam();
+        assert.equal(h.teamMeterCalls.length, 1, 'Repeated applies while busy must share one operation');
+        if (transition === 'leave') p.aboutToDisappear();
+        else h.replaceSession();
+        if (failed) result.reject(new Error('Former page or session failed'));
+        else result.resolve();
+        await applying;
+        assert.deepEqual(h.toasts, [], 'An obsolete team apply must not publish success or error feedback');
+        assert.deepEqual(h.failures, [], 'An obsolete team apply must not log a current-operation failure');
+        assert.equal(h.backCount(), 0, 'A late apply cannot navigate away from a different page or session');
+        assert.equal(h.teamProgramCalls.length, stage === 'meter' ? 0 : 1,
+          'A page/session change after meter preparation must not submit the remaining program update');
+      }
+    }
+  }
+
+  for (const failed of [false, true]) {
+    const h = harness();
+    const p = h.page;
+    const result = deferred();
+    h.teamProgramResponses.push(result);
+    const applying = p.applyToTeam();
+    await settle();
+    if (failed) result.reject(new Error('Current apply failed'));
+    else result.resolve();
+    await applying;
+    assert.equal(p.saving, false);
+    assert.deepEqual(h.toasts, [failed ? '应用失败，请重试' : '鼓机编排已应用到队伍'],
+      'The current team apply must retain one clear result');
+    assert.equal(h.backCount(), failed ? 0 : 1);
+    assert.deepEqual(h.failures, failed ? ['drum.apply'] : []);
+  }
+
+  const h = harness();
+  const p = h.page;
+  const old = deferred();
+  const current = deferred();
+  h.teamMeterResponses.push(old, current);
+  const former = p.applyToTeam();
+  p.aboutToDisappear();
+  p.aboutToAppear();
+  assert.equal(p.saving, false, 'A new page appearance must not inherit an old apply spinner');
+  const latest = p.applyToTeam();
+  old.resolve();
+  await former;
+  assert.equal(p.saving, true, 'An older completion cannot clear the new page apply state');
+  assert.deepEqual(h.toasts, []);
+  current.resolve();
+  await latest;
+  assert.equal(p.saving, false);
+  assert.equal(h.teamProgramCalls.length, 1);
+  assert.deepEqual(h.toasts, ['鼓机编排已应用到队伍']);
+  assert.equal(h.backCount(), 1);
 }
 
 async function testDeferredInitialSongUpdate() {
@@ -1894,10 +2188,14 @@ async function testBuiltInGridSelection() {
 
 async function main() {
   await testSongSectionProgress();
+  await testSongPhraseProgress();
   await testSongSectionProgressRaces();
   await testSongSectionPlaybackOwnership();
   await testWholeSongLiveUpdateQueue();
   await testLiveUpdateFailureAndCancellation();
+  await testLiveUpdateNoticeOwnership();
+  await testLocalSaveAndEditingFeedback();
+  await testTeamApplyFeedbackOwnership();
   await testDeferredInitialSongUpdate();
   await testSongHighlightPresentationDeadlines();
   await testSongEditDuringPresentationRecoveryGap();
@@ -1921,6 +2219,10 @@ async function main() {
     'Each manual card arrow must use the tested independent expansion action');
   assert.ok(sectionBuilder.includes('if (this.isSectionExpanded(index))'),
     'Card contents must follow their own expansion state');
+  assert.ok(sectionBuilder.includes('.enabled(this.sections.length > 1)'),
+    'The final remaining section must have a disabled delete control');
+  assert.ok(source.includes('.enabled(this.sections.length < 8)'),
+    'The eighth section must disable adding another section');
   assert.equal(sectionBuilder.includes('this.selectedSection === index'), false,
     'The editor-selected section must never control card visibility');
   assert.equal(sectionBuilder.includes('.onClick(() => this.selectedSection = index)'), false,
@@ -1929,6 +2231,10 @@ async function main() {
     'The playing card must use the requested light-purple palette');
   assert.ok(sectionBuilder.includes('this.playingSongSection === index') && sectionBuilder.includes('DRUM_SECTION_PLAYING_COLOR'),
     'Card background must react to the audible whole-song section independently of editor selection');
+  for (const fill of [false, true]) {
+    assert.ok(sectionBuilder.includes(`this.isSongPhrasePlaying(index, ${fill}) ? DRUM_PHRASE_PLAYING_COLOR : PAPER`),
+      'Both phrase dropdowns must use the tested exclusive playback highlight');
+  }
   const editorBuilder = source.slice(source.indexOf('  private editorOverlay()'), source.indexOf('\n  build()'));
   assert.equal((editorBuilder.match(/\.onClick\(\(\) => this\.closeEditor\(\)\)/g) ?? []).length, 1,
     'The top-right close button must use the tested audio cleanup path');
@@ -1941,7 +2247,8 @@ async function main() {
     'The grid cursor must span the track viewport and let cell taps pass through it');
   assert.ok(editorBuilder.includes('Scroll(this.editorScroller)') && editorBuilder.includes('this.updateEditorViewport(Number(area.width))'),
     'The tested scroll controller and resize handler must be attached to the grid');
-  console.log('PASS drum editor audition: transport-driven song card highlight, unequal-repeat boundaries and loops, frozen timing and stale visual races, independent manual card expansion, add/delete/load card state, fold preserves playback, continuous background song across draft navigation, explicit song-to-draft handoff, pending song ownership, unsaved events, subdivision switches and nearest snapping, startup races, numbered cursor seek, cursor resume, stop cursor capture, exit cleanup, transport cursor and viewport following');
+  console.log('PASS drum editor audition: exclusive main/fill dropdown highlight follows audible fill windows, transport-driven song card highlight, unequal-repeat boundaries and loops, frozen timing and stale visual races, independent manual card expansion, add/delete/load card state, fold preserves playback, continuous background song across draft navigation, explicit song-to-draft handoff, pending song ownership, unsaved events, subdivision switches and nearest snapping, startup races, numbered cursor seek, cursor resume, stop cursor capture, exit cleanup, transport cursor and viewport following');
 }
 
-main().catch(error => { console.error(error); process.exitCode = 1; });
+module.exports = { harness, load, ets, meter, catalog, plain };
+if (require.main === module) main().catch(error => { console.error(error); process.exitCode = 1; });

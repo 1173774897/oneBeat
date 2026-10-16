@@ -72,6 +72,7 @@ function harness() {
     '../network/p2p/WifiP2pManager': { WifiP2pManager: MockP2p },
     '../network/p2p/BleRoomDiscovery': { BleRoomDiscovery: MockBle },
     '../network/p2p/P2pInvitation': {},
+    '../common/UserFeedback': { showUserNotice: message => trace.push(`toast:${message}`), logUserFailure() {} },
     '../common/Constants': {},
     '../common/MonotonicClock': {},
     '../common/MeterModel': {},

@@ -59,6 +59,10 @@ function harness() {
     Scroller: class {},
     AppSession: { get: () => session, async reset() { trace.push('reset-session'); } },
     promptAction: { showToast: args => toasts.push(args.message) },
+    logUserFailure() {},
+    userErrorMessage: (_error, fallback) => fallback,
+    showUserNotice: message => toasts.push(message),
+    navigateToHome: async () => routes.push('home'),
     router: { pushUrl: args => routes.push(args.url), back: () => routes.push('back') },
     access: { off: () => trace.push('remove-bluetooth-listener') }
   };
@@ -67,6 +71,48 @@ function harness() {
   page.btAudioActive = true;
   page.stopRosterStatusAnimation = () => trace.push('stop-roster-animation');
   return { page, requests, toasts, routes, trace };
+}
+
+const mainSource = fs.readFileSync('entry/src/main/ets/pages/MainPage.ets', 'utf8');
+const mainExitStart = mainSource.indexOf('  private async requestExit(): Promise<void> {');
+const mainExitEnd = mainSource.indexOf('  private toggleChrome(): void {', mainExitStart);
+const mainBusiness = (mainSource.slice(0, mainSource.indexOf('  @Builder')) +
+  mainSource.slice(mainExitStart, mainExitEnd) + '\n}')
+  .replace(/^import[\s\S]*?from\s+['"][^'"]+['"];\s*/gm, '')
+  .replace(/@(?:Entry|Component)\b\s*/g, '')
+  .replace(/@State\s+/g, '')
+  .replace(/@(?:StorageLink|Watch)\([^)]*\)\s*/g, '')
+  .replace('struct MainPage', 'export class MainPage');
+const compiledMain = ts.transpileModule(mainBusiness, {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021 },
+  reportDiagnostics: true
+});
+assert.equal((compiledMain.diagnostics ?? []).filter(d => d.category === ts.DiagnosticCategory.Error).length, 0);
+
+function mainHarness() {
+  const requests = [];
+  const notices = [];
+  let session = {
+    controller: { isLeader: true },
+    leaderStart() { const request = deferred(); requests.push(request); return request.promise; },
+    leaderReturnToLobby() { const request = deferred(); requests.push(request); return request.promise; }
+  };
+  const context = {
+    exports: {},
+    Map,
+    AppSession: { get: () => session },
+    defaultBeatPointStates: () => [],
+    logUserFailure() {},
+    showUserNotice: message => notices.push(message),
+    userErrorMessage: (_error, fallback) => fallback,
+    router: { back() { assert.fail('A hidden page must not navigate after a late response'); } }
+  };
+  vm.runInNewContext(compiledMain.outputText, context);
+  const page = new context.exports.MainPage();
+  page.leader = true;
+  page.refresh = () => {};
+  page.startVisualLoop = () => {};
+  return { page, requests, notices, replaceSession: () => { session = {}; } };
 }
 
 (async () => {
@@ -128,8 +174,9 @@ function harness() {
     await play;
     assert.equal(h.page.bluetoothRouteProbePlaying, false);
     assert.equal(h.page.bluetoothRouteProbePlayed, false);
-    assert.equal(h.toasts.length, outcome === 'failure' ? 1 : 0,
-      'Only a failure in the current visible dialog may show feedback');
+    assert.equal(h.toasts.length, 0, 'Current probe failures should stay inside the dialog');
+    assert.equal(h.page.bluetoothRouteConfirmVisible, true);
+    assert.match(h.page.bluetoothRouteStatus, outcome === 'failure' ? /试音失败/ : /试音未完成/);
     await h.page.confirmBluetoothCalibration();
     assert.equal(h.routes.length, 0);
   }
@@ -143,10 +190,11 @@ function harness() {
     if (outcome === 'failure') disconnected.requests[0].reject(new Error('disconnected'));
     else disconnected.requests[0].resolve(true);
     await play;
-    assert.equal(disconnected.page.bluetoothRouteConfirmVisible, false);
+    assert.equal(disconnected.page.bluetoothRouteConfirmVisible, true);
     assert.equal(disconnected.page.bluetoothRouteProbePlayed, false);
     assert.equal(disconnected.page.bluetoothRouteProbePlaying, false);
     assert.equal(disconnected.toasts.length, 0, 'Disconnection must suppress obsolete playback feedback');
+    assert.match(disconnected.page.bluetoothRouteStatus, /耳机已断开/);
     await disconnected.page.confirmBluetoothCalibration();
     assert.equal(disconnected.routes.length, 0);
   }
@@ -173,7 +221,68 @@ function harness() {
   unavailable.page.btAudioActive = false;
   await unavailable.page.playBluetoothRouteProbe();
   assert.equal(unavailable.requests.length, 0, 'An unavailable Bluetooth route must not start a pair');
-  assert.equal(unavailable.toasts.length, 1);
+  assert.equal(unavailable.toasts.length, 0);
+  assert.match(unavailable.page.bluetoothRouteStatus, /未检测到耳机输出/);
 
-  console.log('PASS: actual lobby probe methods reject stale dialog completions, repeated taps, disconnects and page-exit feedback while retaining the confirmed renderer');
+  const wrongOutput = harness();
+  wrongOutput.page.requestBluetoothCalibration();
+  const firstProbe = wrongOutput.page.playBluetoothRouteProbe();
+  wrongOutput.requests[0].resolve(true);
+  await firstProbe;
+  wrongOutput.page.rejectBluetoothRouteConfirmation();
+  assert.equal(wrongOutput.page.bluetoothRouteConfirmVisible, true,
+    'Choosing a different output must retain the current route-confirmation step');
+  assert.equal(wrongOutput.page.bluetoothRouteProbePlayed, false);
+  assert.match(wrongOutput.page.bluetoothRouteStatus, /请先把媒体输出切到耳机/);
+  assert.equal(wrongOutput.toasts.length, 0);
+  await wrongOutput.page.confirmBluetoothCalibration();
+  assert.equal(wrongOutput.routes.length, 0, 'A wrong output requires another completed probe');
+  const secondProbe = wrongOutput.page.playBluetoothRouteProbe();
+  assert.equal(wrongOutput.page.bluetoothRouteStatus, '');
+  wrongOutput.requests[1].resolve(true);
+  await secondProbe;
+  await wrongOutput.page.confirmBluetoothCalibration();
+  assert.deepEqual(wrongOutput.routes, ['pages/TimeCardCalibrationPage']);
+
+  assert.match(source, /const BLUETOOTH_ROUTE_CONFIRM_WIDTH: number = 318;/);
+  assert.match(source, /const BLUETOOTH_ROUTE_PROBE_BUTTON_HEIGHT: number = 48;/);
+  assert.match(source, /return '声音不同步时，可校准耳机';/);
+  assert.match(source, /return '耳机设置 ›';/);
+  assert.doesNotMatch(actualMethodsBetween('  private soloCalibrationEntryLabel(): string {', '  @Builder'),
+    /latencyCalibrationMs|ms/, 'The solo entry should leave compensation details to calibration');
+
+  const hiddenWalk = mainHarness();
+  const toggle = hiddenWalk.page.toggle();
+  assert.equal(hiddenWalk.page.busy, true);
+  hiddenWalk.page.onPageHide();
+  hiddenWalk.page.onPageShow();
+  await hiddenWalk.page.toggle();
+  assert.equal(hiddenWalk.requests.length, 1, 'A pending hidden action must still prevent overlap after showing');
+  hiddenWalk.requests[0].reject(new Error('late native playback failure'));
+  await toggle;
+  assert.equal(hiddenWalk.page.busy, false, 'A hidden action must always release its busy flag');
+  assert.equal(hiddenWalk.notices.length, 0, 'Hiding must invalidate the old action feedback');
+  const replay = hiddenWalk.page.toggle();
+  hiddenWalk.requests[1].reject(new Error('new playback failure'));
+  await replay;
+  assert.deepEqual(hiddenWalk.notices, ['播放操作失败，请重试']);
+
+  const changedRoom = mainHarness();
+  const previousRoomAction = changedRoom.page.toggle();
+  changedRoom.replaceSession();
+  changedRoom.requests[0].reject(new Error('old room failure'));
+  await previousRoomAction;
+  assert.equal(changedRoom.page.busy, false);
+  assert.equal(changedRoom.notices.length, 0, 'A response from the previous room must not show feedback');
+
+  const hiddenReturn = mainHarness();
+  const returning = hiddenReturn.page.requestExit();
+  assert.equal(hiddenReturn.page.returningToLobby, true);
+  hiddenReturn.page.onPageHide();
+  hiddenReturn.requests[0].reject(new Error('late return failure'));
+  await returning;
+  assert.equal(hiddenReturn.page.returningToLobby, false, 'Hidden return failures must release the navigation guard');
+  assert.equal(hiddenReturn.notices.length, 0);
+
+  console.log('PASS: lobby route confirmation keeps failures inline and rejects stale callbacks; walking actions release hidden busy state and suppress previous-room feedback');
 })().catch(error => { console.error(error); process.exitCode = 1; });

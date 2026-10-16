@@ -1,6 +1,6 @@
 import { common } from '@kit.AbilityKit';
 import { access } from '@kit.ConnectivityKit';
-import { router, promptAction } from '@kit.ArkUI';
+import { router } from '@kit.ArkUI';
 import { navigateToHome } from '../app/HomeNavigation';
 import { AppSession } from '../app/AppSession';
 import { SessionController } from '../session/SessionController';
@@ -52,6 +52,7 @@ import {
 import { refreshStoreEntitlementsNow } from '../store/StoreBootstrapSync';
 import { SESSION_MAX_MEMBER_COUNT } from '../common/Constants';
 import { getCalibrationMs } from '../store/AudioLatencyPersistence';
+import { logUserFailure, showUserNotice, userErrorMessage } from '../common/UserFeedback';
 
 interface LobbySceneOption {
   key: string;
@@ -150,6 +151,7 @@ struct LeaderLobbyPage {
   @State bluetoothRouteConfirmVisible: boolean = false;
   @State bluetoothRouteProbePlaying: boolean = false;
   @State bluetoothRouteProbePlayed: boolean = false;
+  @State bluetoothRouteStatus: string = '';
   // Closing and reopening the dialog can overlap two asynchronous probes. A
   // completion belongs only to the request that still owns the visible dialog.
   private bluetoothRouteProbeRequestToken: number = 0;
@@ -160,6 +162,10 @@ struct LeaderLobbyPage {
   private randomSelectionToken: number = 0;
   private randomPreviewPreviousDrawId: number = 0;
   private rosterStatusAnimationTimer: number = -1;
+  private actionSequence: number = 0;
+  // Late results from an earlier action or room cannot overwrite visible feedback.
+  private readonly pendingActions: Map<string, number> = new Map();
+  private readonly actionSessions: Map<string, AppSession> = new Map();
   // Retain dismissal even if the authoritative result arrives after active changes.
   private readonly interruptedRandomPreviews: Map<string, number> = new Map();
   private readonly bluetoothStateListener = (_state: access.BluetoothState): void => {
@@ -167,23 +173,20 @@ struct LeaderLobbyPage {
   };
 
   private onBluetoothAudioRouteChanged(): void {
-    // A2DP disappearance immediately removes the whole manual-calibration
-    // surface; speaker and wired routes use platform latency only.
-    if (!this.btAudioActive) {
-      if (this.bluetoothRouteConfirmVisible) {
-        this.dismissBluetoothRouteConfirmation();
-      }
+    if (!this.btAudioActive && this.bluetoothRouteConfirmVisible) {
+      this.bluetoothRouteProbeRequestToken++;
+      this.bluetoothRouteProbePlaying = false;
+      this.bluetoothRouteProbePlayed = false;
+      this.bluetoothRouteStatus = '耳机已断开，请连接后重新试音';
+      void AppSession.get()?.stopLatencyCalibration();
     }
   }
 
   private requestBluetoothCalibration(): void {
-    if (!this.btAudioActive) {
-      promptAction.showToast({ message: '当前没有检测到蓝牙耳机输出' });
-      return;
-    }
     this.bluetoothRouteProbeRequestToken++;
     this.bluetoothRouteProbePlayed = false;
     this.bluetoothRouteProbePlaying = false;
+    this.bluetoothRouteStatus = this.btAudioActive ? '' : '未检测到耳机输出，请连接后重新试音';
     this.bluetoothRouteConfirmVisible = true;
   }
 
@@ -192,22 +195,26 @@ struct LeaderLobbyPage {
       return;
     }
     if (!this.btAudioActive) {
-      promptAction.showToast({ message: '当前没有检测到蓝牙耳机输出' });
+      this.bluetoothRouteStatus = '未检测到耳机输出，请连接后重新试音';
       return;
     }
     const requestToken = ++this.bluetoothRouteProbeRequestToken;
     this.bluetoothRouteProbePlaying = true;
     this.bluetoothRouteProbePlayed = false;
+    this.bluetoothRouteStatus = '';
     try {
       const played = await AppSession.get()?.playBluetoothRouteProbe() ?? false;
       if (requestToken === this.bluetoothRouteProbeRequestToken && played &&
         this.bluetoothRouteConfirmVisible && this.btAudioActive) {
         this.bluetoothRouteProbePlayed = true;
+      } else if (requestToken === this.bluetoothRouteProbeRequestToken && this.bluetoothRouteConfirmVisible) {
+        this.bluetoothRouteStatus = '试音未完成，请重试';
       }
     } catch (err) {
+      logUserFailure('lobby-route-probe', err);
       if (requestToken === this.bluetoothRouteProbeRequestToken &&
         this.bluetoothRouteConfirmVisible && this.btAudioActive) {
-        promptAction.showToast({ message: `试音失败：${(err as Error).message}` });
+        this.bluetoothRouteStatus = '试音失败，请确认耳机连接后重试';
       }
     } finally {
       if (requestToken === this.bluetoothRouteProbeRequestToken && this.bluetoothRouteConfirmVisible) {
@@ -233,12 +240,13 @@ struct LeaderLobbyPage {
     this.bluetoothRouteConfirmVisible = false;
     this.bluetoothRouteProbePlayed = false;
     this.bluetoothRouteProbePlaying = false;
+    this.bluetoothRouteStatus = '';
     void AppSession.get()?.stopLatencyCalibration();
   }
 
   private rejectBluetoothRouteConfirmation(): void {
-    this.dismissBluetoothRouteConfirmation();
-    promptAction.showToast({ message: '未进入校准，请先把媒体声音切到蓝牙耳机' });
+    this.bluetoothRouteProbePlayed = false;
+    this.bluetoothRouteStatus = '请先把媒体输出切到耳机，再播放试音';
   }
 
   private hasBluetoothCalibration(): boolean {
@@ -254,7 +262,7 @@ struct LeaderLobbyPage {
 
   private calibrationCardSubtitle(): string {
     if (!this.hasBluetoothCalibration()) {
-      return '测一次，让队伍听到同一拍';
+      return '声音不同步时，可校准耳机';
     }
     if (this.btCalibrationNeedsRemeasure) {
       return `原补偿 ${this.latencyCalibrationMs} ms · 建议适配新连接`;
@@ -285,10 +293,9 @@ struct LeaderLobbyPage {
 
   private soloCalibrationEntryLabel(): string {
     if (this.hasBluetoothCalibration()) {
-      return this.btCalibrationNeedsRemeasure ? '耳机已重连 · 延迟校准 ›' :
-        `耳机补偿 ${this.latencyCalibrationMs} ms · 重测 ›`;
+      return this.btCalibrationNeedsRemeasure ? '耳机已重连 · 校准 ›' : '耳机已校准';
     }
-    return '蓝牙耳机延迟校准（可选）›';
+    return '耳机设置 ›';
   }
 
   @Builder
@@ -369,7 +376,8 @@ struct LeaderLobbyPage {
             .onClick(() => this.dismissBluetoothRouteConfirmation())
         }.width('100%').alignItems(VerticalAlign.Center)
 
-        Text('系统检测到了蓝牙音频。播放“嘀嗒”两声试音，确认声音确实从蓝牙耳机里传出。')
+        Text(this.bluetoothRouteStatus.length > 0 ? this.bluetoothRouteStatus :
+          '系统检测到了蓝牙音频。播放“嘀嗒”两声试音，确认声音确实从蓝牙耳机里传出。')
           .width('100%').fontSize(13).lineHeight(20).fontWeight(700).fontColor('#4F4943')
 
         Button(this.bluetoothRouteProbePlaying ? '正在播放…' :
@@ -424,6 +432,8 @@ struct LeaderLobbyPage {
     void this.initialize();
   }
   aboutToDisappear(): void {
+    this.pendingActions.clear();
+    this.actionSessions.clear();
     this.bluetoothRouteProbeRequestToken++;
     this.randomSelectionToken += 1;
     this.randomPreviewPageVisible = false;
@@ -454,10 +464,14 @@ struct LeaderLobbyPage {
     this.randomPreviewPageVisible = true;
     this.startRosterStatusAnimation();
     this.enteringStage = false;
+    this.refreshingConnectivity = false;
+    this.refresh();
     this.latencyCalibrationMs = getCalibrationMs();
     void this.refreshLeaderConnectivity();
   }
   onPageHide(): void {
+    this.pendingActions.clear();
+    this.actionSessions.clear();
     this.bluetoothRouteProbeRequestToken++;
     if (this.bluetoothRouteConfirmVisible) {
       this.dismissBluetoothRouteConfirmation();
@@ -466,6 +480,30 @@ struct LeaderLobbyPage {
     this.randomPreviewPageVisible = false;
     this.randomPreviewPendingMemberId = '';
     this.stopRosterStatusAnimation();
+  }
+
+  private beginAction(scope: string, trackSession: boolean = true): number {
+    const request = ++this.actionSequence;
+    this.pendingActions.set(scope, request);
+    const session = AppSession.get();
+    if (trackSession && session !== undefined) {
+      this.actionSessions.set(scope, session);
+    } else {
+      this.actionSessions.delete(scope);
+    }
+    return request;
+  }
+
+  private isCurrentAction(scope: string, request: number): boolean {
+    return this.randomPreviewPageVisible && this.pendingActions.get(scope) === request &&
+      (!this.actionSessions.has(scope) || this.actionSessions.get(scope) === AppSession.get());
+  }
+
+  private reportActionFailure(scope: string, request: number, error: Object, fallback: string): void {
+    logUserFailure(scope, error);
+    if (this.isCurrentAction(scope, request)) {
+      showUserNotice(userErrorMessage(error, fallback), scope);
+    }
   }
 
   private startRosterStatusAnimation(): void {
@@ -489,15 +527,24 @@ struct LeaderLobbyPage {
       return;
     }
     this.refreshingConnectivity = true;
+    const request = this.beginAction('lobby-connectivity');
     try {
       await AppSession.get()?.refreshLeaderP2pGroup();
+      if (!this.isCurrentAction('lobby-connectivity', request)) {
+        return;
+      }
       this.refresh();
       this.updateRoomStatus();
     } catch (err) {
-      this.refresh();
-      this.status = (err as Error).message;
+      logUserFailure('lobby-connectivity', err);
+      if (this.isCurrentAction('lobby-connectivity', request)) {
+        this.refresh();
+        this.status = userErrorMessage(err, '邀请信息更新失败，请稍后重试');
+      }
     } finally {
-      this.refreshingConnectivity = false;
+      if (this.isCurrentAction('lobby-connectivity', request)) {
+        this.refreshingConnectivity = false;
+      }
     }
   }
 
@@ -506,13 +553,20 @@ struct LeaderLobbyPage {
   }
 
   private async initialize(): Promise<void> {
+    const request = this.beginAction('lobby-initialize', false);
     this.loading = true;
     this.failed = false;
     try {
       await refreshStoreEntitlementsNow();
+      if (!this.isCurrentAction('lobby-initialize', request)) {
+        return;
+      }
       const params = router.getParams() as Record<string, string>;
       if (params?.['reuse'] !== '1') {
         await AppSession.reset();
+        if (!this.isCurrentAction('lobby-initialize', request)) {
+          return;
+        }
         const name = params?.['displayName'] || 'Player';
         const session = AppSession.createLeader(name);
         if (params?.['solo'] === '1') {
@@ -520,15 +574,28 @@ struct LeaderLobbyPage {
         } else {
           const ctx = getContext(this) as common.UIAbilityContext;
           const granted = await ensureTeamNetworkPermissions(ctx);
+          if (!this.isCurrentAction('lobby-initialize', request)) {
+            return;
+          }
           if (!granted) {
             throw new Error(teamNetworkPermissionDeniedHint());
           }
-          if (!(await verifyTeamNetworkAccess())) {
+          const accessible = await verifyTeamNetworkAccess();
+          if (!this.isCurrentAction('lobby-initialize', request)) {
+            return;
+          }
+          if (!accessible) {
             throw new Error(teamNetworkAccessUnavailableHint());
           }
           await ensureBluetoothDiscoveryPermission(ctx);
+          if (!this.isCurrentAction('lobby-initialize', request)) {
+            return;
+          }
           await session.leaderBootstrap(name);
         }
+      }
+      if (!this.isCurrentAction('lobby-initialize', request)) {
+        return;
       }
       this.refresh();
       this.soloTeam = AppSession.get()?.controller.soloTeam ?? false;
@@ -537,21 +604,24 @@ struct LeaderLobbyPage {
         this.invite = true;
       }
     } catch (e) {
-      this.failed = true;
-      this.status = (e as Error).message;
-    } finally { this.loading = false; }
+      logUserFailure('lobby-initialize', e);
+      if (this.isCurrentAction('lobby-initialize', request)) {
+        this.failed = true;
+        this.status = userErrorMessage(e, '队伍创建失败，请重试');
+      }
+    } finally {
+      if (this.isCurrentAction('lobby-initialize', request)) {
+        this.loading = false;
+      }
+    }
   }
 
   private updateRoomStatus(): void {
     const controller = AppSession.get()?.controller;
-    if (controller === undefined) {
+    if (controller === undefined || this.failed) {
       return;
     }
-    this.status = controller.soloTeam
-      ? '单人练习 · 可增减人机队友'
-      : (controller.bleInviteAvailable
-        ? 'P2P 队伍已创建 · 可扫码或输入加入码'
-        : 'P2P 队伍已创建 · 可扫码加入；打开蓝牙并返回即可恢复当前加入码');
+    this.status = '';
   }
 
   private async leaveLobby(): Promise<void> {
@@ -563,13 +633,21 @@ struct LeaderLobbyPage {
       this.dismissBluetoothRouteConfirmation();
     }
     this.leavingLobby = true;
+    const request = this.beginAction('lobby-exit', false);
     this.status = '正在退出队伍…';
     try {
       await AppSession.reset();
+      if (!this.isCurrentAction('lobby-exit', request)) {
+        this.leavingLobby = false;
+        return;
+      }
       await navigateToHome();
-    } catch (_e) {
+    } catch (error) {
+      this.reportActionFailure('lobby-exit', request, error, '退出队伍失败，请重试');
       this.leavingLobby = false;
-      promptAction.showToast({ message: '退出队伍失败，请重试' });
+      if (this.isCurrentAction('lobby-exit', request)) {
+        this.status = '';
+      }
     }
   }
 
@@ -605,11 +683,14 @@ struct LeaderLobbyPage {
     }
     this.beats = beats;
     this.unit = unit;
+    const request = this.beginAction('lobby-meter');
     try {
       await AppSession.get()?.controller.updateMeter(beats, unit);
-      this.refresh();
-    } catch (_e) {
-      promptAction.showToast({ message: '拍号修改失败，请重试' });
+      if (this.isCurrentAction('lobby-meter', request)) {
+        this.refresh();
+      }
+    } catch (error) {
+      this.reportActionFailure('lobby-meter', request, error, '拍号同步失败，请重试');
     }
   }
 
@@ -748,10 +829,11 @@ struct LeaderLobbyPage {
   private async publishRandomFilmResult(memberId: string, drawId: number): Promise<void> {
     try {
       await AppSession.get()?.controller.completeRandomAvatarPreview(memberId, drawId);
-    } catch (_e) {
+    } catch (error) {
+      logUserFailure('lobby-random-character', error);
       if (this.randomPreviewPageVisible && this.members.some((member: SessionMember) =>
         member.id === memberId && member.randomDrawId === drawId)) {
-        promptAction.showToast({ message: '随机头像同步失败，请重试' });
+        showUserNotice(userErrorMessage(error, '角色同步失败，请重试'), 'lobby-character');
       }
     }
   }
@@ -811,10 +893,11 @@ struct LeaderLobbyPage {
     try {
       await AppSession.get()?.controller.updateMemberAvatar(memberId, key);
       this.refresh();
-    } catch (_e) {
+    } catch (error) {
+      logUserFailure('lobby-character', error);
       if (token === this.randomSelectionToken && this.randomPreviewPageVisible) {
         this.randomPreviewPendingMemberId = '';
-        promptAction.showToast({ message: '角色同步失败，请重试' });
+        showUserNotice(userErrorMessage(error, '角色同步失败，请重试'), 'lobby-character');
       }
     } finally {
       // A follower's send may finish before the leader's snapshot. Retain the
@@ -845,6 +928,9 @@ struct LeaderLobbyPage {
   }
 
   private primaryLobbyLabel(): string {
+    if (this.leavingLobby) {
+      return '正在退出…';
+    }
     if (this.failed) {
       return '重试创建';
     }
@@ -868,7 +954,7 @@ struct LeaderLobbyPage {
   }
 
   private primaryLobbyActive(): boolean {
-    if (this.loading) {
+    if (this.loading || this.leavingLobby) {
       return false;
     }
     if (this.failed) {
@@ -885,7 +971,7 @@ struct LeaderLobbyPage {
       void this.initialize();
       return;
     }
-    if (this.loading) {
+    if (this.loading || this.leavingLobby) {
       return;
     }
     const c = AppSession.get()?.controller;
@@ -900,12 +986,15 @@ struct LeaderLobbyPage {
       await this.leaderDepartToWalk();
       return;
     }
-    if (c.isLocalLobbyReady()) {
-      await c.setLobbyReady(false);
-    } else {
-      await c.setLobbyReady(true);
+    const request = this.beginAction('lobby-ready');
+    try {
+      await c.setLobbyReady(!c.isLocalLobbyReady());
+      if (this.isCurrentAction('lobby-ready', request)) {
+        this.refresh();
+      }
+    } catch (error) {
+      this.reportActionFailure('lobby-ready', request, error, '准备状态同步失败，请重试');
     }
-    this.refresh();
   }
 
   private async leaderDepartToWalk(): Promise<void> {
@@ -913,25 +1002,32 @@ struct LeaderLobbyPage {
     if (c === undefined || !c.canLeaderStartWalk()) {
       return;
     }
+    const request = this.beginAction('lobby-depart');
     try {
       await c.departLobbyToWalk();
+      if (!this.isCurrentAction('lobby-depart', request)) {
+        return;
+      }
       await this.enterStage();
-    } catch (_e) {
-      promptAction.showToast({ message: '出发同步失败，请重试' });
+    } catch (error) {
+      this.reportActionFailure('lobby-depart', request, error, '出发同步失败，请重试');
     }
   }
 
   private async chooseScene(key: string): Promise<void> {
     if (!this.leader || this.loading || key === this.selectedSceneKey) { return; }
     if (!isSceneAccessible(key)) {
-      promptAction.showToast({ message: '请先在收藏小铺解锁这个场景' });
+      showUserNotice('请先在收藏小铺解锁这个场景', 'lobby-scene');
       return;
     }
+    const request = this.beginAction('lobby-scene');
     try {
       await AppSession.get()?.controller.updateSceneKey(key);
-      this.refresh();
-    } catch (_e) {
-      promptAction.showToast({ message: '场景同步失败，请重试' });
+      if (this.isCurrentAction('lobby-scene', request)) {
+        this.refresh();
+      }
+    } catch (error) {
+      this.reportActionFailure('lobby-scene', request, error, '场景同步失败，请重试');
     }
   }
 
@@ -966,7 +1062,7 @@ struct LeaderLobbyPage {
 
   private editDrumMachine(): void {
     if (!isProDrumMachineAccessible()) {
-      promptAction.showToast({ message: 'PRO 定制鼓机包含在畅游月卡中' });
+      showUserNotice('PRO 定制鼓机包含在畅游月卡中', 'lobby-pro-drum');
       return;
     }
     router.pushUrl({ url: 'pages/DrumMachinePage' });
@@ -979,8 +1075,15 @@ struct LeaderLobbyPage {
     }
     const stored = AppStorage.get<number>('lastBasicRhythm') ?? 0;
     const next = stored >= 0 && stored <= 2 ? stored : 0;
-    await controller.updateRhythm(next);
-    this.refresh();
+    const request = this.beginAction('lobby-rhythm');
+    try {
+      await controller.updateRhythm(next);
+      if (this.isCurrentAction('lobby-rhythm', request)) {
+        this.refresh();
+      }
+    } catch (error) {
+      this.reportActionFailure('lobby-rhythm', request, error, '节奏同步失败，请重试');
+    }
   }
 
   private openRhythmDropdown(): void {
@@ -1010,8 +1113,15 @@ struct LeaderLobbyPage {
       return;
     }
     this.rhythmDropdownOpen = false;
-    await AppSession.get()?.controller.updateRhythm(index);
-    this.refresh();
+    const request = this.beginAction('lobby-rhythm');
+    try {
+      await AppSession.get()?.controller.updateRhythm(index);
+      if (this.isCurrentAction('lobby-rhythm', request)) {
+        this.refresh();
+      }
+    } catch (error) {
+      this.reportActionFailure('lobby-rhythm', request, error, '节奏同步失败，请重试');
+    }
   }
 
   private async enterStage(): Promise<void> {
@@ -1019,11 +1129,14 @@ struct LeaderLobbyPage {
       return;
     }
     this.enteringStage = true;
+    const request = this.beginAction('lobby-enter-stage');
     try {
       await router.pushUrl({ url: 'pages/MainPage' });
-    } catch (_e) {
-      this.enteringStage = false;
-      promptAction.showToast({ message: '进入行进页失败，请重试' });
+    } catch (error) {
+      this.reportActionFailure('lobby-enter-stage', request, error, '进入行进页失败，请重试');
+      if (this.isCurrentAction('lobby-enter-stage', request)) {
+        this.enteringStage = false;
+      }
     }
   }
 
@@ -1046,14 +1159,18 @@ struct LeaderLobbyPage {
     if (c === undefined || !this.canAddSoloBotSlot()) {
       return;
     }
+    const request = this.beginAction('lobby-add-bot');
     try {
       const newBotId = await c.addSoloBotWithNextAvatar();
+      if (!this.isCurrentAction('lobby-add-bot', request)) {
+        return;
+      }
       this.refresh();
       if (newBotId !== undefined && newBotId.length > 0) {
         this.selectEditingMember(newBotId);
       }
-    } catch (_e) {
-      promptAction.showToast({ message: '添加人机失败' });
+    } catch (error) {
+      this.reportActionFailure('lobby-add-bot', request, error, '添加人机失败，请重试');
     }
   }
 
@@ -1062,11 +1179,14 @@ struct LeaderLobbyPage {
     if (c === undefined) {
       return;
     }
+    const request = this.beginAction('lobby-remove-bot');
     try {
       await c.removeSoloBotById(id);
-      this.refresh();
-    } catch (_e) {
-      promptAction.showToast({ message: '移除人机失败' });
+      if (this.isCurrentAction('lobby-remove-bot', request)) {
+        this.refresh();
+      }
+    } catch (error) {
+      this.reportActionFailure('lobby-remove-bot', request, error, '移除人机失败，请重试');
     }
   }
 
@@ -1492,8 +1612,8 @@ struct LeaderLobbyPage {
               .fontStyle(FontStyle.Italic)
               .letterSpacing(4)
             Text(AppSession.get()?.controller.bleInviteAvailable === true
-              ? '队员可扫码，或打开蓝牙后输入 6 位加入码'
-              : '队员仍可扫码；打开队长蓝牙并返回本页后，当前加入码会自动恢复')
+              ? '扫码或输入 6 位加入码'
+              : '加入码暂不可用，可扫码加入')
               .fontSize(12)
               .fontColor('#66615A')
             Row() {
@@ -1564,8 +1684,6 @@ struct LeaderLobbyPage {
                 }, (item: LobbySceneOption) => item.key)
               }.padding({ bottom: 2 })
             }.scrollable(ScrollDirection.Horizontal).scrollBar(BarState.Off).width('100%').height(151)
-            Text('出发后全队进入同一场景')
-              .fontSize(11).fontColor('#66615A').width('100%')
           }.width('100%').padding(12).backgroundColor(WHITE)
             .border({ width: 1, color: INK }).borderRadius(7).shadow(CARD_SHADOW)
         }
@@ -1700,16 +1818,18 @@ struct LeaderLobbyPage {
         } else if (this.leader) {
           this.proDrumMachineEntry()
         }
-        Text(this.status)
-          .fontSize(12)
-          .fontColor('#66615A')
-          .width('100%')
-          .onClick(() => {
-            if (this.status.indexOf('Wi-Fi') >= 0) {
-              const ctx = getContext(this) as common.UIAbilityContext;
-              void openWirelessSettings(ctx);
-            }
-          })
+        if (this.status.length > 0) {
+          Text(this.status)
+            .fontSize(12)
+            .fontColor('#66615A')
+            .width('100%')
+            .onClick(() => {
+              if (this.status.indexOf('Wi-Fi') >= 0) {
+                const ctx = getContext(this) as common.UIAbilityContext;
+                void openWirelessSettings(ctx);
+              }
+            })
+        }
         if (this.btAudioActive) {
           if (this.soloTeam) {
             this.soloLatencyCalibrationEntry()

@@ -1,4 +1,4 @@
-import { router, promptAction } from '@kit.ArkUI';
+import { router } from '@kit.ArkUI';
 import { AppSession } from '../app/AppSession';
 import { SessionController } from '../session/SessionController';
 import { SessionMember } from '../protocol/messages';
@@ -18,6 +18,7 @@ import { WalkScene } from '../scene/WalkScene';
 import { EditableBpm } from '../components/EditableBpm';
 import { MeterEditorOverlay } from '../components/EditableMeter';
 import { BeatPointState, defaultBeatPointStates } from '../common/MeterModel';
+import { logUserFailure, showUserNotice, userErrorMessage } from '../common/UserFeedback';
 import {
   defaultDrumProgram,
   DrumStyle,
@@ -70,19 +71,60 @@ struct MainPage {
   @StorageLink('safeAreaTop') topSafeInset: number = 0;
   @StorageLink('safeAreaBottom') bottomSafeInset: number = 0;
   @StorageLink('selectedSceneKey') sceneKey: string = 'sunset_coast';
-  @StorageLink('btAudioActive') @Watch('onBtAudioActiveChanged') btAudioActive: boolean = false;
   @State soloTeam: boolean = false;
   private sounds: string[] = ['电子', '清脆', '低音'];
   private visualTimer: number = -1;
+  private pageActive: boolean = true;
+  private actionSequence: number = 0;
+  // A native response must still belong to this page's latest action and room.
+  private readonly pendingActions: Map<string, number> = new Map();
+  private readonly actionSessions: Map<string, AppSession> = new Map();
 
   aboutToAppear(): void {
+    this.pageActive = true;
     this.refresh();
     this.startVisualLoop();
   }
-  aboutToDisappear(): void { this.stopVisualLoop(); }
+  aboutToDisappear(): void {
+    this.pageActive = false;
+    this.pendingActions.clear();
+    this.actionSessions.clear();
+    this.stopVisualLoop();
+  }
   onPageShow(): void {
+    this.pageActive = true;
     this.refresh();
     this.startVisualLoop();
+  }
+  onPageHide(): void {
+    this.pageActive = false;
+    this.pendingActions.clear();
+    this.actionSessions.clear();
+    this.stopVisualLoop();
+  }
+
+  private beginAction(scope: string, trackSession: boolean = true): number {
+    const request = ++this.actionSequence;
+    this.pendingActions.set(scope, request);
+    const session = AppSession.get();
+    if (trackSession && session !== undefined) {
+      this.actionSessions.set(scope, session);
+    } else {
+      this.actionSessions.delete(scope);
+    }
+    return request;
+  }
+
+  private isCurrentAction(scope: string, request: number): boolean {
+    return this.pageActive && this.pendingActions.get(scope) === request &&
+      (!this.actionSessions.has(scope) || this.actionSessions.get(scope) === AppSession.get());
+  }
+
+  private reportActionFailure(scope: string, request: number, error: Object, fallback: string): void {
+    logUserFailure(scope, error);
+    if (this.isCurrentAction(scope, request)) {
+      showUserNotice(userErrorMessage(error, fallback), scope);
+    }
   }
   onBackPress(): boolean {
     if (this.meterEditorVisible) {
@@ -206,13 +248,19 @@ struct MainPage {
   private async toggle(): Promise<void> {
     if (!this.leader || this.busy || this.exiting) { return; }
     this.busy = true;
+    const request = this.beginAction('walk-playback');
     try {
       const s = AppSession.get();
       if (this.state === 'playing' || this.state === 'countdown') { await s?.leaderPause(); }
       else if (this.state === 'paused') { await s?.leaderResume(); }
       else { await s?.leaderStart(); }
-    } catch (_e) { promptAction.showToast({ message: '播放操作失败，请重试' }); }
-    finally { this.busy = false; this.refresh(); }
+    } catch (error) { this.reportActionFailure('walk-playback', request, error, '播放操作失败，请重试'); }
+    finally {
+      this.busy = false;
+      if (this.isCurrentAction('walk-playback', request)) {
+        this.refresh();
+      }
+    }
   }
 
   private async applyMeter(beats: number, unit: number): Promise<void> {
@@ -221,12 +269,15 @@ struct MainPage {
     }
     this.beats = beats;
     this.unit = unit;
+    const request = this.beginAction('walk-meter');
     try {
       await AppSession.get()?.controller.updateMeter(beats, unit);
-    } catch (_e) {
-      promptAction.showToast({ message: '拍号修改失败，请重试' });
+    } catch (error) {
+      this.reportActionFailure('walk-meter', request, error, '拍号修改失败，请重试');
     } finally {
-      this.refresh();
+      if (this.isCurrentAction('walk-meter', request)) {
+        this.refresh();
+      }
     }
   }
 
@@ -235,13 +286,16 @@ struct MainPage {
       return;
     }
     this.busy = true;
+    const request = this.beginAction('walk-beat-point');
     try {
       await AppSession.get()?.controller.cycleBeatPointState(index);
-    } catch (_e) {
-      promptAction.showToast({ message: '拍点修改失败，请重试' });
+    } catch (error) {
+      this.reportActionFailure('walk-beat-point', request, error, '拍点修改失败，请重试');
     } finally {
       this.busy = false;
-      this.refresh();
+      if (this.isCurrentAction('walk-beat-point', request)) {
+        this.refresh();
+      }
     }
   }
 
@@ -316,11 +370,16 @@ struct MainPage {
       return;
     }
     this.returningToLobby = true;
+    const request = this.beginAction('walk-return');
     try {
       await AppSession.get()?.leaderReturnToLobby();
+      if (!this.isCurrentAction('walk-return', request)) {
+        this.returningToLobby = false;
+        return;
+      }
       router.back();
-    } catch (_e) {
-      promptAction.showToast({ message: '返回队伍大厅失败，请重试' });
+    } catch (error) {
+      this.reportActionFailure('walk-return', request, error, '返回队伍大厅失败，请重试');
       this.returningToLobby = false;
     }
   }
@@ -336,16 +395,21 @@ struct MainPage {
     if (this.exiting) { return; }
     this.showExitConfirm = false;
     this.exiting = true;
+    const request = this.beginAction('walk-exit', false);
     try {
       await AppSession.reset();
-    } catch (_e) {
-      promptAction.showToast({ message: '会话已退出，部分网络资源稍后释放' });
+    } catch (error) {
+      logUserFailure('walk-exit-cleanup', error);
+    }
+    if (!this.isCurrentAction('walk-exit', request)) {
+      this.exiting = false;
+      return;
     }
     router.clear();
     try {
       await router.replaceUrl({ url: 'pages/Index' });
-    } catch (_e) {
-      promptAction.showToast({ message: '返回首页失败，请重试' });
+    } catch (error) {
+      this.reportActionFailure('walk-exit', request, error, '返回首页失败，请重试');
       this.exiting = false;
     }
   }
@@ -392,7 +456,7 @@ struct MainPage {
             .onClick(() => this.showExitConfirm = false)
         }.width('100%')
         Text('要退出这支队伍吗？').fontSize(25).fontWeight(900).fontStyle(FontStyle.Italic).width('100%')
-        Text('退出后会回到首页，本轮队伍进度不会保留。')
+        Text('退出后需重新加入队伍。')
           .fontSize(13).fontWeight(FontWeight.Bold).fontColor('#625C54').width('100%')
         Row({ space: 10 }) {
           Button('继续行进', { type: ButtonType.Normal })
@@ -639,7 +703,7 @@ struct MainPage {
       }.width('100%').justifyContent(FlexAlign.SpaceBetween).alignItems(VerticalAlign.Center)
       Text(this.leader ? (this.state === 'idle' ? '点击播放 · 全队一起出发' :
         this.state === 'paused' ? '已暂停 · 点击继续' :
-          this.visualCountIn ? '准备拍 · 舞台保持静止' : 'ONEBEAT / 同拍进行中') : '节奏由队长控制')
+          this.visualCountIn ? '准备拍…' : 'ONEBEAT / 同拍进行中') : '节奏由队长控制')
         .fontSize(10).fontWeight(FontWeight.Bold).fontStyle(FontStyle.Italic).letterSpacing(0.5)
     }
     .width('100%').padding({ left: 14, right: 14, top: 8, bottom: 12 + this.bottomSafeInset })
@@ -647,33 +711,6 @@ struct MainPage {
     .border({ width: { top: 3 }, color: INK })
     .translate({ y: this.chromeVisible ? 0 : 190 + this.bottomSafeInset })
     .opacity(this.chromeVisible ? 1 : 0)
-  }
-
-  onBtAudioActiveChanged(): void {
-    if (this.btAudioActive) {
-      promptAction.showToast({ message: '检测到蓝牙耳机输出，节拍可能延迟，建议外放或有线耳机' });
-    }
-  }
-
-  @Builder
-  bluetoothBanner() {
-    Column() {
-      Row() {
-        Text('蓝牙耳机输出 · 节拍可能延迟')
-          .fontSize(13)
-          .fontColor(INK)
-        Blank()
-        Text('建议外放 / 有线')
-          .fontSize(12)
-          .fontColor(CORAL)
-      }
-      .width('100%')
-      .padding({ left: 14, right: 14, top: 9, bottom: 9 })
-      .backgroundColor(PAPER)
-      .borderRadius(12)
-    }
-    .width('100%')
-    .padding({ left: 16, right: 16, top: this.topSafeInset + 10 })
   }
 
   build() {
@@ -698,9 +735,6 @@ struct MainPage {
       .height('100%')
       .hitTestBehavior(HitTestMode.Transparent)
       .zIndex(50)
-      if (this.btAudioActive) {
-        this.bluetoothBanner()
-      }
       if (this.showExitConfirm) {
         this.exitConfirmOverlay()
       }
