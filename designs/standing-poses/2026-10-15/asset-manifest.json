@@ -1,0 +1,559 @@
+[
+  {
+    "key": "boonie/palette_1",
+    "source": "entry/src/main/resources/rawfile/walk/boonie/palette_1/frame_01.png",
+    "output": "entry/src/main/resources/rawfile/stand/boonie/palette_1/frame_01.png",
+    "source_sha256": "4faaf8ce72c086693e5caa359c35442bc9405186533ffa8a10751f5a112e43af",
+    "output_sha256": "926c960f35b85ba1cd940b33b41143bbe8ead8d8790e0939816c0b5ea1e8ce68",
+    "source_audit": {
+      "width": 1254,
+      "height": 1254,
+      "mode": "RGBA",
+      "alpha_extrema": [
+        0,
+        255
+      ],
+      "alpha32_bbox": [
+        150,
+        42,
+        1091,
+        1228
+      ]
+    },
+    "output_audit": {
+      "width": 1254,
+      "height": 1254,
+      "mode": "RGBA",
+      "alpha_extrema": [
+        0,
+        255
+      ],
+      "alpha32_bbox": [
+        353,
+        41,
+        989,
+        1229
+      ]
+    }
+  },
+  {
+    "key": "boonie/palette_2",
+    "source": "entry/src/main/resources/rawfile/walk/boonie/palette_2/frame_01.png",
+    "output": "entry/src/main/resources/rawfile/stand/boonie/palette_2/frame_01.png",
+    "source_sha256": "1c69ad0271bba19d7d1920f675c167b7bb1429c54e385ef604ace41f1d6e380a",
+    "output_sha256": "cb8d051a410731342e2f9ee1d590f6881bffd76f56a18baeec5a20fe02e5d955",
+    "source_audit": {
+      "width": 1254,
+      "height": 1254,
+      "mode": "RGBA",
+      "alpha_extrema": [
+        0,
+        255
+      ],
+      "alpha32_bbox": [
+        173,
+        42,
+        1055,
+        1230
+      ]
+    },
+    "output_audit": {
+      "width": 1254,
+      "height": 1254,
+      "mode": "RGBA",
+      "alpha_extrema": [
+        0,
+        255
+      ],
+      "alpha32_bbox": [
+        366,
+        39,
+        985,
+        1232
+      ]
+    }
+  },
+  {
+    "key": "braids/palette_1",
+    "source": "entry/src/main/resources/rawfile/walk/braids/palette_1/frame_01.png",
+    "output": "entry/src/main/resources/rawfile/stand/braids/palette_1/frame_01.png",
+    "source_sha256": "27d93e5d416f82ea326d8f16dcc6d6e15d78fd677e122b6cd6be594f603a2938",
+    "output_sha256": "98b3c5e7d8a3359a52347064e42298e7542de86a1ef6ab1ae3e35ffb5ec19374",
+    "source_audit": {
+      "width": 1254,
+      "height": 1254,
+      "mode": "RGBA",
+      "alpha_extrema": [
+        0,
+        255
+      ],
+      "alpha32_bbox": [
+        181,
+        59,
+        1152,
+        1213
+      ]
+    },
+    "output_audit": {
+      "width": 1254,
+      "height": 1254,
+      "mode": "RGBA",
+      "alpha_extrema": [
+        0,
+        255
+      ],
+      "alpha32_bbox": [
+        359,
+        61,
+        1000,
+        1216
+      ]
+    }
+  },
+  {
+    "key": "braids/palette_2",
+    "source": "entry/src/main/resources/rawfile/walk/braids/palette_2/frame_01.png",
+    "output": "entry/src/main/resources/rawfile/stand/braids/palette_2/frame_01.png",
+    "source_sha256": "866671aa39ce472da76fd6a31c1e42880ca1ac6154855c737c5a95a1f0b654df",
+    "output_sha256": "26fa3d59b31f1c2f49442e22338f3f26f7161dad4faa97518685717f2a4dcc82",
+    "source_audit": {
+      "width": 1254,
+      "height": 1254,
+      "mode": "RGBA",
+      "alpha_extrema": [
+        0,
+        255
+      ],
+      "alpha32_bbox": [
+        181,
+        60,
+        1156,
+        1215
+      ]
+    },
+    "output_audit": {
+      "width": 1254,
+      "height": 1254,
+      "mode": "RGBA",
+      "alpha_extrema": [
+        0,
+        255
+      ],
+      "alpha32_bbox": [
+        362,
+        63,
+        991,
+        1220
+      ]
+    }
+  },
+  {
+    "key": "buzz/palette_1",
+    "source": "entry/src/main/resources/rawfile/walk/buzz/palette_1/frame_01.png",
+    "output": "entry/src/main/resources/rawfile/stand/buzz/palette_1/frame_01.png",
+    "source_sha256": "45a501a0775c5d0a15311d6dcc9f33aeccd5062cf6a4dccdcad776a3be762e3c",
+    "output_sha256": "3ea1a8df6ecf18af45e83bc19e75af00e13546cc0ebc5df3ca6a82ecbcf4d1bd",
+    "source_audit": {
+      "width": 1080,
+      "height": 1080,
+      "mode": "RGBA",
+      "alpha_extrema": [
+        0,
+        255
+      ],
+      "alpha32_bbox": [
+        223,
+        55,
+        891,
+        1064
+      ]
+    },
+    "output_audit": {
+      "width": 1254,
+      "height": 1254,
+      "mode": "RGBA",
+      "alpha_extrema": [
+        0,
+        255
+      ],
+      "alpha32_bbox": [
+        426,
+        64,
+        974,
+        1232
+      ]
+    },
+    "revision": "Both hands outside pockets, relaxed hanging arms"
+  },
+  {
+    "key": "buzz/palette_2",
+    "source": "entry/src/main/resources/rawfile/walk/buzz/palette_2/frame_01.png",
+    "output": "entry/src/main/resources/rawfile/stand/buzz/palette_2/frame_01.png",
+    "source_sha256": "ab424d02d42cec2f6e91ae072c670b70d865606642d4f359cad3e8d56de6b5e2",
+    "output_sha256": "7a13c28f082f1c4bf48341117458f550637688ce9065a937bf8f06654dffe90a",
+    "source_audit": {
+      "width": 1080,
+      "height": 1080,
+      "mode": "RGBA",
+      "alpha_extrema": [
+        0,
+        255
+      ],
+      "alpha32_bbox": [
+        226,
+        48,
+        916,
+        1036
+      ]
+    },
+    "output_audit": {
+      "width": 1254,
+      "height": 1254,
+      "mode": "RGBA",
+      "alpha_extrema": [
+        0,
+        255
+      ],
+      "alpha32_bbox": [
+        440,
+        54,
+        958,
+        1216
+      ]
+    },
+    "revision": "Both hands outside pockets, relaxed hanging arms"
+  },
+  {
+    "key": "cloud",
+    "source": "entry/src/main/resources/rawfile/walk/cloud/frame_01.png",
+    "output": "entry/src/main/resources/rawfile/stand/cloud/frame_01.png",
+    "source_sha256": "4f6c5d1508f06362718fdddac6592c3d0951aeaa84684dbba3029c6106204772",
+    "output_sha256": "9ccd87838d6513414819fcefc591db4adb0867da19c18a607d2f4a6f97710ab1",
+    "source_audit": {
+      "width": 1080,
+      "height": 1080,
+      "mode": "RGBA",
+      "alpha_extrema": [
+        0,
+        255
+      ],
+      "alpha32_bbox": [
+        160,
+        164,
+        881,
+        944
+      ]
+    },
+    "output_audit": {
+      "width": 1254,
+      "height": 1254,
+      "mode": "RGBA",
+      "alpha_extrema": [
+        0,
+        255
+      ],
+      "alpha32_bbox": [
+        352,
+        192,
+        920,
+        1097
+      ]
+    }
+  },
+  {
+    "key": "curly/palette_1",
+    "source": "entry/src/main/resources/rawfile/walk/curly/palette_1/frame_01.png",
+    "output": "entry/src/main/resources/rawfile/stand/curly/palette_1/frame_01.png",
+    "source_sha256": "e6682cab7a40bcec1a9bf8b3c1c1cc3fe82fbd4ec02c8f384e7b4a28d35c2a48",
+    "output_sha256": "4aee368fc74a156b0baf207005a0006a7ecc1711a29841d4e835b15d95f6c3b8",
+    "source_audit": {
+      "width": 1080,
+      "height": 1080,
+      "mode": "RGBA",
+      "alpha_extrema": [
+        0,
+        255
+      ],
+      "alpha32_bbox": [
+        147,
+        30,
+        871,
+        1065
+      ]
+    },
+    "output_audit": {
+      "width": 1254,
+      "height": 1254,
+      "mode": "RGBA",
+      "alpha_extrema": [
+        0,
+        255
+      ],
+      "alpha32_bbox": [
+        227,
+        24,
+        915,
+        1230
+      ]
+    }
+  },
+  {
+    "key": "curly/palette_2",
+    "source": "entry/src/main/resources/rawfile/walk/curly/palette_2/frame_01.png",
+    "output": "entry/src/main/resources/rawfile/stand/curly/palette_2/frame_01.png",
+    "source_sha256": "b5684e842de560dee096c6e508844cdedd8c45fd7944683ef0ab80c5ca48dee7",
+    "output_sha256": "1180198f4dbdab4b5d6e5e604ec2e8f77d5be9c669f7b00182b620129c651bfe",
+    "source_audit": {
+      "width": 1080,
+      "height": 1080,
+      "mode": "RGBA",
+      "alpha_extrema": [
+        0,
+        255
+      ],
+      "alpha32_bbox": [
+        152,
+        30,
+        880,
+        1059
+      ]
+    },
+    "output_audit": {
+      "width": 1254,
+      "height": 1254,
+      "mode": "RGBA",
+      "alpha_extrema": [
+        0,
+        255
+      ],
+      "alpha32_bbox": [
+        188,
+        35,
+        984,
+        1225
+      ]
+    }
+  },
+  {
+    "key": "lamp",
+    "source": "entry/src/main/resources/rawfile/walk/lamp/frame_01.png",
+    "output": "entry/src/main/resources/rawfile/stand/lamp/frame_01.png",
+    "source_sha256": "f24b6c356ccf9377b6dfe7d042a922750d0772f4138810ba3874ed35c86add52",
+    "output_sha256": "4fdc8117dc9480be3c3c6b9cd3c40c317dd7f1ef94a17ccf0e6dedd9814ffc72",
+    "source_audit": {
+      "width": 1080,
+      "height": 1080,
+      "mode": "RGBA",
+      "alpha_extrema": [
+        0,
+        255
+      ],
+      "alpha32_bbox": [
+        189,
+        55,
+        909,
+        979
+      ]
+    },
+    "output_audit": {
+      "width": 1254,
+      "height": 1254,
+      "mode": "RGBA",
+      "alpha_extrema": [
+        0,
+        255
+      ],
+      "alpha32_bbox": [
+        223,
+        66,
+        1022,
+        1173
+      ]
+    }
+  },
+  {
+    "key": "lilroll",
+    "source": "entry/src/main/resources/rawfile/walk/lilroll/frame_01.png",
+    "output": "entry/src/main/resources/rawfile/stand/lilroll/frame_01.png",
+    "source_sha256": "094d2944c8432a9f59681be4778cea3246713dbe02eed80359f5fbb5b711c3ab",
+    "output_sha256": "d064ee3670512ade785f9cba1bb0b9ab36a24396cabe1557fccc52a7d95e98d2",
+    "source_audit": {
+      "width": 1080,
+      "height": 1080,
+      "mode": "RGBA",
+      "alpha_extrema": [
+        0,
+        255
+      ],
+      "alpha32_bbox": [
+        104,
+        108,
+        945,
+        1040
+      ]
+    },
+    "output_audit": {
+      "width": 1254,
+      "height": 1254,
+      "mode": "RGBA",
+      "alpha_extrema": [
+        0,
+        255
+      ],
+      "alpha32_bbox": [
+        338,
+        70,
+        965,
+        1156
+      ]
+    }
+  },
+  {
+    "key": "mismatch",
+    "source": "entry/src/main/resources/rawfile/walk/mismatch/frame_01.png",
+    "output": "entry/src/main/resources/rawfile/stand/mismatch/frame_01.png",
+    "source_sha256": "481c5c0978a7a2cecef21789d58697229ffa90043a0cb3231e4fe0957ae6d371",
+    "output_sha256": "61f4aad2ace9ed22e52acb0bcb37a348ee45bcbc50608c8e5dfb0c8f00b3691d",
+    "source_audit": {
+      "width": 1080,
+      "height": 1080,
+      "mode": "RGBA",
+      "alpha_extrema": [
+        0,
+        255
+      ],
+      "alpha32_bbox": [
+        136,
+        67,
+        789,
+        1011
+      ]
+    },
+    "output_audit": {
+      "width": 1254,
+      "height": 1254,
+      "mode": "RGBA",
+      "alpha_extrema": [
+        0,
+        255
+      ],
+      "alpha32_bbox": [
+        361,
+        78,
+        830,
+        1172
+      ]
+    }
+  },
+  {
+    "key": "scooter",
+    "source": "entry/src/main/resources/rawfile/walk/scooter/frame_01.png",
+    "output": "entry/src/main/resources/rawfile/stand/scooter/frame_01.png",
+    "source_sha256": "f25ab83f28d5bf06d52bdbe39d535a59e35ac28f045af5edca14d910f43e69e9",
+    "output_sha256": "0a55b2645bb7add231c8cef49f36aa1525efe432df494eb1f92d1992735489e4",
+    "source_audit": {
+      "width": 1080,
+      "height": 1080,
+      "mode": "RGBA",
+      "alpha_extrema": [
+        0,
+        255
+      ],
+      "alpha32_bbox": [
+        69,
+        96,
+        923,
+        988
+      ]
+    },
+    "output_audit": {
+      "width": 1254,
+      "height": 1254,
+      "mode": "RGBA",
+      "alpha_extrema": [
+        0,
+        255
+      ],
+      "alpha32_bbox": [
+        288,
+        96,
+        967,
+        1156
+      ]
+    }
+  },
+  {
+    "key": "teapot",
+    "source": "entry/src/main/resources/rawfile/walk/teapot/frame_01.png",
+    "output": "entry/src/main/resources/rawfile/stand/teapot/frame_01.png",
+    "source_sha256": "58403b99b0c365c54a48e3993cfeda07b2f56bd0b358410a53d36ab718e461f0",
+    "output_sha256": "46fd5c610582389e222f4be8c0ba39ad71cd8cace1112cece5302e0785b843ce",
+    "source_audit": {
+      "width": 1080,
+      "height": 1080,
+      "mode": "RGBA",
+      "alpha_extrema": [
+        0,
+        255
+      ],
+      "alpha32_bbox": [
+        190,
+        65,
+        851,
+        995
+      ]
+    },
+    "output_audit": {
+      "width": 1254,
+      "height": 1254,
+      "mode": "RGBA",
+      "alpha_extrema": [
+        0,
+        255
+      ],
+      "alpha32_bbox": [
+        254,
+        72,
+        1010,
+        1193
+      ]
+    }
+  },
+  {
+    "key": "wave",
+    "source": "entry/src/main/resources/rawfile/walk/wave/frame_01.png",
+    "output": "entry/src/main/resources/rawfile/stand/wave/frame_01.png",
+    "source_sha256": "97dd9bf13643b56392221735e8613efe924da54a818f7e74084ee8bf5d2bd140",
+    "output_sha256": "46334816757cd9d3c9b156581e014faac7fa4f43f21bd8d9ffc7cc871475f1fa",
+    "source_audit": {
+      "width": 1080,
+      "height": 1080,
+      "mode": "RGBA",
+      "alpha_extrema": [
+        0,
+        255
+      ],
+      "alpha32_bbox": [
+        243,
+        78,
+        900,
+        1065
+      ]
+    },
+    "output_audit": {
+      "width": 1254,
+      "height": 1254,
+      "mode": "RGBA",
+      "alpha_extrema": [
+        0,
+        255
+      ],
+      "alpha32_bbox": [
+        353,
+        80,
+        946,
+        1215
+      ]
+    }
+  }
+]

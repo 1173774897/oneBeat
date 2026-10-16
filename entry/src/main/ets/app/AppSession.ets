@@ -45,6 +45,11 @@ export class AppSession {
   readonly bleDiscovery: BleRoomDiscovery = new BleRoomDiscovery();
   private lastTransportKey: string = '';
   private drumPreviewToken: number = 0;
+  // Local audition owns both preparation and playback. Roster/settings UI
+  // notifications must not replace its kit with the team's normal click sound.
+  private drumPreviewActive: boolean = false;
+  private drumPreviewReady: boolean = false;
+  private drumPreviewUpdateRevision: number = 0;
   private countInStartBeatIndex: number = -1;
   private countInEndBeatIndex: number = -1;
   private latencyCalibrationActive: boolean = false;
@@ -166,7 +171,7 @@ export class AppSession {
       }
       const playing = this.controller.state === 'playing' || this.controller.state === 'countdown';
       void SessionBackgroundKeeper.updatePlaybackState(playing);
-      if (!this.latencyCalibrationActive && !this.keepRendererAliveForSession &&
+      if (!this.latencyCalibrationActive && !this.drumPreviewActive && !this.keepRendererAliveForSession &&
         !this.controller.lobbyDeparted && this.controller.state === 'idle') {
         this.clearCountIn();
         void this.metronome.suspendRenderer();
@@ -297,6 +302,7 @@ export class AppSession {
   }
 
   private async shutdownExclusive(): Promise<void> {
+    this.releaseDrumPreviewOwnership();
     this.latencyRouteProbeToken++;
     this.latencyRouteProbeOwner = -1;
     this.memberJoinFeedbackAttempt?.cancel();
@@ -362,7 +368,7 @@ export class AppSession {
   }
 
   syncEngineFromSession(): void {
-    if (this.latencyCalibrationActive) {
+    if (this.latencyCalibrationActive || this.drumPreviewActive) {
       return;
     }
     this.metronome.setBpm(this.controller.bpm, this.controller.beatsPerBar);
@@ -375,26 +381,121 @@ export class AppSession {
     }
   }
 
+  /** Lets local audition visuals reject a transport taken over by production or calibration. */
+  isDrumPreviewActive(): boolean {
+    return this.drumPreviewActive;
+  }
+
+  /** PCM and the start schedule are ready; audible time may still be in preroll. */
+  isDrumPreviewReady(): boolean {
+    return this.drumPreviewActive && this.drumPreviewReady;
+  }
+
+  /** Also changes when another transport cancels a debounced, not-yet-started audition. */
+  getDrumPreviewRequestRevision(): number {
+    return this.drumPreviewToken;
+  }
+
+  /** A newer edit withdraws older prepared changes without stopping the active audition. */
+  invalidateDrumPreviewUpdate(): void {
+    this.drumPreviewUpdateRevision++;
+    if (this.drumPreviewActive) {
+      this.metronome.invalidateDrumPreviewUpdate();
+    }
+  }
+
+  async updateDrumPreviewProgram(program: string, sectionKeys: string[]): Promise<boolean> {
+    if (!this.isDrumPreviewReady()) {
+      return false;
+    }
+    const owner = this.drumPreviewToken;
+    const revision = ++this.drumPreviewUpdateRevision;
+    try {
+      const prepared = await this.metronome.updateDrumPreviewProgram(program, sectionKeys);
+      return prepared && this.drumPreviewActive && owner === this.drumPreviewToken &&
+        revision === this.drumPreviewUpdateRevision;
+    } catch (err) {
+      if (!this.drumPreviewActive || owner !== this.drumPreviewToken ||
+        revision !== this.drumPreviewUpdateRevision) {
+        return false;
+      }
+      // The existing plan keeps playing when an edit cannot be prepared.
+      throw new Error((err as Error).message ?? '试听更新失败');
+    }
+  }
+
+  /**
+   * Starts a new local audition at an optional fractional editor cursor.
+   * Whole-song callers also attach transient section keys for later live updates.
+   */
   async previewDrumProgram(
     program: string,
     looping: boolean = true,
     previewBpm?: number,
-    previewBeatsPerBar?: number
+    previewBeatsPerBar?: number,
+    previewStartPositionBeats: number = 0,
+    previewSectionKeys?: string[]
   ): Promise<void> {
     const token = ++this.drumPreviewToken;
-    this.metronome.pause();
+    this.drumPreviewActive = true;
+    this.drumPreviewReady = false;
+    this.drumPreviewUpdateRevision++;
     const bpm = previewBpm ?? this.controller.bpm;
     const beatsPerBar = previewBeatsPerBar ?? this.controller.beatsPerBar;
-    this.metronome.setBpm(bpm, beatsPerBar);
-    await this.metronome.configureProgram(program, looping);
-    if (token !== this.drumPreviewToken) {
-      return;
+    try {
+      this.metronome.pause();
+      this.metronome.setBpm(bpm, beatsPerBar);
+      const ready = await this.metronome.configureProgram(program, looping);
+      if (token !== this.drumPreviewToken) {
+        return;
+      }
+      if (!ready) {
+        throw new Error('鼓机试听配置已失效，请重试');
+      }
+      if (previewSectionKeys !== undefined) {
+        this.metronome.attachDrumPreviewPlan(previewSectionKeys);
+      }
+      await this.metronome.scheduleFromLeaderStart(MonotonicClock.nowMs() + 350, 0, 0,
+        undefined, previewStartPositionBeats);
+      if (token === this.drumPreviewToken && this.drumPreviewActive) {
+        this.drumPreviewReady = true;
+      }
+    } catch (err) {
+      // A late failure belongs to its original request, never the newer audition.
+      if (token === this.drumPreviewToken) {
+        this.releaseDrumPreviewOwnership();
+        this.metronome.pause();
+      }
+      throw new Error((err as Error).message ?? '鼓机试听启动失败');
     }
-    await this.metronome.scheduleFromLeaderStart(MonotonicClock.nowMs() + 350, 0);
+  }
+
+  private releaseDrumPreviewOwnership(): boolean {
+    const owned = this.drumPreviewActive === true;
+    this.drumPreviewToken++;
+    this.drumPreviewActive = false;
+    this.drumPreviewReady = false;
+    this.drumPreviewUpdateRevision++;
+    if (owned) {
+      this.metronome.cancelProgramPreparation();
+    }
+    return owned;
+  }
+
+  private preemptDrumPreview(): boolean {
+    if (!this.drumPreviewActive) {
+      this.drumPreviewToken++;
+      return false;
+    }
+    this.releaseDrumPreviewOwnership();
+    this.metronome.pause();
+    return true;
   }
 
   stopDrumPreview(): void {
-    this.drumPreviewToken++;
+    if (!this.releaseDrumPreviewOwnership()) {
+      return;
+    }
     if (this.controller.state === 'idle') {
       if (this.keepRendererAliveForSession) {
         this.metronome.pause();
@@ -416,6 +517,7 @@ export class AppSession {
     if (!AudioOutputMonitor.isBluetoothA2dpActive()) {
       throw new Error('当前声音没有通过蓝牙耳机输出');
     }
+    this.preemptDrumPreview();
     this.latencyRouteProbeToken++;
     this.latencyRouteProbeOwner = -1;
     this.latencyCalibrationActive = true;
@@ -440,6 +542,7 @@ export class AppSession {
     if (!AudioOutputMonitor.isBluetoothA2dpActive()) {
       throw new Error('当前声音没有通过蓝牙耳机输出');
     }
+    this.preemptDrumPreview();
     this.latencyRouteProbeToken++;
     this.latencyRouteProbeOwner = -1;
     this.latencyCalibrationActive = true;
@@ -548,6 +651,7 @@ export class AppSession {
     if (!AudioOutputMonitor.isBuiltInSpeakerActive()) {
       throw new Error('输入侧校准需要把媒体输出切到手机扬声器');
     }
+    this.preemptDrumPreview();
     this.latencyRouteProbeToken++;
     this.latencyRouteProbeOwner = -1;
     this.latencyCalibrationActive = true;
@@ -557,6 +661,7 @@ export class AppSession {
 
   /** Enter mic measurement before its first chirp, then realign the probe frame epoch. */
   async flushMicCalibrationProbeBoundary(): Promise<void> {
+    this.preemptDrumPreview();
     this.latencyRouteProbeToken++;
     this.latencyRouteProbeOwner = -1;
     this.latencyCalibrationActive = true;
@@ -592,6 +697,7 @@ export class AppSession {
     if (!AudioOutputMonitor.isBluetoothA2dpActive()) {
       throw new Error('当前声音没有通过蓝牙耳机输出');
     }
+    this.preemptDrumPreview();
     this.latencyRouteProbeToken++;
     this.latencyRouteProbeOwner = -1;
     this.latencyCalibrationActive = true;
@@ -610,6 +716,7 @@ export class AppSession {
     if (!AudioOutputMonitor.isBluetoothA2dpActive()) {
       throw new Error('未检测到蓝牙耳机输出');
     }
+    this.preemptDrumPreview();
     const probeToken = ++this.latencyRouteProbeToken;
     this.latencyRouteProbeOwner = probeToken;
     this.latencyCalibrationActive = true;
@@ -875,6 +982,9 @@ export class AppSession {
   }
 
   async leaderStart(): Promise<void> {
+    if (this.preemptDrumPreview()) {
+      this.syncEngineFromSession();
+    }
     try {
       // Create the stream before the leader publishes a shared deadline so
       // renderer allocation time cannot consume the synchronization window.
@@ -901,6 +1011,9 @@ export class AppSession {
   }
 
   async leaderResume(): Promise<void> {
+    if (this.preemptDrumPreview()) {
+      this.syncEngineFromSession();
+    }
     await this.controller.resumeTransport();
   }
 
@@ -919,6 +1032,12 @@ export class AppSession {
   }
 
   private applyTransportMessage(message: WireMessage): void {
+    // Shared transport has priority over local audition; late kit loads must
+    // lose their start permission before session configuration is restored.
+    if (message.type === 'TRANSPORT' || message.type === 'TRANSPORT_PAUSE' ||
+      message.type === 'TRANSPORT_RESUME') {
+      this.preemptDrumPreview();
+    }
     this.syncEngineFromSession();
     if (message.type === 'TRANSPORT') {
       this.keepRendererAliveForSession = true;

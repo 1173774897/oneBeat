@@ -48,6 +48,10 @@ const ROUTE_PROBE_MAX_DRAIN_MS: number = 3000;
 const ROUTE_REPHASE_SETTLE_MS: number = 160;
 const ROUTE_REPHASE_READY_TIMEOUT_MS: number = 4000;
 const ROUTE_REPHASE_GUARD_MS: number = 80;
+const DRUM_PREVIEW_BOUNDARY_CAPACITY: number = 256;
+const DRUM_PREVIEW_CLOCK_MAX_AGE_MS: number = 2000;
+const DRUM_PREVIEW_CLOCK_REPEAT_GRACE_MS: number = 40;
+const DRUM_PREVIEW_CLOCK_CONFIRM_WINDOW_MS: number = 400;
 // Sub-audible dither floor laid under the click samples so the stream is never
 // pure digital zero. Pure zero runs are what the smart PA silence detector
 // (CustStreamCheck -> SmartpaPowerOff) keys on to power off the amplifier.
@@ -166,6 +170,72 @@ interface RenderedBar {
   frameCount: number;
   samplesPerBeat: number;
   beatsPerBar: number;
+}
+
+/** Stable local editor identity; repeatIndex is zero-based and independent of A/B display labels. */
+export interface DrumPreviewPosition {
+  sectionKey: string;
+  repeatIndex: number;
+  nextBoundaryDelayMs?: number;
+}
+
+interface DrumPreviewPlan {
+  raw: string;
+  program: DrumProgram;
+  bank: Map<string, ArrayBuffer>;
+  sequence: RenderedBar[];
+  sectionKeys: string[];
+  sectionStarts: number[];
+  positions: DrumPreviewPosition[];
+}
+
+interface DrumPreviewActivation {
+  plan: DrumPreviewPlan;
+  startBar: number;
+  startIndex: number;
+  previous?: DrumPreviewActivation;
+}
+
+interface DrumPreviewPlanContext {
+  bpm: number;
+  beatsPerBar: number;
+  beatUnit: number;
+  armed: boolean;
+  started: boolean;
+  initialBeatOffset: number;
+  newest: DrumPreviewActivation;
+  rendered: DrumPreviewActivation;
+  renderedBar: number;
+  boundaryFrames: Float64Array;
+  boundaryBars: Float64Array;
+  boundaryRendererEpochs: Float64Array;
+  boundaryPhysicalStarts: Float64Array;
+  boundaryHead: number;
+  boundaryCount: number;
+}
+
+interface DrumPreviewNativeClock {
+  rendererEpoch: number;
+  physicalStartCount: number;
+  rawFrame: number;
+  timestampMonoMs: number;
+  streamFrameAtTimestamp: number;
+  originTimestampMonoMs: number;
+  originStreamFrame: number;
+  rawToStreamOffset: number;
+  candidateRawFrame: number;
+  candidateTimestampMonoMs: number;
+  lastSeenRawFrame: number;
+  lastSeenTimestampMonoMs: number;
+  repeatedPairSinceMonoMs: number;
+  lastOutputFrame: number;
+}
+
+interface StagedDrumPreviewUpdate {
+  revision: number;
+  base: DrumPreviewPlan;
+  activation: DrumPreviewActivation;
+  nextIndices: number[];
 }
 
 type AudioTransitionKind = 'play' | 'pause';
@@ -317,6 +387,12 @@ export class MetronomeEngine {
   private customProgramLooping: boolean = true;
   private configurationToken: number = 0;
   private sampleBank: Map<string, ArrayBuffer> = new Map();
+  private drumPreviewPlan: DrumPreviewPlanContext | undefined = undefined;
+  private stagedDrumPreviewUpdate: StagedDrumPreviewUpdate | undefined = undefined;
+  private drumPreviewUpdateRevision: number = 0;
+  // Local presentation continuity belongs to the physical stream, so a warm
+  // stop/new preview must not reseed it from an unrelated legacy phase estimate.
+  private drumPreviewNativeClock: DrumPreviewNativeClock | undefined = undefined;
   private pendingSequence: RenderedBar[] = [];
   private pendingSequenceLooping: boolean = true;
   private pendingRevision: number = 0;
@@ -349,6 +425,9 @@ export class MetronomeEngine {
   private transportStartBeatIndex: number = 0;
   private transportCountInBeats: number = 0;
   private transportCountInDurationMs: number = 0;
+  // A local drum seek changes source PCM, never the elapsed audio-clock origin.
+  // Keeping those coordinates separate prevents phase-lock from undoing a seek.
+  private transportPreviewStartPositionBeats: number | undefined = undefined;
   /**
    * Calibration supplies zero here because the user is measuring the complete
    * route delay themselves. Mixing the platform estimate into that trial would
@@ -424,6 +503,7 @@ export class MetronomeEngine {
   }
 
   configure(rhythm: number, soundId: number): void {
+    this.clearDrumPreviewPlan();
     this.configurationToken++;
     const leavingProgram = this.customProgram !== undefined;
     const rhythmChanged = this.rhythm !== rhythm;
@@ -453,6 +533,7 @@ export class MetronomeEngine {
    * two audible clicks depending on queue depth.
    */
   configureRouteProbeClickPair(): void {
+    this.clearDrumPreviewPlan();
     this.configurationToken++;
     this.bpm = 120;
     this.beatsPerBar = 2;
@@ -659,23 +740,415 @@ export class MetronomeEngine {
     return probeCurrent();
   }
 
-  async configureProgram(raw: string, looping: boolean = true): Promise<void> {
+  /** True only when this request's drum sequence is ready; superseded loads cannot authorize playback. */
+  async configureProgram(raw: string, looping: boolean = true): Promise<boolean> {
+    this.clearDrumPreviewPlan();
     // Even an already-applied request must invalidate older sample loads: a
     // late one-shot preview must never replace the walking transport's loop.
     const token = ++this.configurationToken;
-    if (raw.length === 0 || (raw === this.customProgramRaw && looping === this.customProgramLooping)) {
-      return;
+    if (raw.length === 0) {
+      return false;
+    }
+    if (raw === this.customProgramRaw && looping === this.customProgramLooping) {
+      return true;
     }
     const program = parseDrumProgram(raw);
     const bank = await DrumSampleBank.loadStyle(program.styleKey);
     if (token !== this.configurationToken) {
-      return;
+      return false;
     }
     this.customProgramRaw = raw;
     this.customProgram = program;
     this.customProgramLooping = looping;
     this.sampleBank = bank;
     this.rebuildPendingSequence(buildProgramSequence(program), looping);
+    return true;
+  }
+
+  /** Releasing a local audition must also invalidate a sample load that has not completed yet. */
+  cancelProgramPreparation(): void {
+    this.clearDrumPreviewPlan();
+    this.configurationToken++;
+  }
+
+  /** Arm only the immediately following count-in-free, looping whole-song audition. */
+  attachDrumPreviewPlan(sectionKeys: string[]): void {
+    this.clearDrumPreviewPlan();
+    const program = this.customProgram;
+    if (program === undefined || !this.customProgramLooping) {
+      throw new Error('整曲试听尚未准备完成');
+    }
+    const plan = this.createDrumPreviewPlan(this.customProgramRaw, program, this.sampleBank,
+      this.pendingSequence, sectionKeys);
+    const activation: DrumPreviewActivation = { plan, startBar: 0, startIndex: 0 };
+    this.drumPreviewPlan = {
+      bpm: this.bpm, beatsPerBar: program.beatsPerBar, beatUnit: program.beatUnit,
+      armed: true, started: false, initialBeatOffset: 0, newest: activation, rendered: activation, renderedBar: 0,
+      boundaryFrames: new Float64Array(DRUM_PREVIEW_BOUNDARY_CAPACITY),
+      boundaryBars: new Float64Array(DRUM_PREVIEW_BOUNDARY_CAPACITY),
+      boundaryRendererEpochs: new Float64Array(DRUM_PREVIEW_BOUNDARY_CAPACITY),
+      boundaryPhysicalStarts: new Float64Array(DRUM_PREVIEW_BOUNDARY_CAPACITY),
+      boundaryHead: 0, boundaryCount: 0
+    };
+  }
+
+  /** Withdraw unsubmitted edits immediately, keeping the active transport and submitted PCM intact. */
+  invalidateDrumPreviewUpdate(): void {
+    this.drumPreviewUpdateRevision++;
+    this.stagedDrumPreviewUpdate = undefined;
+  }
+
+  /** Prepare a whole-song revision without changing its clock, current bar or renderer lifecycle. */
+  async updateDrumPreviewProgram(raw: string, sectionKeys: string[]): Promise<boolean> {
+    this.invalidateDrumPreviewUpdate();
+    const context = this.drumPreviewPlan;
+    const revision = this.drumPreviewUpdateRevision;
+    const configuration = this.configurationToken;
+    if (context === undefined || context.armed || !this.running || raw.length === 0 ||
+      this.bpm !== context.bpm || this.beatsPerBar !== context.beatsPerBar) {
+      return false;
+    }
+    const program = parseDrumProgram(raw);
+    if (program.beatsPerBar !== context.beatsPerBar || program.beatUnit !== context.beatUnit) {
+      return false;
+    }
+    let bank: Map<string, ArrayBuffer>;
+    try {
+      bank = await DrumSampleBank.loadStyle(program.styleKey);
+    } catch (err) {
+      if (context !== this.drumPreviewPlan || revision !== this.drumPreviewUpdateRevision ||
+        configuration !== this.configurationToken || !this.running) {
+        return false;
+      }
+      throw new Error((err as Error).message);
+    }
+    if (context !== this.drumPreviewPlan || revision !== this.drumPreviewUpdateRevision ||
+      configuration !== this.configurationToken || !this.running) {
+      return false;
+    }
+    // Explicit render inputs keep a prepared style/bank out of the active engine
+    // until its boundary. No PCM generation or resource access occurs in writeData.
+    const sequence = this.renderSequence(buildProgramSequence(program), true, bank, program);
+    const plan = this.createDrumPreviewPlan(raw, program, bank, sequence, sectionKeys);
+    if (context !== this.drumPreviewPlan || revision !== this.drumPreviewUpdateRevision ||
+      configuration !== this.configurationToken || !this.running) {
+      return false;
+    }
+    this.pruneDrumPreviewHistory(context);
+    const base = context.newest.plan;
+    this.stagedDrumPreviewUpdate = {
+      revision, base, activation: { plan, startBar: 0, startIndex: 0 },
+      nextIndices: this.drumPreviewNextIndices(base, plan)
+    };
+    return true;
+  }
+
+  /** Local audition follows emitted PCM at presentation; walking visuals keep their shared clock. */
+  getDrumPreviewPosition(): DrumPreviewPosition | undefined {
+    const context = this.drumPreviewPlan;
+    if (context === undefined || context.armed || !this.running) {
+      return undefined;
+    }
+    let bar = this.drumPreviewLogicalBar(context);
+    let nextBoundaryDelayMs: number | undefined = undefined;
+    const presentedFrame = this.drumPreviewPresentedFrame();
+    if (presentedFrame !== undefined) {
+      const boundary = this.drumPreviewBoundaryAt(context, presentedFrame);
+      // A valid hardware clock can precede the clamped first PCM submission.
+      // Do not paint A just because the requested wall-clock start has passed.
+      if (boundary < 0) {
+        return undefined;
+      }
+      bar = context.boundaryBars[boundary];
+      nextBoundaryDelayMs = this.drumPreviewNextBoundaryDelay(context, presentedFrame);
+    }
+    if (bar < 0) {
+      return undefined;
+    }
+    const activation = this.drumPreviewActivationAt(context, bar);
+    const index = this.drumPreviewIndexAt(activation, bar);
+    const position = activation.plan.positions[index];
+    this.pruneDrumPreviewHistory(context, bar);
+    if (position === undefined) {
+      return undefined;
+    }
+    const result: DrumPreviewPosition = { sectionKey: position.sectionKey, repeatIndex: position.repeatIndex };
+    if (nextBoundaryDelayMs !== undefined) {
+      result.nextBoundaryDelayMs = nextBoundaryDelayMs;
+    }
+    return result;
+  }
+
+  private clearDrumPreviewPlan(): void {
+    this.invalidateDrumPreviewUpdate();
+    this.drumPreviewPlan = undefined;
+  }
+
+  private createDrumPreviewPlan(raw: string, program: DrumProgram,
+    bank: Map<string, ArrayBuffer>, sequence: RenderedBar[], sectionKeys: string[]): DrumPreviewPlan {
+    if (sectionKeys.length !== program.sections.length || sectionKeys.length === 0) {
+      throw new Error('整曲试听段落标识不完整');
+    }
+    const keys: string[] = [];
+    const starts: number[] = [];
+    const positions: DrumPreviewPosition[] = [];
+    for (let section = 0; section < program.sections.length; section++) {
+      const key = sectionKeys[section];
+      if (key.length === 0 || keys.indexOf(key) >= 0) {
+        throw new Error('整曲试听段落标识重复');
+      }
+      keys.push(key);
+      starts.push(positions.length);
+      for (let repeat = 0; repeat < program.sections[section].repeats; repeat++) {
+        positions.push({ sectionKey: key, repeatIndex: repeat });
+      }
+    }
+    if (positions.length !== sequence.length) {
+      throw new Error('整曲试听小节计划不完整');
+    }
+    return { raw, program, bank, sequence, sectionKeys: keys, sectionStarts: starts, positions };
+  }
+
+  private drumPreviewNextIndices(before: DrumPreviewPlan, after: DrumPreviewPlan): number[] {
+    const indices: number[] = [];
+    for (let bar = 0; bar < before.positions.length; bar++) {
+      const position = before.positions[bar];
+      const section = after.sectionKeys.indexOf(position.sectionKey);
+      if (section >= 0) {
+        const nextRepeat = position.repeatIndex + 1;
+        indices.push(nextRepeat < after.program.sections[section].repeats ?
+          after.sectionStarts[section] + nextRepeat :
+          after.sectionStarts[(section + 1) % after.sectionKeys.length]);
+        continue;
+      }
+      const oldSection = before.sectionKeys.indexOf(position.sectionKey);
+      let successor = -1;
+      for (let step = 1; step <= before.sectionKeys.length; step++) {
+        const candidate = before.sectionKeys[(oldSection + step) % before.sectionKeys.length];
+        successor = after.sectionKeys.indexOf(candidate);
+        if (successor >= 0) {
+          break;
+        }
+      }
+      indices.push(successor < 0 ? 0 : after.sectionStarts[successor]);
+    }
+    return indices;
+  }
+
+  private drumPreviewLogicalBar(context: DrumPreviewPlanContext): number {
+    const snapshot = this.getVisualSnapshot();
+    if (!snapshot.running || snapshot.countIn || snapshot.mainPlayheadMs < 0) {
+      return -1;
+    }
+    const beatMs = 60000 / Math.max(1, context.bpm);
+    return Math.floor((snapshot.mainPlayheadMs / beatMs + context.initialBeatOffset) / context.beatsPerBar);
+  }
+
+  private drumPreviewActivationAt(context: DrumPreviewPlanContext, bar: number): DrumPreviewActivation {
+    let activation = context.newest;
+    while (activation.previous !== undefined && activation.startBar > bar) {
+      activation = activation.previous;
+    }
+    return activation;
+  }
+
+  private drumPreviewIndexAt(activation: DrumPreviewActivation, bar: number): number {
+    const count = activation.plan.sequence.length;
+    const index = activation.startIndex + bar - activation.startBar;
+    return ((index % count) + count) % count;
+  }
+
+  private pruneDrumPreviewHistory(context: DrumPreviewPlanContext, audibleBar?: number): void {
+    const logicalBar = this.drumPreviewLogicalBar(context);
+    if (logicalBar < 0) {
+      return;
+    }
+    let presentedBar = audibleBar ?? logicalBar;
+    if (audibleBar === undefined) {
+      const frame = this.drumPreviewPresentedFrame();
+      if (frame !== undefined) {
+        const boundary = this.drumPreviewBoundaryAt(context, frame);
+        if (boundary < 0) {
+          return;
+        }
+        presentedBar = context.boundaryBars[boundary];
+      }
+    }
+    // Keep the audible plan and any already-submitted future revisions. A route
+    // repair can revisit those revisions before catching the submission head.
+    const oldest = this.drumPreviewActivationAt(context,
+      Math.min(presentedBar, logicalBar, context.renderedBar));
+    oldest.previous = undefined;
+  }
+
+  private drumPreviewPresentedFrame(): number | undefined {
+    const renderer = this.renderer;
+    if (renderer === undefined || !this.rendererStarted) {
+      return undefined;
+    }
+    const frame = this.readDrumPreviewStreamFrame(renderer);
+    return frame === undefined || !Number.isFinite(frame) ? undefined :
+      frame - this.audioTimelineOutputLatencyMs * SAMPLE_RATE / 1000;
+  }
+
+  private readDrumPreviewNativeSample(renderer: audio.AudioRenderer): CalibrationClockSample | undefined {
+    try {
+      const startupBefore = systemDateTime.getUptime(systemDateTime.TimeType.STARTUP, true) / 1000000;
+      const activeBefore = systemDateTime.getUptime(systemDateTime.TimeType.ACTIVE, true) / 1000000;
+      const info = renderer.getAudioTimestampInfoSync();
+      const activeAfter = systemDateTime.getUptime(systemDateTime.TimeType.ACTIVE, true) / 1000000;
+      const startupAfter = systemDateTime.getUptime(systemDateTime.TimeType.STARTUP, true) / 1000000;
+      const queryMonoMs = (startupBefore + startupAfter) / 2;
+      const timestampMonoMs = info.timestamp / 1000000 + queryMonoMs - (activeBefore + activeAfter) / 2;
+      if (!Number.isFinite(info.framePos) || info.framePos < 0 || info.timestamp <= 0 ||
+        !Number.isFinite(timestampMonoMs)) {
+        return undefined;
+      }
+      return { framePos: info.framePos, rawTimestampMs: info.timestamp / 1000000,
+        timestampMonoMs, queryMonoMs };
+    } catch (_e) {
+      return undefined;
+    }
+  }
+
+  private readDrumPreviewStreamFrame(renderer: audio.AudioRenderer): number | undefined {
+    const sample = this.readDrumPreviewNativeSample(renderer);
+    if (sample === undefined) {
+      return undefined;
+    }
+    const ageMs = sample.queryMonoMs - sample.timestampMonoMs;
+    let clock = this.drumPreviewNativeClock;
+    if (clock !== undefined && (clock.rendererEpoch !== this.rendererEpoch ||
+      clock.physicalStartCount !== this.rendererPhysicalStartCount)) {
+      clock = undefined;
+      this.drumPreviewNativeClock = undefined;
+    }
+    if (ageMs < -50 || ageMs > DRUM_PREVIEW_CLOCK_MAX_AGE_MS) {
+      // A repeatedly frozen pair is evidence of a stopped native clock. Keep
+      // its last presentation instead of extrapolating through queued audio.
+      return clock !== undefined && sample.framePos === clock.lastSeenRawFrame &&
+        sample.timestampMonoMs === clock.lastSeenTimestampMonoMs ? clock.lastOutputFrame : undefined;
+    }
+    const rate = SAMPLE_RATE / 1000;
+    if (clock === undefined) {
+      // A renderer's first physical start proves raw/submitted zero. A retained
+      // counter after stop is instead anchored at the sample's actual time,
+      // never at its delayed query time or the shared playback phase cache.
+      const zeroProven = this.rendererPhysicalStartCount === 1 && !this.diagnosticRawOriginLost;
+      const streamFrame = zeroProven ? sample.framePos : Math.min(this.audioSubmittedFrames,
+        Math.max(0, (sample.timestampMonoMs - this.rendererStartedAtLocalMs) * rate));
+      clock = {
+        rendererEpoch: this.rendererEpoch, physicalStartCount: this.rendererPhysicalStartCount,
+        rawFrame: sample.framePos, timestampMonoMs: sample.timestampMonoMs,
+        streamFrameAtTimestamp: streamFrame,
+        originTimestampMonoMs: sample.timestampMonoMs, originStreamFrame: streamFrame,
+        rawToStreamOffset: streamFrame - sample.framePos,
+        candidateRawFrame: -1, candidateTimestampMonoMs: -1,
+        lastSeenRawFrame: sample.framePos, lastSeenTimestampMonoMs: sample.timestampMonoMs,
+        repeatedPairSinceMonoMs: sample.queryMonoMs, lastOutputFrame: 0
+      };
+      this.drumPreviewNativeClock = clock;
+    }
+    const repeated = sample.framePos === clock.lastSeenRawFrame &&
+      sample.timestampMonoMs === clock.lastSeenTimestampMonoMs;
+    if (!repeated) {
+      clock.lastSeenRawFrame = sample.framePos;
+      clock.lastSeenTimestampMonoMs = sample.timestampMonoMs;
+      clock.repeatedPairSinceMonoMs = sample.queryMonoMs;
+    } else if (sample.queryMonoMs - clock.repeatedPairSinceMonoMs > DRUM_PREVIEW_CLOCK_REPEAT_GRACE_MS) {
+      return clock.lastOutputFrame;
+    }
+
+    const elapsedMs = sample.timestampMonoMs - clock.timestampMonoMs;
+    const rawDelta = sample.framePos - clock.rawFrame;
+    const tolerance = CALIB_CLOCK_FRAME_POS_QUANTUM * 2;
+    const expectedStreamFrame = clock.originStreamFrame +
+      (sample.timestampMonoMs - clock.originTimestampMonoMs) * rate;
+    // Quantization has one bounded error budget for the origin, rather than a
+    // fresh budget on every read. Otherwise small counter-origin losses can be
+    // accepted repeatedly and leave the highlight permanently behind the PCM.
+    const sameOrigin = elapsedMs >= 0 && rawDelta >= 0 &&
+      Math.abs(sample.framePos + clock.rawToStreamOffset - expectedStreamFrame) <= tolerance;
+    let projectedAtSample = clock.streamFrameAtTimestamp;
+    let projectedTimestamp = clock.timestampMonoMs;
+    if (sameOrigin) {
+      clock.rawFrame = sample.framePos;
+      clock.timestampMonoMs = sample.timestampMonoMs;
+      clock.streamFrameAtTimestamp = sample.framePos + clock.rawToStreamOffset;
+      clock.candidateRawFrame = -1;
+      projectedAtSample = clock.streamFrameAtTimestamp;
+      projectedTimestamp = sample.timestampMonoMs;
+    } else if (elapsedMs > 0) {
+      const candidateElapsed = sample.timestampMonoMs - clock.candidateTimestampMonoMs;
+      const candidateDelta = sample.framePos - clock.candidateRawFrame;
+      const candidateConsistent = clock.candidateRawFrame >= 0 &&
+        candidateElapsed >= DRUM_PREVIEW_CLOCK_CONFIRM_WINDOW_MS &&
+        candidateDelta > 0 && Math.abs(candidateDelta - candidateElapsed * rate) <= tolerance;
+      if (candidateConsistent) {
+        // A sustained advancing pair confirms a new counter origin. Derive its
+        // offset at the confirming timestamp from the fixed trusted reference,
+        // so earlier tolerated losses cannot leak into the replacement origin.
+        clock.rawToStreamOffset = expectedStreamFrame - sample.framePos;
+        clock.rawFrame = sample.framePos;
+        clock.timestampMonoMs = sample.timestampMonoMs;
+        clock.streamFrameAtTimestamp = expectedStreamFrame;
+        clock.originTimestampMonoMs = sample.timestampMonoMs;
+        clock.originStreamFrame = expectedStreamFrame;
+        clock.candidateRawFrame = -1;
+      } else if (clock.candidateRawFrame < 0 || candidateElapsed < 0 || candidateDelta < 0 ||
+        Math.abs(candidateDelta - candidateElapsed * rate) > tolerance) {
+        clock.candidateRawFrame = sample.framePos;
+        clock.candidateTimestampMonoMs = sample.timestampMonoMs;
+      }
+      projectedAtSample = expectedStreamFrame;
+      projectedTimestamp = sample.timestampMonoMs;
+    }
+    // A lone low/out-of-order pair cannot rewrite the origin. Its brief trusted
+    // projection also covers quantized/aged samples; the entire validated age
+    // is used, rather than dropping all but 250 ms of a valid native timestamp.
+    const projected = projectedAtSample + Math.max(0, sample.queryMonoMs - projectedTimestamp) * rate;
+    const frame = Math.min(this.audioSubmittedFrames, Math.max(0, clock.lastOutputFrame, projected));
+    clock.lastOutputFrame = frame;
+    return frame;
+  }
+
+  private drumPreviewBoundaryAt(context: DrumPreviewPlanContext, frame: number): number {
+    for (let offset = 1; offset <= context.boundaryCount; offset++) {
+      const index = (context.boundaryHead - offset + DRUM_PREVIEW_BOUNDARY_CAPACITY) %
+        DRUM_PREVIEW_BOUNDARY_CAPACITY;
+      if (context.boundaryRendererEpochs[index] === this.rendererEpoch &&
+        context.boundaryPhysicalStarts[index] === this.rendererPhysicalStartCount &&
+        context.boundaryFrames[index] <= frame) {
+        return index;
+      }
+    }
+    return -1;
+  }
+
+  private drumPreviewNextBoundaryDelay(context: DrumPreviewPlanContext, frame: number): number | undefined {
+    let next = Number.POSITIVE_INFINITY;
+    for (let offset = 1; offset <= context.boundaryCount; offset++) {
+      const index = (context.boundaryHead - offset + DRUM_PREVIEW_BOUNDARY_CAPACITY) %
+        DRUM_PREVIEW_BOUNDARY_CAPACITY;
+      if (context.boundaryRendererEpochs[index] === this.rendererEpoch &&
+        context.boundaryPhysicalStarts[index] === this.rendererPhysicalStartCount &&
+        context.boundaryFrames[index] > frame) {
+        next = Math.min(next, context.boundaryFrames[index]);
+      }
+    }
+    return Number.isFinite(next) ? (next - frame) * 1000 / SAMPLE_RATE : undefined;
+  }
+
+  private recordDrumPreviewBoundary(context: DrumPreviewPlanContext): void {
+    // Preallocated numeric anchors record actual submitted frames, including
+    // source-frame insertion/drop. They retain no PCM and allocate nothing in writeData.
+    const index = context.boundaryHead;
+    context.boundaryFrames[index] = this.audioSubmittedFrames;
+    context.boundaryBars[index] = context.renderedBar;
+    context.boundaryRendererEpochs[index] = this.rendererEpoch;
+    context.boundaryPhysicalStarts[index] = this.rendererPhysicalStartCount;
+    context.boundaryHead = (index + 1) % DRUM_PREVIEW_BOUNDARY_CAPACITY;
+    context.boundaryCount = Math.min(DRUM_PREVIEW_BOUNDARY_CAPACITY, context.boundaryCount + 1);
   }
 
   setBeatCallback(callback: BeatCallback): void {
@@ -689,6 +1162,9 @@ export class MetronomeEngine {
   setBpm(bpm: number, beatsPerBar: number): void {
     const bpmChanged = this.bpm !== bpm;
     const meterChanged = this.beatsPerBar !== beatsPerBar;
+    if (bpmChanged || meterChanged) {
+      this.clearDrumPreviewPlan();
+    }
     this.bpm = bpm;
     this.beatsPerBar = beatsPerBar;
     if (meterChanged) {
@@ -710,6 +1186,7 @@ export class MetronomeEngine {
     if (normalized.join(',') === this.beatPointStates.join(',')) {
       return;
     }
+    this.clearDrumPreviewPlan();
     this.beatPointStates = normalized;
     this.pattern = BuiltInRhythmFactory.create(this.rhythm, this.beatsPerBar, this.beatPointStates);
     if (this.customProgram !== undefined) {
@@ -761,17 +1238,25 @@ export class MetronomeEngine {
     const countIn = this.transportCountInBeats > 0 && (!started ||
       beatIndex < this.transportStartBeatIndex + this.transportCountInBeats);
     const countInBeat = beatIndex - this.transportStartBeatIndex;
+    const previewPositionBeats = this.transportPreviewStartPositionBeats;
+    // Keep pre-roll negative so a held editor cursor stays put until playback.
+    const mainPlayheadMs = playheadMs - this.transportCountInDurationMs +
+      (started ? (previewPositionBeats ?? 0) * beatMs : 0);
+    const previewBeatPosition = Math.max(0, mainPlayheadMs / beatMs);
     return {
       revision: this.transportRevision,
       running: true,
       playheadMs: playheadMs,
-      mainPlayheadMs: playheadMs - this.transportCountInDurationMs,
-      mainBeatIndex: Math.max(0,
-        beatIndex - this.transportStartBeatIndex - this.transportCountInBeats),
-      beatIndex: beatIndex,
-      beatInBar: started ? (countIn ? (countInBeat % this.transportBeatsPerBar) + 1 :
-        (beatIndex % this.transportBeatsPerBar) + 1) : 0,
-      beatPhase: started ? Math.max(0, Math.min(0.999999, beatPhase)) : 0,
+      mainPlayheadMs: mainPlayheadMs,
+      mainBeatIndex: previewPositionBeats === undefined ? Math.max(0,
+        beatIndex - this.transportStartBeatIndex - this.transportCountInBeats) : Math.floor(previewBeatPosition),
+      beatIndex: previewPositionBeats === undefined ? beatIndex : Math.floor(previewBeatPosition),
+      beatInBar: started ? (previewPositionBeats !== undefined ?
+        (Math.floor(previewBeatPosition) % this.transportBeatsPerBar) + 1 :
+        (countIn ? (countInBeat % this.transportBeatsPerBar) + 1 :
+        (beatIndex % this.transportBeatsPerBar) + 1)) : 0,
+      beatPhase: started ? (previewPositionBeats !== undefined ? previewBeatPosition % 1 :
+        Math.max(0, Math.min(0.999999, beatPhase))) : 0,
       countIn: countIn
     };
   }
@@ -1194,10 +1679,17 @@ export class MetronomeEngine {
     }
   }
 
+  /** The final source-position argument is reserved for local, count-in-free drum audition. */
   async scheduleFromLeaderStart(startAtLeaderMonoMs: number, beatIndex: number,
-    countInBeats: number = 0, outputCompensationOverrideMs?: number): Promise<void> {
+    countInBeats: number = 0, outputCompensationOverrideMs?: number,
+    previewStartPositionBeats?: number): Promise<void> {
     const requestedAtMs = MonotonicClock.nowMs();
-    const token = this.beginTransport();
+    const preview = this.drumPreviewPlan;
+    const preservePreview = preview !== undefined && preview.armed && countInBeats === 0;
+    const token = this.beginTransport(preservePreview);
+    if (preservePreview && preview !== undefined) {
+      preview.armed = false;
+    }
     const timing: StartTimingRequest = {
       token, sequence: ++this.startTimingSequence, requestedAtMs,
       timerDueAtMs: -1, timerFiredAtMs: -1, operationStartedAtMs: -1
@@ -1215,6 +1707,11 @@ export class MetronomeEngine {
 
     this.transportBpm = this.bpm;
     this.transportBeatsPerBar = this.beatsPerBar;
+    // Only local drum audition opts into a fractional source position. Shared
+    // starts/count-ins retain their existing integer-beat transport contract.
+    this.transportPreviewStartPositionBeats = previewStartPositionBeats === undefined ? undefined :
+      Math.max(0, Number.isFinite(previewStartPositionBeats) ? previewStartPositionBeats : 0) %
+      Math.max(1, this.transportBeatsPerBar);
     const interval = 60000 / this.transportBpm;
     // ClockSync offset is leader - client, so convert leader time back to the local clock.
     let localStart = startAtLeaderMonoMs - this.offsetMs;
@@ -1224,7 +1721,9 @@ export class MetronomeEngine {
     if (localStart < now) {
       const missedBeats = Math.ceil((now - localStart) / interval);
       localStart += missedBeats * interval;
-      firstBeatIndex += missedBeats;
+      if (this.transportPreviewStartPositionBeats === undefined) {
+        firstBeatIndex += missedBeats;
+      }
       remainingCountInBeats = Math.max(0, remainingCountInBeats - missedBeats);
     }
 
@@ -1312,7 +1811,10 @@ export class MetronomeEngine {
     await this.haltRenderer();
   }
 
-  private beginTransport(): number {
+  private beginTransport(preserveDrumPreview: boolean = false): number {
+    if (!preserveDrumPreview) {
+      this.clearDrumPreviewPlan();
+    }
     this.cancelTimers();
     this.startTimingRequest = undefined;
     this.startTargetEstimate = undefined;
@@ -1320,11 +1822,13 @@ export class MetronomeEngine {
     this.startWriteBufferContext = undefined;
     this.runToken++;
     this.running = true;
+    this.transportPreviewStartPositionBeats = undefined;
     this.pendingAudioTransition = undefined;
     return this.runToken;
   }
 
   private cancelTransport(): void {
+    this.clearDrumPreviewPlan();
     this.running = false;
     this.audioStreaming = false;
     this.pendingAudioTransition = undefined;
@@ -1556,10 +2060,7 @@ export class MetronomeEngine {
   }
 
   private rebuildPendingSequence(patterns: SequencerPattern[], looping: boolean): void {
-    const sequence: RenderedBar[] = [];
-    for (let i = 0; i < patterns.length; i++) {
-      sequence.push(this.renderBar(patterns[i]));
-    }
+    const sequence = this.renderSequence(patterns, looping, this.sampleBank, this.customProgram);
     this.pendingSequence = sequence;
     this.pendingSequenceLooping = looping;
     this.pendingRevision++;
@@ -1570,7 +2071,70 @@ export class MetronomeEngine {
     this.deferPendingSequenceActivation = this.audioStreaming;
   }
 
-  private renderBar(pattern: SequencerPattern, applyBeatPointPattern: boolean = true): RenderedBar {
+  private renderSequence(patterns: SequencerPattern[], looping: boolean,
+    bank: Map<string, ArrayBuffer>, program: DrumProgram | undefined): RenderedBar[] {
+    const sequence: RenderedBar[] = [];
+    for (let i = 0; i < patterns.length; i++) {
+      sequence.push(this.renderBar(patterns[i], true, bank, program));
+    }
+    this.mixRideTails(patterns, sequence, looping, bank, program);
+    return sequence;
+  }
+
+  private mixRideTails(patterns: SequencerPattern[], sequence: RenderedBar[], looping: boolean,
+    bank: Map<string, ArrayBuffer> = this.sampleBank,
+    program: DrumProgram | undefined = this.customProgram): void {
+    const ride = bank.get('ride');
+    if (ride === undefined || sequence.length === 0) {
+      return;
+    }
+    const source = new DataView(ride);
+    const sourceFrames = Math.floor(ride.byteLength / BYTES_PER_SAMPLE);
+    // Only the new, sustained ride voice needs this continuation. Mix it while
+    // preparing PCM, never in writeData, and keep every bar's frame count and
+    // transport boundary unchanged. Looping PCM includes the previous cycle's
+    // steady-state ring so its seam cannot chop the cymbal tail.
+    for (let barIndex = 0; barIndex < patterns.length; barIndex++) {
+      const pattern = patterns[barIndex];
+      const bar = sequence[barIndex];
+      for (let eventIndex = 0; eventIndex < pattern.events.length; eventIndex++) {
+        const event = pattern.events[eventIndex];
+        if (event.sampleKey !== 'ride') {
+          continue;
+        }
+        const eventBeat = Math.floor(event.tick / pattern.ticksPerBeat) % Math.max(1, pattern.beatsPerBar);
+        const pointState = this.beatPointStates[eventBeat] ?? 'normal';
+        if (pointState === 'silent') {
+          continue;
+        }
+        const startFrame = Math.round(event.tick * bar.samplesPerBeat / pattern.ticksPerBeat);
+        if (startFrame < 0 || startFrame >= bar.frameCount) {
+          continue;
+        }
+        const pointGain = program !== undefined && pointState === 'accent' ? 1.15 : 1;
+        let sourceFrame = bar.frameCount - startFrame;
+        let targetBarIndex = barIndex + 1;
+        while (sourceFrame < sourceFrames) {
+          if (!looping && targetBarIndex >= sequence.length) {
+            break;
+          }
+          const target = sequence[targetBarIndex % sequence.length];
+          const count = Math.min(sourceFrames - sourceFrame, target.frameCount);
+          for (let frame = 0; frame < count; frame++) {
+            const mixed = target.samples[frame] +
+              source.getInt16((sourceFrame + frame) * BYTES_PER_SAMPLE, true) * event.velocity * pointGain;
+            target.samples[frame] = Math.max(-32768, Math.min(32767, Math.round(mixed)));
+          }
+          sourceFrame += count;
+          targetBarIndex++;
+        }
+      }
+    }
+  }
+
+  private renderBar(pattern: SequencerPattern, applyBeatPointPattern: boolean = true,
+    bank: Map<string, ArrayBuffer> = this.sampleBank,
+    program: DrumProgram | undefined = this.customProgram): RenderedBar {
     const samplesPerBeat = SAMPLE_RATE * 60 / Math.max(1, this.bpm);
     const frameCount = Math.max(1, Math.round(samplesPerBeat * pattern.beatsPerBar));
     const data = new ArrayBuffer(frameCount * BYTES_PER_SAMPLE);
@@ -1584,7 +2148,7 @@ export class MetronomeEngine {
       if (applyBeatPointPattern && pointState === 'silent') {
         continue;
       }
-      const bankSample = this.sampleBank.get(event.sampleKey);
+      const bankSample = bank.get(event.sampleKey);
       const sourceData = bankSample !== undefined ? bankSample :
         event.sampleKey === 'accent' ? this.accentBuffer : this.weakBuffer;
       const source = new DataView(sourceData);
@@ -1593,7 +2157,7 @@ export class MetronomeEngine {
       const availableFrames = Math.min(sourceFrames, frameCount - startFrame);
       for (let frame = 0; frame < availableFrames; frame++) {
         const targetOffset = (startFrame + frame) * BYTES_PER_SAMPLE;
-        const pointGain = applyBeatPointPattern && this.customProgram !== undefined && pointState === 'accent' ? 1.15 : 1;
+        const pointGain = applyBeatPointPattern && program !== undefined && pointState === 'accent' ? 1.15 : 1;
         const mixed = output.getInt16(targetOffset, true) +
           source.getInt16(frame * BYTES_PER_SAMPLE, true) * event.velocity * pointGain;
         output.setInt16(targetOffset, Math.max(-32768, Math.min(32767, Math.round(mixed))), true);
@@ -1668,6 +2232,11 @@ export class MetronomeEngine {
   }
 
   private prepareAudioCursor(beatIndex: number, countInBeats: number = 0): void {
+    const preview = this.drumPreviewPlan;
+    if (preview !== undefined && !preview.armed && preview.started && countInBeats === 0) {
+      this.prepareDrumPreviewCursorAtBeat(preview, beatIndex);
+      return;
+    }
     const countInBar = countInBeats > 0 ? this.preparedCountInBars.get(countInBeats) : undefined;
     this.activeSequence = countInBar === undefined ? this.pendingSequence : [countInBar, ...this.pendingSequence];
     this.activeSequenceLooping = this.pendingSequenceLooping;
@@ -1684,14 +2253,26 @@ export class MetronomeEngine {
     }
     this.mainStartBeatIndex = beatIndex + countInBeats;
     this.applyMainStartOffset = countInBar !== undefined;
-    const beatInBar = ((beatIndex % bar.beatsPerBar) + bar.beatsPerBar) % bar.beatsPerBar;
+    const sourceBeat = beatIndex + (this.transportPreviewStartPositionBeats ?? 0);
+    const beatInBar = ((sourceBeat % bar.beatsPerBar) + bar.beatsPerBar) % bar.beatsPerBar;
     this.audioFrameCursor = countInBar === undefined ? Math.round(beatInBar * bar.samplesPerBeat) : 0;
     if (this.audioFrameCursor >= bar.frameCount) {
       this.audioFrameCursor = 0;
     }
+    if (preview !== undefined && !preview.armed && countInBeats === 0) {
+      preview.started = true;
+      preview.initialBeatOffset = beatInBar;
+      preview.renderedBar = 0;
+      preview.rendered = preview.newest;
+    }
   }
 
   private prepareRouteAudioCursor(beatIndex: number, preserveActiveSequence: boolean): void {
+    const preview = this.drumPreviewPlan;
+    if (preview !== undefined && !preview.armed) {
+      this.prepareDrumPreviewCursorAtBeat(preview, beatIndex);
+      return;
+    }
     if (!preserveActiveSequence) {
       this.prepareAudioCursor(this.transportStartBeatIndex, this.transportCountInBeats);
     }
@@ -1722,7 +2303,7 @@ export class MetronomeEngine {
       // sequence would replay its first drum section on every output switch.
       beatOffset = Math.max(0, beatIndex - this.mainStartBeatIndex) +
         ((this.mainStartBeatIndex % firstMainBar.beatsPerBar) + firstMainBar.beatsPerBar) %
-          firstMainBar.beatsPerBar;
+          firstMainBar.beatsPerBar + (this.transportPreviewStartPositionBeats ?? 0);
       let mainBeats = 0;
       for (let i = index; i < this.activeSequence.length; i++) {
         mainBeats += this.activeSequence[i].beatsPerBar;
@@ -1907,6 +2488,11 @@ export class MetronomeEngine {
     this.audioTimelineOutputLatencyMs = transition.outputLatencyMs;
     this.audioTimelineToken = transition.token;
     this.audioSequenceTransportRevision = this.transportRevision;
+    const preview = this.drumPreviewPlan;
+    if (preview !== undefined && !preview.armed && preview.started &&
+      this.activeSequence === preview.rendered.plan.sequence) {
+      this.recordDrumPreviewBoundary(preview);
+    }
     this.lastAudioPlayheadMs = 0;
     this.lastAudioSampleMonoMs = this.transportStartLocalMs;
     const startTiming = this.startTimingTransition;
@@ -2086,6 +2672,13 @@ export class MetronomeEngine {
   private scheduleRunningTransition(transition: PendingAudioTransition): void {
     if (transition.token !== this.runToken) {
       return;
+    }
+    if (transition.kind === 'play' && !transition.routeRephase &&
+      this.transportPreviewStartPositionBeats !== undefined) {
+      // A physical recovery starts later on the same elapsed preview timeline;
+      // its PCM seek includes the source offset, its clock origin does not.
+      transition.timelineElapsedFrames = Math.round(Math.max(0,
+        transition.beatIndex - this.transportStartBeatIndex) * 60 * SAMPLE_RATE / this.transportBpm);
     }
     transition.targetFrame = Math.max(this.audioSubmittedFrames, transition.targetFrame);
     this.pendingAudioTransition = transition;
@@ -2462,7 +3055,7 @@ export class MetronomeEngine {
     const preserveActiveSequence = this.audioSequenceTransportRevision === this.transportRevision &&
       this.activeSequence.length > 0;
     const pendingPauseAt = this.scheduledPauseAtLocalMs;
-    const token = this.beginTransport();
+    const token = this.beginTransport(true);
     this.audioStreaming = false;
     this.phaseCorrectionFrames = 0;
     // UI callbacks stay on the same nextBeatAt/beatIndex grid. Reusing a new
@@ -2646,6 +3239,38 @@ export class MetronomeEngine {
   }
 
   private advanceAudioBar(): void {
+    const preview = this.drumPreviewPlan;
+    if (preview !== undefined && !preview.armed &&
+      this.activeSequence === preview.rendered.plan.sequence) {
+      const nextBar = preview.renderedBar + 1;
+      const activation = this.drumPreviewActivationAt(preview, nextBar);
+      const staged = this.stagedDrumPreviewUpdate;
+      if (activation === preview.rendered && preview.rendered === preview.newest &&
+        staged !== undefined && staged.revision === this.drumPreviewUpdateRevision &&
+        staged.base === preview.rendered.plan) {
+        const prepared = staged.activation;
+        prepared.startBar = nextBar;
+        prepared.startIndex = staged.nextIndices[this.activeSequenceIndex];
+        prepared.previous = preview.newest;
+        preview.newest = prepared;
+        this.customProgramRaw = prepared.plan.raw;
+        this.customProgram = prepared.plan.program;
+        this.customProgramLooping = true;
+        this.sampleBank = prepared.plan.bank;
+        this.pendingSequence = prepared.plan.sequence;
+        this.pendingSequenceLooping = true;
+        this.pendingRevision++;
+        this.stagedDrumPreviewUpdate = undefined;
+        this.setDrumPreviewCursor(preview, prepared, nextBar);
+      } else {
+        // Route recovery may revisit an older audible revision. Replay already-
+        // submitted changes at their original bars before adopting a newer edit;
+        // the native queue may still contain that future revision's PCM.
+        this.setDrumPreviewCursor(preview, activation, nextBar);
+      }
+      this.recordDrumPreviewBoundary(preview);
+      return;
+    }
     if (this.activeRevision !== this.pendingRevision && !this.deferPendingSequenceActivation) {
       this.activeSequence = this.pendingSequence;
       this.activeSequenceLooping = this.pendingSequenceLooping;
@@ -2670,6 +3295,35 @@ export class MetronomeEngine {
       this.audioFrameCursor = Math.round(mainBeatInBar * this.activeBar.samplesPerBeat);
       this.applyMainStartOffset = false;
     }
+  }
+
+  private setDrumPreviewCursor(context: DrumPreviewPlanContext, activation: DrumPreviewActivation,
+    bar: number, beatInBar: number = 0): void {
+    context.rendered = activation;
+    context.renderedBar = bar;
+    this.activeSequence = activation.plan.sequence;
+    this.activeSequenceLooping = true;
+    this.activeSequenceFinished = false;
+    this.activeRevision = this.pendingRevision;
+    this.deferPendingSequenceActivation = false;
+    this.activeSequenceIndex = this.drumPreviewIndexAt(activation, bar);
+    this.activeLoopStartIndex = 0;
+    this.activeBar = this.activeSequence[this.activeSequenceIndex];
+    this.audioFrameCursor = Math.min(this.activeBar.frameCount - 1,
+      Math.max(0, Math.round(beatInBar * this.activeBar.samplesPerBeat)));
+  }
+
+  private prepareDrumPreviewCursorAtBeat(context: DrumPreviewPlanContext, beatIndex: number): void {
+    if (!context.started) {
+      context.initialBeatOffset = ((this.transportStartBeatIndex % context.beatsPerBar) +
+        context.beatsPerBar) % context.beatsPerBar;
+      context.started = true;
+    }
+    const sourceBeat = Math.max(0, beatIndex - this.transportStartBeatIndex) + context.initialBeatOffset;
+    const bar = Math.floor(sourceBeat / context.beatsPerBar);
+    const activation = this.drumPreviewActivationAt(context, bar);
+    this.setDrumPreviewCursor(context, activation, bar, sourceBeat % context.beatsPerBar);
+    this.applyMainStartOffset = false;
   }
 
   private resetAudioTimestampState(): void {

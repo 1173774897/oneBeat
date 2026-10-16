@@ -48,7 +48,7 @@ function harness(options = {}) {
     '../network/p2p/WifiP2pManager': {},
     '../network/p2p/BleRoomDiscovery': { BleMemberJoinFeedbackAttempt: Attempt },
     '../network/p2p/P2pInvitation': {},
-    '../common/Constants': { PROTOCOL_VERSION: 4 },
+    '../common/Constants': { PROTOCOL_VERSION: 6 },
     '../common/MonotonicClock': { MonotonicClock: { nowMs: () => 1000 + trace.length * 10 } },
     '../common/MeterModel': {},
     '../session/SessionBackgroundKeeper': { SessionBackgroundKeeper: background },
@@ -100,7 +100,7 @@ function harness(options = {}) {
       return await feedback.promise;
     },
     async resolveInvitationByCode(code, version) {
-      trace.push('room-found'); assert.equal(code, '123456'); assert.equal(version, 4);
+      trace.push('room-found'); assert.equal(code, '123456'); assert.equal(version, mocks['../common/Constants'].PROTOCOL_VERSION);
       return options.invitation ?? testInvitation;
     },
     async stopLeaderAdvertising() { trace.push('ble-stop'); }

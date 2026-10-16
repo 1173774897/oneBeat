@@ -1,0 +1,14 @@
+[
+  {
+    "version": "before",
+    "clippedFrames": 748,
+    "totalFrames": 176400,
+    "clippedFraction": 0.004240362811791383
+  },
+  {
+    "version": "after",
+    "clippedFrames": 160,
+    "totalFrames": 176400,
+    "clippedFraction": 0.0009070294784580499
+  }
+]

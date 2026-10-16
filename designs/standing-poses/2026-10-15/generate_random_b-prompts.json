@@ -1,0 +1,285 @@
+{
+  "date": "2026-10-15",
+  "assets": [
+    {
+      "id": "curly/palette_2",
+      "source": "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/walk/curly/palette_2/frame_01.png",
+      "generated": "/Users/lizhe/.codex/generated_images/01a13f5b-686d-7cd0-9568-ce26e4255c64/exec-c4a3bc90-f8fc-457e-b636-84d695f5ec46.png",
+      "saved": "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/stand/curly/palette_2/frame_01.png",
+      "prompt": "Use case: identity-preserve. Asset type: transparent 2D game character idle sprite, a single standing frame. Image 1 is the edit target and sole identity/style/color reference. Change ONLY the walking pose into an informal relaxed standing pose: both shoes planted at the same ground level, knees loose, weight asymmetrically settled on one leg, shoulders slightly dropped, arms hanging naturally and casually (one arm may bend slightly but no marching arm swing), unforced expression. Preserve character identity, face, hairstyle, outfit details, exact original palette, direction facing right, body proportions, original hand drawn ink outline weight, scratchy hatching density and shadow style. Do not smooth or modernize the drawing. Keep one full-body character, nearly the original overall visual height and canvas placement, original foot baseline, original transparent padding, no crop or zoom. Preserve the shadow's hand-ink treatment, move ground contact shadow naturally below the two planted feet. True transparent background, no solid color, no checkerboard drawn into image. No new props, no text, no watermark. Avoid military posture, stiff straight knees, arms rigid at sides, stepping, running, feet in the air, extra limbs. Specific character: flowing purple-and-black curly hair, turquoise hoop earring, warm skin, cream and white top with turquoise sleeves, coral pink cuffed shorts, blue high-top sneakers with yellow circular ankle patches. Keep her friendly calm face and the large swept hair silhouette. Match reference head-top and sole baseline within original 1080 by 1080 square canvas; allow hair to settle naturally while standing.",
+      "tool": "built-in image_gen",
+      "transparent_background": true,
+      "inspection": "Accepted: relaxed standing, both feet planted, identity/palette/hatching preserved; no raster post-processing performed.",
+      "source_inspection": {
+        "size": [
+          1080,
+          1080
+        ],
+        "mode": "RGBA",
+        "alpha_extrema": [
+          0,
+          255
+        ],
+        "alpha_gt128_bbox": [
+          152,
+          30,
+          863,
+          1059
+        ],
+        "normalized_bbox": [
+          0.1407,
+          0.0278,
+          0.7991,
+          0.9806
+        ]
+      },
+      "saved_inspection": {
+        "size": [
+          1254,
+          1254
+        ],
+        "mode": "RGBA",
+        "alpha_extrema": [
+          0,
+          255
+        ],
+        "alpha_gt128_bbox": [
+          188,
+          35,
+          978,
+          1224
+        ],
+        "normalized_bbox": [
+          0.1499,
+          0.0279,
+          0.7799,
+          0.9761
+        ]
+      }
+    },
+    {
+      "id": "buzz/palette_1",
+      "source": "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/walk/buzz/palette_1/frame_01.png",
+      "generated": "/Users/lizhe/.codex/generated_images/01a13f5b-686d-7cd0-9568-ce26e4255c64/exec-45c5061e-7423-4cf1-8d29-e7938fb6ffe0.png",
+      "saved": "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/stand/buzz/palette_1/frame_01.png",
+      "prompt": "Use case: identity-preserve. Asset type: transparent 2D game character idle sprite, a single standing frame. Image 1 is the edit target and sole identity/style/color reference. Change ONLY the walking pose into an informal relaxed standing pose: both shoes planted at the same ground level, knees loose, weight asymmetrically settled on one leg, shoulders slightly dropped, arms hanging naturally and casually (one arm may bend slightly but no marching arm swing), unforced expression. Preserve character identity, face, hairstyle, outfit details, exact original palette, direction facing right, body proportions, original hand drawn ink outline weight, scratchy hatching density and shadow style. Do not smooth or modernize the drawing. Keep one full-body character, nearly the original overall visual height and canvas placement, original foot baseline, original transparent padding, no crop or zoom. Preserve the shadow's hand-ink treatment, move ground contact shadow naturally below the two planted feet. True transparent background, no solid color, no checkerboard drawn into image. No new props, no text, no watermark. Avoid military posture, stiff straight knees, arms rigid at sides, stepping, running, feet in the air, extra limbs. Specific character: warm tan skin, very short black buzz cut with stippled ink texture, half-lidded calm eyes, loose charcoal black t-shirt, gray drawstring jogger pants, black-and-cream low-top sneakers. Preserve his languid slightly bored face. Relaxed patient waiting pose with one hand loose or casually resting in trouser pocket and the other hanging, both feet planted. Match reference head-top and sole baseline within original 1080 by 1080 square canvas.",
+      "tool": "built-in image_gen",
+      "transparent_background": true,
+      "inspection": "Accepted: relaxed standing, both feet planted, identity/palette/hatching preserved; no raster post-processing performed.",
+      "source_inspection": {
+        "size": [
+          1080,
+          1080
+        ],
+        "mode": "RGBA",
+        "alpha_extrema": [
+          0,
+          255
+        ],
+        "alpha_gt128_bbox": [
+          224,
+          56,
+          878,
+          1063
+        ],
+        "normalized_bbox": [
+          0.2074,
+          0.0519,
+          0.813,
+          0.9843
+        ]
+      },
+      "saved_inspection": {
+        "size": [
+          1254,
+          1254
+        ],
+        "mode": "RGBA",
+        "alpha_extrema": [
+          0,
+          255
+        ],
+        "alpha_gt128_bbox": [
+          429,
+          62,
+          973,
+          1231
+        ],
+        "normalized_bbox": [
+          0.3421,
+          0.0494,
+          0.7759,
+          0.9817
+        ]
+      }
+    },
+    {
+      "id": "buzz/palette_2",
+      "source": "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/walk/buzz/palette_2/frame_01.png",
+      "generated": "/Users/lizhe/.codex/generated_images/01a13f5b-686d-7cd0-9568-ce26e4255c64/exec-9e11add1-de00-4695-b92e-32a0938d886e.png",
+      "saved": "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/stand/buzz/palette_2/frame_01.png",
+      "prompt": "Use case: identity-preserve. Asset type: transparent 2D game character idle sprite, a single standing frame. Image 1 is the edit target and sole identity/style/color reference. Change ONLY the walking pose into an informal relaxed standing pose: both shoes planted at the same ground level, knees loose, weight asymmetrically settled on one leg, shoulders slightly dropped, arms hanging naturally and casually (one arm may bend slightly but no marching arm swing), unforced expression. Preserve character identity, face, hairstyle, outfit details, exact original palette, direction facing right, body proportions, original hand drawn ink outline weight, scratchy hatching density and shadow style. Do not smooth or modernize the drawing. Keep one full-body character, nearly the original overall visual height and canvas placement, original foot baseline, original transparent padding, no crop or zoom. Preserve the shadow's hand-ink treatment, move ground contact shadow naturally below the two planted feet. True transparent background, no solid color, no checkerboard drawn into image. No new props, no text, no watermark. Avoid military posture, stiff straight knees, arms rigid at sides, stepping, running, feet in the air, extra limbs. Specific character: flat pale pink skin, very short dark charcoal buzz cut with stippled ink texture, half-lidded calm eyes, vivid purple loose t-shirt, bright cyan drawstring jogger pants, orange-and-cream low-top sneakers. Preserve his languid slightly bored face and flat unusual fantasy colors exactly. Relaxed patient waiting pose with one hand loose or casually resting in trouser pocket and the other hanging, both feet planted. Match reference head-top and sole baseline within original 1080 by 1080 square canvas.",
+      "tool": "built-in image_gen",
+      "transparent_background": true,
+      "inspection": "Accepted: relaxed standing, both feet planted, identity/palette/hatching preserved; no raster post-processing performed.",
+      "source_inspection": {
+        "size": [
+          1080,
+          1080
+        ],
+        "mode": "RGBA",
+        "alpha_extrema": [
+          0,
+          255
+        ],
+        "alpha_gt128_bbox": [
+          227,
+          48,
+          898,
+          1035
+        ],
+        "normalized_bbox": [
+          0.2102,
+          0.0444,
+          0.8315,
+          0.9583
+        ]
+      },
+      "saved_inspection": {
+        "size": [
+          1254,
+          1254
+        ],
+        "mode": "RGBA",
+        "alpha_extrema": [
+          0,
+          255
+        ],
+        "alpha_gt128_bbox": [
+          441,
+          54,
+          966,
+          1216
+        ],
+        "normalized_bbox": [
+          0.3517,
+          0.0431,
+          0.7703,
+          0.9697
+        ]
+      }
+    },
+    {
+      "id": "cloud",
+      "source": "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/walk/cloud/frame_01.png",
+      "generated": "/Users/lizhe/.codex/generated_images/01a13f5b-686d-7cd0-9568-ce26e4255c64/exec-ff5c22d7-4398-4376-85b3-61e3d944b944.png",
+      "saved": "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/stand/cloud/frame_01.png",
+      "prompt": "Use case: identity-preserve. Asset type: transparent 2D game character idle sprite, a single standing frame. Image 1 is the edit target and sole identity/style/color reference. Change ONLY the walking pose into an informal relaxed standing pose: both shoes planted at the same ground level, knees loose, weight asymmetrically settled on one leg, shoulders slightly dropped, arms hanging naturally and casually (one arm may bend slightly but no marching arm swing), unforced expression. Preserve character identity, face, hairstyle, outfit details, exact original palette, direction facing right, body proportions, original hand drawn ink outline weight, scratchy hatching density and shadow style. Do not smooth or modernize the drawing. Keep one full-body character, nearly the original overall visual height and canvas placement, original foot baseline, original transparent padding, no crop or zoom. Preserve the shadow's hand-ink treatment, move ground contact shadow naturally below the two planted feet. True transparent background, no solid color, no checkerboard drawn into image. No new props, no text, no watermark. Avoid military posture, stiff straight knees, arms rigid at sides, stepping, running, feet in the air, extra limbs. Specific character: happy bright cyan blue one-eyed little creature, enormous white fluffy cloud hair with rainbow and yellow bandage hair ornament, one very large eye, round pink cheeks, open black smile with pink tongue, small white feather wings, white fluffy cloud skirt, cyan legs with cream shoe-like feet. Keep exact stylized anatomy and short proportions. Casual sweet waiting pose, slack arms beside body, a slight easy lean with both little cream feet resting on the ground and knees relaxed. Do not invent hands with fingers, clothing pockets, or additional eye. Use the reference head cloud top at roughly 15% from top of the square canvas and foot soles at roughly 86% from top, preserving the larger blank margins above and below. Keep cloud tufts, wing feather design, fine pencil hatching in white areas and dark flat contact shadows as reference.",
+      "tool": "built-in image_gen",
+      "transparent_background": true,
+      "inspection": "Accepted: relaxed standing, both feet planted, identity/palette/hatching preserved; no raster post-processing performed.",
+      "source_inspection": {
+        "size": [
+          1080,
+          1080
+        ],
+        "mode": "RGBA",
+        "alpha_extrema": [
+          0,
+          255
+        ],
+        "alpha_gt128_bbox": [
+          180,
+          165,
+          852,
+          943
+        ],
+        "normalized_bbox": [
+          0.1667,
+          0.1528,
+          0.7889,
+          0.8731
+        ]
+      },
+      "saved_inspection": {
+        "size": [
+          1254,
+          1254
+        ],
+        "mode": "RGBA",
+        "alpha_extrema": [
+          0,
+          255
+        ],
+        "alpha_gt128_bbox": [
+          353,
+          192,
+          919,
+          1096
+        ],
+        "normalized_bbox": [
+          0.2815,
+          0.1531,
+          0.7329,
+          0.874
+        ]
+      }
+    },
+    {
+      "id": "mismatch",
+      "source": "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/walk/mismatch/frame_01.png",
+      "generated": "/Users/lizhe/.codex/generated_images/01a13f5b-686d-7cd0-9568-ce26e4255c64/exec-cefcf7d1-58cf-4209-9fb7-134ea4e32c85.png",
+      "saved": "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/stand/mismatch/frame_01.png",
+      "prompt": "Use case: identity-preserve. Asset type: transparent 2D game character idle sprite, a single standing frame. Image 1 is the edit target and sole identity/style/color reference. Change ONLY the walking pose into an informal relaxed standing pose: both shoes planted at the same ground level, knees loose, weight asymmetrically settled on one leg, shoulders slightly dropped, arms hanging naturally and casually (one arm may bend slightly but no marching arm swing), unforced expression. Preserve character identity, face, hairstyle, outfit details, exact original palette, direction facing right, body proportions, original hand drawn ink outline weight, scratchy hatching density and shadow style. Do not smooth or modernize the drawing. Keep one full-body character, nearly the original overall visual height and canvas placement, original foot baseline, original transparent padding, no crop or zoom. Preserve the shadow's hand-ink treatment, move ground contact shadow naturally below the two planted feet. True transparent background, no solid color, no checkerboard drawn into image. No new props, no text, no watermark. Avoid military posture, stiff straight knees, arms rigid at sides, stepping, running, feet in the air, extra limbs. Specific character: bright turquoise cyan skin and long legs, dark green bangs beneath a teal ribbed wool beanie, small horizontal closed black eye and tiny bored mouth, loose black-and-white horizontal striped long sleeve shirt, purple elbow pad, blue denim cuffed knee shorts, red-and-white high-top sneakers with black laces. Preserve his slouchy daydreaming face, hat, purple elbow pad, and visible pencil-like denim and fabric grain. Casual slightly slouched waiting pose with one knee soft and arms loose, can casually rest one hand near or in pocket if natural, both red shoes settled on same ground baseline. Keep three-quarter side view facing right. Match reference top of hat at roughly 7% from top of square canvas and foot sole baseline roughly 92% from top.",
+      "tool": "built-in image_gen",
+      "transparent_background": true,
+      "inspection": "Accepted: relaxed standing, both feet planted, identity/palette/hatching preserved; no raster post-processing performed.",
+      "source_inspection": {
+        "size": [
+          1080,
+          1080
+        ],
+        "mode": "RGBA",
+        "alpha_extrema": [
+          0,
+          255
+        ],
+        "alpha_gt128_bbox": [
+          148,
+          68,
+          771,
+          1010
+        ],
+        "normalized_bbox": [
+          0.137,
+          0.063,
+          0.7139,
+          0.9352
+        ]
+      },
+      "saved_inspection": {
+        "size": [
+          1254,
+          1254
+        ],
+        "mode": "RGBA",
+        "alpha_extrema": [
+          0,
+          255
+        ],
+        "alpha_gt128_bbox": [
+          361,
+          79,
+          823,
+          1171
+        ],
+        "normalized_bbox": [
+          0.2879,
+          0.063,
+          0.6563,
+          0.9338
+        ]
+      }
+    }
+  ]
+}

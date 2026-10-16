@@ -1,6 +1,7 @@
 import { common } from '@kit.AbilityKit';
 import { access } from '@kit.ConnectivityKit';
 import { router, promptAction } from '@kit.ArkUI';
+import { navigateToHome } from '../app/HomeNavigation';
 import { AppSession } from '../app/AppSession';
 import { SessionController } from '../session/SessionController';
 import { SessionMember } from '../protocol/messages';
@@ -565,7 +566,7 @@ struct LeaderLobbyPage {
     this.status = '正在退出队伍…';
     try {
       await AppSession.reset();
-      router.back();
+      await navigateToHome();
     } catch (_e) {
       this.leavingLobby = false;
       promptAction.showToast({ message: '退出队伍失败，请重试' });
@@ -1348,21 +1349,25 @@ struct LeaderLobbyPage {
   private scenePreview(key: string) {
     Stack({ alignContent: Alignment.TopStart }) {
       if (key === 'sunset_coast') {
-        Image($rawfile('background/sunset_sky.png')).width('100%').height('100%').objectFit(ImageFit.Cover)
-        Image($rawfile('background/sunset_sun.png')).width(54).height(54).objectFit(ImageFit.Contain)
+        Image($rawfile('scenes/sunset/sunset_sky.png')).width('100%').height('100%').objectFit(ImageFit.Cover)
+        Image($rawfile('scenes/sunset/sunset_sun.png')).width(54).height(54).objectFit(ImageFit.Contain)
           .position({ x: '60%', y: 4 })
-        Image($rawfile('background/sunset_clouds.png')).width('150%').height(48).objectFit(ImageFit.Fill)
+        Image($rawfile('scenes/sunset/sunset_clouds.png')).width('150%').height(48).objectFit(ImageFit.Fill)
           .position({ x: -18, y: 4 })
-        Image($rawfile('background/ocean.png')).width('100%').height(36).objectFit(ImageFit.Fill)
+        Image($rawfile('scenes/sunset/sunset_ocean.png')).width('100%').height(46).objectFit(ImageFit.Fill)
           .position({ x: 0, y: 46 })
-        Image($rawfile('background/midground_dirt.png')).width('100%').height(34).objectFit(ImageFit.Fill)
-          .position({ x: 0, y: 70 })
+        Image($rawfile('scenes/sunset/sunset_midground_dirt.png')).width('100%').height(34).objectFit(ImageFit.Fill)
+          .position({ x: 0, y: 55 })
+        Image($rawfile('scenes/sunset/sunset_road.png')).width('125%').height(40).objectFit(ImageFit.Fill)
+          .position({ x: -14, y: 70 })
       } else {
         Image($rawfile('scenes/neon/neon_sky.png')).width('100%').height('100%').objectFit(ImageFit.Cover)
         Image($rawfile('scenes/neon/neon_far_skyline.png')).width('118%').height(68).objectFit(ImageFit.Fill)
           .position({ x: -12, y: 8 })
         Image($rawfile('scenes/neon/neon_street_blocks.png')).width('130%').height(72).objectFit(ImageFit.Fill)
           .position({ x: -18, y: 31 })
+        Image($rawfile('scenes/neon/neon_road.png')).width('125%').height(40).objectFit(ImageFit.Fill)
+          .position({ x: -14, y: 73 })
       }
     }.width('100%').height(96).clip(true)
   }

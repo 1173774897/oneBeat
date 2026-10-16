@@ -6,36 +6,37 @@ export const WALK_FRAMES_PER_BEAT: number = 4;
 export const SCOOTER_WALK_FRAME_COUNT: number = 16;
 
 export const ROAD_IMAGES: string[] = [
-  'road/dirtroad1.png'
+  'scenes/sunset/sunset_road.png'
 ];
 
+/** 夕阳海边步道两侧物体（与 scenes/sunset/entities 文件名一致） */
 export const SIDE_ENTITIES: string[] = [
-  'entities/barrel.png',
-  'entities/bench.png',
-  'entities/billboard.png',
-  'entities/billboardreck.png',
-  'entities/blocksign.png',
-  'entities/busstop.png',
-  'entities/cable.png',
-  'entities/cactus.png',
-  'entities/cart.png',
-  'entities/drain.png',
-  'entities/firehydrant.png',
-  'entities/gaslight.png',
-  'entities/mailbox.png',
-  'entities/milemeter.png',
-  'entities/paperbox.png',
-  'entities/petrol.png',
-  'entities/phone.png',
-  'entities/rocks.png',
-  'entities/sign.png',
-  'entities/snowcone.png',
-  'entities/telescope.png',
-  'entities/tier.png',
-  'entities/trashcan.png',
-  'entities/tree.png',
-  'entities/umbrella.png',
-  'entities/vendingmachine.png'
+  'scenes/sunset/entities/barrel.png',
+  'scenes/sunset/entities/bench.png',
+  'scenes/sunset/entities/billboard.png',
+  'scenes/sunset/entities/billboardreck.png',
+  'scenes/sunset/entities/blocksign.png',
+  'scenes/sunset/entities/busstop.png',
+  'scenes/sunset/entities/cable.png',
+  'scenes/sunset/entities/cactus.png',
+  'scenes/sunset/entities/cart.png',
+  'scenes/sunset/entities/drain.png',
+  'scenes/sunset/entities/firehydrant.png',
+  'scenes/sunset/entities/gaslight.png',
+  'scenes/sunset/entities/mailbox.png',
+  'scenes/sunset/entities/milemeter.png',
+  'scenes/sunset/entities/paperbox.png',
+  'scenes/sunset/entities/petrol.png',
+  'scenes/sunset/entities/phone.png',
+  'scenes/sunset/entities/rocks.png',
+  'scenes/sunset/entities/sign.png',
+  'scenes/sunset/entities/snowcone.png',
+  'scenes/sunset/entities/telescope.png',
+  'scenes/sunset/entities/tier.png',
+  'scenes/sunset/entities/trashcan.png',
+  'scenes/sunset/entities/tree.png',
+  'scenes/sunset/entities/umbrella.png',
+  'scenes/sunset/entities/vendingmachine.png'
 ];
 
 /** 前景侧仅使用较矮的物体（对应 SIDE_ENTITIES 下标） */
@@ -200,6 +201,13 @@ export function walkFramePath(avatar: WalkerAvatarKey, frameIndex: number, color
     return `walk/${avatar}/palette_${colorSlot + 1}/frame_${suffix}.png`;
   }
   return `walk/${avatar}/frame_${suffix}.png`;
+}
+
+export function standFramePath(avatar: WalkerAvatarKey, colorSlot: number = 0): string {
+  if (isRandomPoolCharacter(avatar)) {
+    return `stand/${avatar}/palette_${colorSlot === 1 ? 2 : 1}/frame_01.png`;
+  }
+  return `stand/${avatar}/frame_01.png`;
 }
 
 /** Every beat owns four consecutive frames; the global beat index prevents a

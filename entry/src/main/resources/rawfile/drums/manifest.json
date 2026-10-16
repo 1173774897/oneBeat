@@ -1,6 +1,16 @@
 {
-  "generator": "OneBeat deterministic DSP v1",
+  "generator": "OneBeat deterministic DSP v4",
   "license": "Original project asset",
+  "models": {
+    "kick": "acoustic bass drum v3",
+    "ride": "struck ride cymbal v3",
+    "shaker": "granular shaker v3",
+    "clap": "single-person palm contact v2",
+    "perc": "skin-and-wood hand drum v2",
+    "tom_low": "acoustic floor tom v4",
+    "tom_high": "acoustic rack tom v4",
+    "other": "original DSP v1"
+  },
   "styles": {
     "rock": [
       "rock/kick.wav",
@@ -10,7 +20,9 @@
       "rock/clap.wav",
       "rock/tom_low.wav",
       "rock/tom_high.wav",
-      "rock/perc.wav"
+      "rock/perc.wav",
+      "rock/ride.wav",
+      "rock/shaker.wav"
     ],
     "psychedelic": [
       "psychedelic/kick.wav",
@@ -20,7 +32,9 @@
       "psychedelic/clap.wav",
       "psychedelic/tom_low.wav",
       "psychedelic/tom_high.wav",
-      "psychedelic/perc.wav"
+      "psychedelic/perc.wav",
+      "psychedelic/ride.wav",
+      "psychedelic/shaker.wav"
     ],
     "jazz": [
       "jazz/kick.wav",
@@ -30,7 +44,9 @@
       "jazz/clap.wav",
       "jazz/tom_low.wav",
       "jazz/tom_high.wav",
-      "jazz/perc.wav"
+      "jazz/perc.wav",
+      "jazz/ride.wav",
+      "jazz/shaker.wav"
     ],
     "funk": [
       "funk/kick.wav",
@@ -40,7 +56,9 @@
       "funk/clap.wav",
       "funk/tom_low.wav",
       "funk/tom_high.wav",
-      "funk/perc.wav"
+      "funk/perc.wav",
+      "funk/ride.wav",
+      "funk/shaker.wav"
     ],
     "disco": [
       "disco/kick.wav",
@@ -50,7 +68,9 @@
       "disco/clap.wav",
       "disco/tom_low.wav",
       "disco/tom_high.wav",
-      "disco/perc.wav"
+      "disco/perc.wav",
+      "disco/ride.wav",
+      "disco/shaker.wav"
     ],
     "hiphop": [
       "hiphop/kick.wav",
@@ -60,7 +80,9 @@
       "hiphop/clap.wav",
       "hiphop/tom_low.wav",
       "hiphop/tom_high.wav",
-      "hiphop/perc.wav"
+      "hiphop/perc.wav",
+      "hiphop/ride.wav",
+      "hiphop/shaker.wav"
     ],
     "trap": [
       "trap/kick.wav",
@@ -70,7 +92,9 @@
       "trap/clap.wav",
       "trap/tom_low.wav",
       "trap/tom_high.wav",
-      "trap/perc.wav"
+      "trap/perc.wav",
+      "trap/ride.wav",
+      "trap/shaker.wav"
     ],
     "house": [
       "house/kick.wav",
@@ -80,7 +104,9 @@
       "house/clap.wav",
       "house/tom_low.wav",
       "house/tom_high.wav",
-      "house/perc.wav"
+      "house/perc.wav",
+      "house/ride.wav",
+      "house/shaker.wav"
     ],
     "techno": [
       "techno/kick.wav",
@@ -90,7 +116,9 @@
       "techno/clap.wav",
       "techno/tom_low.wav",
       "techno/tom_high.wav",
-      "techno/perc.wav"
+      "techno/perc.wav",
+      "techno/ride.wav",
+      "techno/shaker.wav"
     ],
     "dnb": [
       "dnb/kick.wav",
@@ -100,7 +128,9 @@
       "dnb/clap.wav",
       "dnb/tom_low.wav",
       "dnb/tom_high.wav",
-      "dnb/perc.wav"
+      "dnb/perc.wav",
+      "dnb/ride.wav",
+      "dnb/shaker.wav"
     ],
     "latin": [
       "latin/kick.wav",
@@ -110,7 +140,9 @@
       "latin/clap.wav",
       "latin/tom_low.wav",
       "latin/tom_high.wav",
-      "latin/perc.wav"
+      "latin/perc.wav",
+      "latin/ride.wav",
+      "latin/shaker.wav"
     ],
     "reggae": [
       "reggae/kick.wav",
@@ -120,7 +152,9 @@
       "reggae/clap.wav",
       "reggae/tom_low.wav",
       "reggae/tom_high.wav",
-      "reggae/perc.wav"
+      "reggae/perc.wav",
+      "reggae/ride.wav",
+      "reggae/shaker.wav"
     ]
   }
 }

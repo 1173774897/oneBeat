@@ -119,7 +119,7 @@ function harness(initialWireless = true, leader = true) {
     '../network/p2p/WifiP2pManager': { WifiP2pManager: class { async teardown() {} } },
     '../network/p2p/BleRoomDiscovery': { BleRoomDiscovery: class { async stopLeaderAdvertising() {} } },
     '../network/p2p/P2pInvitation': {},
-    '../common/Constants': { PROTOCOL_VERSION: 4 },
+    '../common/Constants': { PROTOCOL_VERSION: 6 },
     '../common/MonotonicClock': { MonotonicClock: { nowMs: () => now } },
     '../common/MeterModel': { defaultBeatPointStates: () => [] },
     '../session/SessionBackgroundKeeper': { SessionBackgroundKeeper: {

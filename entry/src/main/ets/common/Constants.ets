@@ -1,7 +1,9 @@
 export const DOMAIN: number = 0x0001;
 export const TAG: string = 'OneBeat';
 export const SESSION_TCP_PORT: number = 9527;
-export const PROTOCOL_VERSION: number = 4;
+// Older peers lack the ride/shaker bank and revised preset catalog. Reject
+// them before joining rather than silently playing a different arrangement.
+export const PROTOCOL_VERSION: number = 6;
 /** 单人和多人共用同一容量；队长也计入总人数。 */
 export const SESSION_MAX_MEMBER_COUNT: number = 9;
 /** 首次播放和恢复时预留给网络、音频流启动及硬件时间戳锁定的同步时间。 */

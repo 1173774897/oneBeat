@@ -17,6 +17,11 @@ const suites = [
   'metronome-playback-baseline.cjs',
   'metronome-audio-lifecycle.cjs',
   'metronome-route-transition.cjs',
+  'metronome-drum-preview-seek.cjs',
+  'drum-subdivision-model.cjs',
+  'drum-editor-preview.cjs',
+  'drum-preview-session-ownership.cjs',
+  'drum-preview-live-update.cjs',
   'latency-calibration-routing.cjs',
   'route-probe-playback.cjs',
   'time-card-calibration.cjs'

@@ -36,11 +36,13 @@ const WALKER_DEPTH_LEFT_SHIFT_MAX_PX: number = 85;
 const WALKER_FORMATION_CENTER_ADJUST_X: number = 0;
 /** 行进页人物 z 基底（低于 neon 前景遮挡，见 neonForeground zIndex） */
 const WALKER_STAND_Z_BASE: number = 18;
-/** 远近之间 z 增量（远=BASE，近=BASE+SPAN，均须 < NEON_FOREGROUND_Z_INDEX） */
+/** 远近之间 z 增量（远=BASE，近=BASE+SPAN） */
 const WALKER_STAND_Z_SPAN: number = 10;
-/** 夕阳道路近景侧路边物须遮挡全部人物，但仍低于更高的场景覆盖层。 */
-const SUNSET_FOREGROUND_ROADSIDE_Z_INDEX: number = WALKER_STAND_Z_BASE + WALKER_STAND_Z_SPAN + 1;
-/** 霓虹前景遮挡层 zIndex（须在人物之上） */
+/** 步道近侧路边物 / 前景植被：压在全部人物之上（须低于 neonForeground 的 30）。 */
+const NEAR_ROADSIDE_ABOVE_WALKERS_Z_INDEX: number = WALKER_STAND_Z_BASE + WALKER_STAND_Z_SPAN + 1;
+/** 步道远侧路边物 / 背景植被：保持在人物下面（人物 z 最低为 WALKER_STAND_Z_BASE）。 */
+const FAR_ROADSIDE_BELOW_WALKERS_Z_INDEX: number = 12;
+/** 霓虹前景遮挡层 zIndex（须在人物与近侧路边物之上） */
 const NEON_FOREGROUND_Z_INDEX: number = 30;
 /** 列内脚底锚点（自列顶向下 px），与 scale center 对齐 */
 const WALKER_COLUMN_FEET_ANCHOR_Y: number = WALKER_RANK_H + WALKER_SPRITE_H;
@@ -126,6 +128,7 @@ export struct WalkScene {
   @State animBeatIndex: number = 0;
   @State animBeatInBar: number = 1;
   @State animStepInBeat: number = 0;
+  @State walkersWalking: boolean = false;
   @State sideEntities: SideEntityView[] = [];
   @State vegetation: VegetationView[] = [];
   @State sceneWidth: number = 360;
@@ -151,6 +154,7 @@ export struct WalkScene {
   private walkerLayoutMemberSig: string = '';
 
   aboutToAppear(): void {
+    this.walkersWalking = false;
     this.animBeatIndex = 0;
     this.animBeatInBar = 1;
     this.animStepInBeat = 0;
@@ -186,11 +190,20 @@ export struct WalkScene {
     this.ensureWalkerStands();
   }
 
-  private updateWalkFrame(snapshot: TransportVisualSnapshot): void {
-    if (!snapshot.running || snapshot.mainPlayheadMs < 0 || snapshot.beatInBar <= 0) {
-      this.animBeatIndex = 0;
-      this.animBeatInBar = 1;
-      this.animStepInBeat = 0;
+  private updateWalkFrame(snapshot: TransportVisualSnapshot | undefined): void {
+    // The controller can publish countdown/playing before the shared start deadline.
+    // Only the transport's main timeline may switch standing poses into walk frames.
+    const walking = snapshot !== undefined && snapshot.running && !snapshot.countIn &&
+      snapshot.mainPlayheadMs >= 0 && snapshot.beatInBar > 0;
+    if (this.walkersWalking !== walking) {
+      this.walkersWalking = walking;
+    }
+    if (!walking || snapshot === undefined) {
+      if (this.animBeatIndex !== 0 || this.animBeatInBar !== 1 || this.animStepInBeat !== 0) {
+        this.animBeatIndex = 0;
+        this.animBeatInBar = 1;
+        this.animStepInBeat = 0;
+      }
       return;
     }
     const step = Math.min(WALK_FRAMES_PER_BEAT - 1,
@@ -355,6 +368,7 @@ export struct WalkScene {
   private tickFrame(): void {
     const now = MonotonicClock.nowMs();
     const snapshot = AppSession.get()?.metronome.getVisualSnapshot();
+    this.updateWalkFrame(snapshot);
     const speed = this.scrollSpeedPx();
     let advancedPx = 0;
     if (snapshot !== undefined && snapshot.running) {
@@ -375,7 +389,6 @@ export struct WalkScene {
         advancedPx = Math.max(0, targetRoadScroll - this.roadScroll);
         this.roadScroll = Math.max(this.roadScroll, targetRoadScroll);
       }
-      this.updateWalkFrame(snapshot);
     } else if (!this.isPlaying) {
       this.activeTransportRevision = -1;
     }
@@ -555,9 +568,13 @@ export struct WalkScene {
     return item.isForeground ? base + ENTITY_FG_DROP_PX : base - ENTITY_BG_LIFT_PX;
   }
 
+  private roadsideDecorZIndex(isForeground: boolean): number {
+    return isForeground ? NEAR_ROADSIDE_ABOVE_WALKERS_Z_INDEX : FAR_ROADSIDE_BELOW_WALKERS_Z_INDEX;
+  }
+
   private entityZIndex(item: SideEntityView): number {
-    if (this.sceneKey === 'sunset_coast' && item.isForeground) {
-      return SUNSET_FOREGROUND_ROADSIDE_Z_INDEX;
+    if (this.sceneKey === 'sunset_coast' || this.sceneKey === 'neon_street') {
+      return this.roadsideDecorZIndex(item.isForeground);
     }
     return item.isForeground ? 25 : 12;
   }
@@ -574,8 +591,8 @@ export struct WalkScene {
   }
 
   private vegetationZIndex(item: VegetationView): number {
-    if (this.sceneKey === 'sunset_coast' && item.isForeground) {
-      return SUNSET_FOREGROUND_ROADSIDE_Z_INDEX;
+    if (this.sceneKey === 'sunset_coast') {
+      return this.roadsideDecorZIndex(item.isForeground);
     }
     return item.isForeground ? 23 : 11;
   }
@@ -742,7 +759,7 @@ export struct WalkScene {
 
   @Builder
   private roadTileDirt1(mirrored: boolean) {
-    Image($rawfile('road/dirtroad1.png'))
+    Image($rawfile('scenes/sunset/sunset_road.png'))
       .width(this.roadTileWidth())
       .height(this.roadBandHeight())
       .objectFit(ImageFit.Fill)
@@ -889,14 +906,14 @@ export struct WalkScene {
         this.neonBackground()
       }
 
-      Image($rawfile('background/sunset_sky.png'))
+      Image($rawfile('scenes/sunset/sunset_sky.png'))
         .width('100%')
         .height('100%')
         .objectFit(ImageFit.Cover)
         .visibility(this.sceneKey === 'neon_street' ? Visibility.None : Visibility.Visible)
         .zIndex(0)
 
-      Image($rawfile('background/sunset_sun.png'))
+      Image($rawfile('scenes/sunset/sunset_sun.png'))
         .width(this.sceneWidth * 0.30)
         .height(this.sceneWidth * 0.30)
         .objectFit(ImageFit.Contain)
@@ -906,10 +923,10 @@ export struct WalkScene {
 
       Stack({ alignContent: Alignment.TopStart }) {
         Row({ space: 0 }) {
-          Image($rawfile('background/sunset_clouds.png')).width(this.roadTileWidth()).height(this.sceneHeight * 0.36).objectFit(ImageFit.Fill)
-          Image($rawfile('background/sunset_clouds.png')).width(this.roadTileWidth()).height(this.sceneHeight * 0.36).objectFit(ImageFit.Fill)
-          Image($rawfile('background/sunset_clouds.png')).width(this.roadTileWidth()).height(this.sceneHeight * 0.36).objectFit(ImageFit.Fill)
-          Image($rawfile('background/sunset_clouds.png')).width(this.roadTileWidth()).height(this.sceneHeight * 0.36).objectFit(ImageFit.Fill)
+          Image($rawfile('scenes/sunset/sunset_clouds.png')).width(this.roadTileWidth()).height(this.sceneHeight * 0.36).objectFit(ImageFit.Fill)
+          Image($rawfile('scenes/sunset/sunset_clouds.png')).width(this.roadTileWidth()).height(this.sceneHeight * 0.36).objectFit(ImageFit.Fill)
+          Image($rawfile('scenes/sunset/sunset_clouds.png')).width(this.roadTileWidth()).height(this.sceneHeight * 0.36).objectFit(ImageFit.Fill)
+          Image($rawfile('scenes/sunset/sunset_clouds.png')).width(this.roadTileWidth()).height(this.sceneHeight * 0.36).objectFit(ImageFit.Fill)
         }
         .width(this.roadTileWidth() * 4)
         .translate({ x: -this.layerLoopOffset(0.05) })
@@ -923,10 +940,10 @@ export struct WalkScene {
 
       Stack({ alignContent: Alignment.TopStart }) {
         Row({ space: 0 }) {
-          Image($rawfile('background/ocean.png')).width(this.roadTileWidth()).height(this.sceneHeight * 0.34).objectFit(ImageFit.Fill)
-          Image($rawfile('background/ocean.png')).width(this.roadTileWidth()).height(this.sceneHeight * 0.34).objectFit(ImageFit.Fill)
-          Image($rawfile('background/ocean.png')).width(this.roadTileWidth()).height(this.sceneHeight * 0.34).objectFit(ImageFit.Fill)
-          Image($rawfile('background/ocean.png')).width(this.roadTileWidth()).height(this.sceneHeight * 0.34).objectFit(ImageFit.Fill)
+          Image($rawfile('scenes/sunset/sunset_ocean.png')).width(this.roadTileWidth()).height(this.sceneHeight * 0.34).objectFit(ImageFit.Fill)
+          Image($rawfile('scenes/sunset/sunset_ocean.png')).width(this.roadTileWidth()).height(this.sceneHeight * 0.34).objectFit(ImageFit.Fill)
+          Image($rawfile('scenes/sunset/sunset_ocean.png')).width(this.roadTileWidth()).height(this.sceneHeight * 0.34).objectFit(ImageFit.Fill)
+          Image($rawfile('scenes/sunset/sunset_ocean.png')).width(this.roadTileWidth()).height(this.sceneHeight * 0.34).objectFit(ImageFit.Fill)
         }
         .width(this.roadTileWidth() * 4)
         .translate({ x: -this.layerLoopOffset(0.12) })
@@ -940,10 +957,10 @@ export struct WalkScene {
 
       Stack({ alignContent: Alignment.TopStart }) {
         Row({ space: 0 }) {
-          Image($rawfile('background/midground_dirt.png')).width(this.roadTileWidth()).height(this.sceneHeight * 0.22).objectFit(ImageFit.Fill)
-          Image($rawfile('background/midground_dirt.png')).width(this.roadTileWidth()).height(this.sceneHeight * 0.22).objectFit(ImageFit.Fill)
-          Image($rawfile('background/midground_dirt.png')).width(this.roadTileWidth()).height(this.sceneHeight * 0.22).objectFit(ImageFit.Fill)
-          Image($rawfile('background/midground_dirt.png')).width(this.roadTileWidth()).height(this.sceneHeight * 0.22).objectFit(ImageFit.Fill)
+          Image($rawfile('scenes/sunset/sunset_midground_dirt.png')).width(this.roadTileWidth()).height(this.sceneHeight * 0.22).objectFit(ImageFit.Fill)
+          Image($rawfile('scenes/sunset/sunset_midground_dirt.png')).width(this.roadTileWidth()).height(this.sceneHeight * 0.22).objectFit(ImageFit.Fill)
+          Image($rawfile('scenes/sunset/sunset_midground_dirt.png')).width(this.roadTileWidth()).height(this.sceneHeight * 0.22).objectFit(ImageFit.Fill)
+          Image($rawfile('scenes/sunset/sunset_midground_dirt.png')).width(this.roadTileWidth()).height(this.sceneHeight * 0.22).objectFit(ImageFit.Fill)
         }
         .width(this.roadTileWidth() * 4)
         .translate({ x: -this.layerLoopOffset(0.25) })
@@ -995,6 +1012,7 @@ export struct WalkScene {
             .padding({ left: 6, right: 6, top: 2, bottom: 2 })
             .borderRadius(6)
           WalkerSprite({
+            isWalking: this.walkersWalking,
             frameIndex: this.walkerFrameFor(member, index),
             avatar: memberAvatar(member.avatarKey, index, member.resolvedAvatarKey ?? ''),
             colorSlot: member.colorSlot ?? 0

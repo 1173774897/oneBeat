@@ -6,6 +6,7 @@ import { WaveWalkerLayers } from './WaveWalkerLayers';
 import { ScooterWalkerLayers } from './ScooterWalkerLayers';
 import { LampWalkerLayers } from './LampWalkerLayers';
 import { RandomPoolWalkerLayers } from './RandomPoolWalkerLayers';
+import { StandingWalkerSprite } from './StandingWalkerSprite';
 
 const CLOUD_SCALE: number = 0.7;
 const BASE_WALKER_SIZE: number = 140;
@@ -16,6 +17,7 @@ export struct WalkerSprite {
   @Prop @Watch('onFrameChanged') frameIndex: number = 0;
   @Prop avatar: WalkerAvatarKey = 'cloud';
   @Prop colorSlot: number = 0;
+  @Prop isWalking: boolean = true;
 
   onFrameChanged(): void {
     // Prop watch keeps the stack in sync when frameIndex updates.
@@ -85,7 +87,8 @@ export struct WalkerSprite {
     .height(BASE_WALKER_SIZE)
   }
 
-  build() {
+  @Builder
+  private walkLayers() {
     if (this.avatar === 'cloud') {
       this.cloudLayers();
     } else if (this.avatar === 'lilroll') {
@@ -107,5 +110,21 @@ export struct WalkerSprite {
     } else {
       this.mismatchLayers();
     }
+  }
+
+  build() {
+    Stack() {
+      // Keep both poses mounted so PNG loading does not begin on a beat or pause boundary.
+      StandingWalkerSprite({ avatar: this.avatar, colorSlot: this.colorSlot })
+        .visibility(this.isWalking ? Visibility.Hidden : Visibility.Visible)
+      Stack() {
+        this.walkLayers();
+      }
+      .width(BASE_WALKER_SIZE)
+      .height(BASE_WALKER_SIZE)
+      .visibility(this.isWalking ? Visibility.Visible : Visibility.Hidden)
+    }
+    .width(BASE_WALKER_SIZE)
+    .height(BASE_WALKER_SIZE)
   }
 }

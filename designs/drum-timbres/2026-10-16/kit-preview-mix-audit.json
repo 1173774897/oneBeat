@@ -1,0 +1,20 @@
+[
+  {
+    "style": "jazz",
+    "clippedFrames": 26,
+    "totalFrames": 176400,
+    "clippedFraction": 0.00014739229024943312
+  },
+  {
+    "style": "reggae",
+    "clippedFrames": 22,
+    "totalFrames": 176400,
+    "clippedFraction": 0.00012471655328798187
+  },
+  {
+    "style": "rock",
+    "clippedFrames": 359,
+    "totalFrames": 176400,
+    "clippedFraction": 0.0020351473922902495
+  }
+]

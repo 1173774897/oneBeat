@@ -6,7 +6,7 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DEST_ROOT="$REPO_ROOT/entry/src/main/resources/rawfile"
 LAMP_FRAME_SRC="$REPO_ROOT/designs/lamp-linework/2026-10-02/lamp-retouched-frames"
 
-mkdir -p "$DEST_ROOT/walk/cloud" "$DEST_ROOT/walk/lamp" "$DEST_ROOT/walk/mismatch" "$DEST_ROOT/walk/lilroll" "$DEST_ROOT/walk/teapot" "$DEST_ROOT/walk/wave" "$DEST_ROOT/walk/scooter" "$DEST_ROOT/road" "$DEST_ROOT/entities"
+mkdir -p "$DEST_ROOT/walk/cloud" "$DEST_ROOT/walk/lamp" "$DEST_ROOT/walk/mismatch" "$DEST_ROOT/walk/lilroll" "$DEST_ROOT/walk/teapot" "$DEST_ROOT/walk/wave" "$DEST_ROOT/walk/scooter" "$DEST_ROOT/scenes/sunset/entities"
 
 copy_frames() {
   local name="$1"
@@ -66,12 +66,34 @@ if [[ -f "$DEST_ROOT/walk/scooter/frame_01.png" ]]; then
   echo "Comic placeholder -> comic/*/scooter.png"
 fi
 
-cp "$SRC_ROOT/background/road/"*.png "$DEST_ROOT/road/"
-echo "Copied road tiles -> road/"
+SUNSET_BG_SRC="$SRC_ROOT/background"
+if [[ -d "$SUNSET_BG_SRC" ]]; then
+  mkdir -p "$DEST_ROOT/scenes/sunset"
+  for asset in sunset_sky sunset_sun sunset_clouds; do
+    if [[ -f "$SUNSET_BG_SRC/${asset}.png" ]]; then
+      cp "$SUNSET_BG_SRC/${asset}.png" "$DEST_ROOT/scenes/sunset/${asset}.png"
+    fi
+  done
+  if [[ -f "$SUNSET_BG_SRC/ocean.png" ]]; then
+    cp "$SUNSET_BG_SRC/ocean.png" "$DEST_ROOT/scenes/sunset/sunset_ocean.png"
+  fi
+  if [[ -f "$SUNSET_BG_SRC/midground_dirt.png" ]]; then
+    cp "$SUNSET_BG_SRC/midground_dirt.png" "$DEST_ROOT/scenes/sunset/sunset_midground_dirt.png"
+  fi
+  echo "Copied sunset background layers -> scenes/sunset/"
+fi
 
-rm -f "$DEST_ROOT/entities"/*.png
-cp "$SRC_ROOT/background/entities/cutout/"*.png "$DEST_ROOT/entities/"
-echo "Copied $(ls "$DEST_ROOT/entities" | wc -l | tr -d ' ') entities -> entities/"
+if [[ -f "$SRC_ROOT/background/road/dirtroad1.png" ]]; then
+  cp "$SRC_ROOT/background/road/dirtroad1.png" "$DEST_ROOT/scenes/sunset/sunset_road.png"
+  echo "Copied sunset road -> scenes/sunset/sunset_road.png"
+fi
+
+SUNSET_ENTITY_SRC="$SRC_ROOT/background/entities/cutout"
+if [[ -d "$SUNSET_ENTITY_SRC" ]]; then
+  rm -f "$DEST_ROOT/scenes/sunset/entities"/*.png
+  cp "$SUNSET_ENTITY_SRC"/*.png "$DEST_ROOT/scenes/sunset/entities/"
+  echo "Copied $(ls "$DEST_ROOT/scenes/sunset/entities" | wc -l | tr -d ' ') entities -> scenes/sunset/entities/"
+fi
 
 NEON_ENTITY_SRC="$SRC_ROOT/background/neon/entities/cutout"
 if [[ -d "$NEON_ENTITY_SRC" ]]; then

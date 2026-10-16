@@ -1,5 +1,19 @@
 import { DEFAULT_TICKS_PER_BEAT, SequencerEvent, SequencerPattern } from './RhythmTimeline';
 import { isValidMeter, stepsPerBeatForUnit } from '../common/MeterModel';
+import {
+  buildJazzFill,
+  buildJazzPattern,
+  jazzFillWindowBeats,
+  JAZZ_FILL_NAMES,
+  JAZZ_PATTERN_NAMES
+} from './JazzDrumPatterns';
+import {
+  buildStyleDrumFill,
+  buildStyleDrumPattern,
+  styleFillWindowBeats,
+  styleDrumFillNames,
+  styleDrumPatternNames
+} from './StyleDrumPatterns';
 
 export interface DrumStyle {
   key: string;
@@ -13,12 +27,21 @@ export interface DrumTrack {
   name: string;
 }
 
+/** The grid is an editing preference; event ticks and velocities are the saved musical data. */
+export interface DrumCustomPattern {
+  subdivision: number;
+  events: SequencerEvent[];
+}
+
 export interface DrumSection {
   id: string;
   patternIndex: number;
   repeats: number;
   fillIndex: number;
   fillEvery: number;
+  customPattern?: DrumCustomPattern;
+  customFill?: DrumCustomPattern;
+  // Legacy rows retain their original beat-unit-dependent sixteenth grid until explicitly applied.
   customRows?: string[];
   customFillRows?: string[];
 }
@@ -50,14 +73,119 @@ export const DRUM_TRACKS: DrumTrack[] = [
   { key: 'snare', name: '军鼓' },
   { key: 'hat_closed', name: '闭镲' },
   { key: 'hat_open', name: '开镲' },
+  { key: 'ride', name: '叮叮镲' },
   { key: 'clap', name: '拍手' },
   { key: 'tom_low', name: '低通鼓' },
   { key: 'tom_high', name: '高通鼓' },
-  { key: 'perc', name: '打击乐' }
+  { key: 'perc', name: '打击乐' },
+  { key: 'shaker', name: '沙锤' }
+];
+
+// Old binary rows have no instrument keys. UI insertions must never reinterpret
+// their fifth row (clap) as ride or shift either tom and the percussion voice.
+const LEGACY_DRUM_TRACK_KEYS: string[] = [
+  'kick', 'snare', 'hat_closed', 'hat_open', 'clap', 'tom_low', 'tom_high', 'perc'
 ];
 
 export const PATTERN_NAMES: string[] = ['基础律动', '推进律动', '强力律动'];
 export const FILL_NAMES: string[] = ['短加花', '滚奏加花', '爆发过鼓'];
+
+export function drumPatternNames(styleKey: string): string[] {
+  return styleKey === 'jazz' ? JAZZ_PATTERN_NAMES : styleDrumPatternNames(styleKey);
+}
+
+export function drumFillNames(styleKey: string): string[] {
+  return styleKey === 'jazz' ? JAZZ_FILL_NAMES : styleDrumFillNames(styleKey);
+}
+
+/** Musical descriptions explain the built-in phrase, including intentional off-grid notes. */
+export function drumPatternDescription(styleKey: string, index: number): string {
+  const selected = savedPatternIndex(index);
+  switch (styleKey) {
+    case 'psychedelic': return ['疏落叮镲与留白打击', '通鼓应答与沙锤点缀', '叮镲铺底与通鼓回应'][selected];
+    case 'jazz': return ['叮镲 Swing 乐句与轻底鼓', '三连音一、三位的 Shuffle 律动', '切分军鼓与叮镲推动 Swing'][selected];
+    case 'funk': return ['切分底鼓与反拍军鼓', '十六分镲与轻军鼓鬼音', '叮镲与打击乐的切分应答'][selected];
+    case 'disco': return ['四拍底鼓与反拍开镲', '四拍底鼓与十六分沙锤', '开镲与拍手推动四拍律动'][selected];
+    case 'hiphop': return ['刻意后靠的微时值鼓点', '刻意后靠的微时值鼓点与沙锤切分', '刻意后靠的微时值鼓点与叮镲碎拍'][selected];
+    case 'trap': return ['半拍军鼓与切分底鼓', '每拍六格的十六分三连音滚镲', '含八等分落点的密集滚镲'][selected];
+    case 'house': return ['四拍底鼓与反拍开镲', '沙锤与打击乐推动四拍律动', '叮镲与开镲交织的四拍律动'][selected];
+    case 'techno': return ['四拍底鼓与机械镲点', '闭镲与打击乐的十六分切分', '叮镲与军鼓推动机械律动'][selected];
+    case 'dnb': return ['双步底鼓与反拍军鼓', '军鼓鬼音与密集切分', '叮镲与碎拍鼓点交织'][selected];
+    case 'latin': return ['沙锤与通巴打击的交织', '八分音符 3＋3＋2 切分重音', '沙锤、叮镲与通鼓的应答'][selected];
+    case 'reggae': return ['One Drop 底鼓与军鼓重拍', '反拍沙锤与打击乐点缀', '四拍底鼓与反拍沙锤推进'][selected];
+    default: return ['八分镲与二、四拍军鼓', '反拍开镲与底鼓引入', '叮镲推进与强反拍军鼓'][selected];
+  }
+}
+
+export function drumFillDescription(styleKey: string, index: number): string {
+  const selected = savedPatternIndex(index);
+  switch (styleKey) {
+    case 'psychedelic': return ['含八等分落点的留白应答', '三连音通鼓，可与主节奏形成混合细分', '疏落叮镲与高低通鼓回应'][selected];
+    case 'jazz': return ['三连音军鼓与高通鼓应答', '每拍六格的轻重军鼓滚奏', '三连音高低通鼓衔接 Swing'][selected];
+    case 'funk': return ['轻军鼓与切分重音', '军鼓与通鼓的切分接力', '底鼓与反拍军鼓收束'][selected];
+    case 'disco': return ['拍手切分与开镲应答', '十六分军鼓渐强与沙锤铺底', '开镲与通鼓的十六分收束'][selected];
+    case 'hiphop': return ['刻意后靠的微时值切分应答', '刻意后靠的微时值军鼓短滚', '刻意后靠的微时值通鼓与军鼓'][selected];
+    case 'trap': return ['三连音镲花，可与主节奏形成混合细分', '六连音滚镲，可与主节奏形成混合细分', '六连音与四等分混合的半拍过鼓'][selected];
+    case 'house': return ['拍手与开镲的反拍短句', '十六分沙锤与反拍应答', '军鼓渐强与叮镲抬升'][selected];
+    case 'techno': return ['十六分打击乐切分', '含八等分落点的切分打击', '叮镲与军鼓的切分抬升'][selected];
+    case 'dnb': return ['底鼓与军鼓的碎拍回切', '十六分军鼓穿插八等分碎滚', '军鼓与高低通鼓冲刺'][selected];
+    case 'latin': return ['鼓皮打击与沙锤应答', '十六分沙锤与打击乐切分', '高低通鼓与沙锤花句'][selected];
+    case 'reggae': return ['反拍打击与留白应答', '三连通鼓与半拍沙锤，可与主节奏形成混合细分', '十六分沙锤与反拍重音收束'][selected];
+    default: return ['轻重军鼓接高通鼓', '两拍军鼓重音滚奏接高低通鼓', '十六分军鼓转高低通鼓下行'][selected];
+  }
+}
+
+function validDrumSampleKey(key: string): boolean {
+  for (let i = 0; i < DRUM_TRACKS.length; i++) {
+    if (DRUM_TRACKS[i].key === key) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function copyDrumEvents(events: SequencerEvent[], barTicks?: number): SequencerEvent[] {
+  const copied: SequencerEvent[] = [];
+  if (!Array.isArray(events)) {
+    return copied;
+  }
+  for (let i = 0; i < events.length; i++) {
+    const event = events[i];
+    if (event === null || event === undefined || typeof event.tick !== 'number' ||
+      !Number.isFinite(event.tick) || event.tick < 0 ||
+      (barTicks !== undefined && event.tick >= barTicks) || !validDrumSampleKey(event.sampleKey)) {
+      continue;
+    }
+    const velocity = typeof event.velocity === 'number' && Number.isFinite(event.velocity) ?
+      Math.max(0, Math.min(1, event.velocity)) : 1;
+    // Preserve fractional positions and event order: changing the visible grid must not quantize audio.
+    copied.push({ tick: event.tick, sampleKey: event.sampleKey, velocity: velocity });
+  }
+  return copied;
+}
+
+export function cloneDrumCustomPattern(pattern?: DrumCustomPattern): DrumCustomPattern | undefined {
+  if (pattern === undefined || pattern === null || !Array.isArray(pattern.events)) {
+    return undefined;
+  }
+  const subdivision = pattern.subdivision === 3 || pattern.subdivision === 6 ? pattern.subdivision : 4;
+  return { subdivision: subdivision, events: copyDrumEvents(pattern.events) };
+}
+
+function copyLegacyRows(rows?: string[]): string[] | undefined {
+  if (!Array.isArray(rows)) {
+    return undefined;
+  }
+  const copied: string[] = [];
+  for (let i = 0; i < rows.length; i++) {
+    copied.push(typeof rows[i] === 'string' ? rows[i] : '');
+  }
+  return copied;
+}
+
+function savedPatternIndex(value: number): number {
+  return Number.isInteger(value) && value >= 0 && value < PATTERN_NAMES.length ? value : 0;
+}
 
 export function defaultDrumProgram(): DrumProgram {
   return {
@@ -74,10 +202,34 @@ export function parseDrumProgram(raw: string): DrumProgram {
   }
   try {
     const parsed = JSON.parse(raw) as DrumProgram;
-    if (!isValidMeter(parsed.beatsPerBar, parsed.beatUnit)) {
+    if (parsed === null || !isValidMeter(parsed.beatsPerBar, parsed.beatUnit) ||
+      !Array.isArray(parsed.sections)) {
       return defaultDrumProgram();
     }
-    return parsed;
+    const sections: DrumSection[] = [];
+    for (let i = 0; i < parsed.sections.length; i++) {
+      const section = parsed.sections[i];
+      if (section === null || section === undefined) {
+        continue;
+      }
+      sections.push({
+        id: typeof section.id === 'string' ? section.id : String.fromCharCode(65 + i),
+        patternIndex: savedPatternIndex(section.patternIndex),
+        repeats: Number.isInteger(section.repeats) && section.repeats > 0 ? section.repeats : 1,
+        fillIndex: savedPatternIndex(section.fillIndex),
+        fillEvery: Number.isInteger(section.fillEvery) && section.fillEvery >= 0 ? section.fillEvery : 0,
+        customPattern: cloneDrumCustomPattern(section.customPattern),
+        customFill: cloneDrumCustomPattern(section.customFill),
+        customRows: copyLegacyRows(section.customRows),
+        customFillRows: copyLegacyRows(section.customFillRows)
+      });
+    }
+    return {
+      styleKey: styleByKey(parsed.styleKey).key,
+      beatsPerBar: parsed.beatsPerBar,
+      beatUnit: parsed.beatUnit,
+      sections: sections
+    };
   } catch (_e) {
     return defaultDrumProgram();
   }
@@ -105,304 +257,17 @@ function pushEvent(events: SequencerEvent[], step: number, stepsPerBeat: number,
   });
 }
 
-function shouldKick(styleKey: string, beat: number, sub: number, variant: number): boolean {
-  if (styleKey === 'house' || styleKey === 'techno' || styleKey === 'disco') {
-    return sub === 0 || (variant > 1 && sub === 2 && beat % 2 === 1);
-  }
-  if (styleKey === 'jazz') {
-    if (variant === 0) {
-      return sub === 0 && (beat === 0 || beat === 2);
-    }
-    if (variant === 1) {
-      return sub === 0 && (beat === 0 || beat === 1 || beat === 2);
-    }
-    return sub === 0;
-  }
-  if (styleKey === 'funk') {
-    if (variant === 0) {
-      return (beat === 0 && sub === 0) || (beat === 1 && sub === 2) || (beat === 2 && sub === 0);
-    }
-    if (variant === 1) {
-      return (beat === 0 && sub === 0) || (beat === 1 && sub === 2) || (beat === 2 && sub === 0) ||
-        (beat === 3 && sub === 2);
-    }
-    return sub === 0 && beat % 2 === 0 || (beat === 3 && sub === 2);
-  }
-  if (styleKey === 'latin') {
-    if (variant === 0) {
-      return sub === 0 && (beat === 0 || beat === 2);
-    }
-    return sub === 0 && (beat === 0 || beat === 2 || (variant > 1 && beat === 3));
-  }
-  if (styleKey === 'reggae') {
-    if (variant === 0) {
-      return beat === 3 && sub === 0;
-    }
-    return (beat === 0 && sub === 0 && variant === 1) || (beat === 3 && sub === 0);
-  }
-  if (styleKey === 'psychedelic') {
-    if (variant === 0) {
-      return beat === 0 && sub === 0;
-    }
-    if (variant === 1) {
-      return sub === 0 && (beat === 0 || beat === 2);
-    }
-    return sub === 0 && (beat === 0 || beat === 1 || beat === 2);
-  }
-  if (styleKey === 'rock') {
-    if (variant === 0) {
-      return sub === 0 && (beat === 0 || beat === 2);
-    }
-    if (variant === 1) {
-      return sub === 0 && (beat === 0 || beat === 2) || (beat === 3 && sub === 2);
-    }
-    return sub === 0 && (beat === 0 || beat === 2) || (beat === 1 && sub === 2) || (beat === 3 && sub === 2);
-  }
-  if (styleKey === 'trap' || styleKey === 'hiphop') {
-    return (beat === 0 && sub === 0) || (beat === 2 && sub === (variant > 0 ? 2 : 0)) ||
-      (variant > 1 && beat === 3 && sub === 3);
-  }
-  if (styleKey === 'dnb') {
-    return (beat === 0 && sub === 0) || (beat === 2 && sub === 2) || (variant > 0 && beat === 3 && sub === 1);
-  }
-  return sub === 0 && (beat === 0 || beat === 2) || (variant > 0 && beat === 3 && sub === 2);
-}
-
-function shouldSnare(styleKey: string, beat: number, sub: number, variant: number): boolean {
-  if (styleKey === 'trap' || styleKey === 'hiphop') {
-    return beat === 2 && sub === 0 || (variant > 1 && beat === 3 && sub === 2);
-  }
-  if (styleKey === 'reggae') {
-    return beat === 2 && sub === 0 || (variant > 1 && beat === 0 && sub === 2);
-  }
-  if (styleKey === 'jazz') {
-    return (beat === 1 || beat === 3) && sub === 0;
-  }
-  if (styleKey === 'funk') {
-    return (beat === 1 || beat === 3) && sub === 0;
-  }
-  if (styleKey === 'dnb') {
-    if (variant === 0) {
-      return (beat === 1 && sub === 2) || (beat === 3 && sub === 0);
-    }
-    return (beat === 1 && sub === 2) || (beat === 3 && sub === 0) || (variant > 1 && beat === 2 && sub === 2);
-  }
-  if (styleKey === 'latin') {
-    return (beat === 1 && sub === 0) || (beat === 3 && sub === 0) ||
-      (variant > 0 && beat === 2 && sub === 2);
-  }
-  if (styleKey === 'psychedelic') {
-    return (beat === 1 || beat === 3) && sub === 0 || (variant > 1 && beat === 2 && sub === 2);
-  }
-  return (beat === 1 || beat === 3) && sub === 0;
-}
-
-function shouldGhostSnare(styleKey: string, beat: number, sub: number, variant: number,
-  stepsPerBeat: number): boolean {
-  if (stepsPerBeat < 4) {
-    return false;
-  }
-  if (styleKey === 'jazz') {
-    if (variant === 0) {
-      return (beat === 0 || beat === 2) && sub === 2;
-    }
-    if (variant === 1) {
-      return sub === 2 && (beat === 0 || beat === 1 || beat === 2);
-    }
-    return sub === 2 || (sub === 1 && beat % 2 === 1);
-  }
-  if (styleKey === 'funk' && variant > 0) {
-    return sub === 2 && (beat === 0 || beat === 2 || (variant > 1 && beat === 1));
-  }
-  if (styleKey === 'hiphop' && variant > 0) {
-    return sub === 2 && (beat === 1 || beat === 3);
-  }
-  return false;
-}
-
-/** Shuffle / straight / busy hi-hat grid per style and pattern variant. */
-function shouldHat(styleKey: string, beat: number, sub: number, variant: number,
-  stepsPerBeat: number): boolean {
-  if (stepsPerBeat === 2) {
-    if (styleKey === 'jazz' && variant === 0) {
-      return sub === 0;
-    }
-    return variant === 0 ? sub === 0 : true;
-  }
-  if (styleKey === 'jazz') {
-    if (variant === 0) {
-      return sub === 0 || sub === 3;
-    }
-    if (variant === 1) {
-      return sub === 0 || sub === 2 || (beat === 3 && sub === 3);
-    }
-    return sub === 0 || sub === 1 || sub === 3;
-  }
-  if (styleKey === 'reggae') {
-    if (variant === 0) {
-      return sub === 2;
-    }
-    return sub === 2 || (variant > 1 && sub === 0 && beat % 2 === 1);
-  }
-  if (styleKey === 'funk') {
-    if (variant === 0) {
-      return sub === 0 || sub === 2;
-    }
-    if (variant === 1) {
-      return true;
-    }
-    return sub !== 1 || beat % 2 === 0;
-  }
-  if (styleKey === 'trap') {
-    if (variant === 0) {
-      return sub === 0 || sub === 2;
-    }
-    if (variant === 1) {
-      return sub % 2 === 0;
-    }
-    return true;
-  }
-  if (styleKey === 'hiphop') {
-    if (variant === 0) {
-      return sub === 0 || sub === 2;
-    }
-    return sub % 2 === 0 || (variant > 1 && sub === 3);
-  }
-  if (styleKey === 'latin') {
-    if (variant === 0) {
-      return sub === 0 || sub === 2;
-    }
-    return sub === 0 || sub === 1 || sub === 2;
-  }
-  if (styleKey === 'dnb') {
-    if (variant === 0) {
-      return sub === 0 || sub === 2;
-    }
-    return true;
-  }
-  if (styleKey === 'psychedelic') {
-    if (variant === 0) {
-      return sub === 0;
-    }
-    if (variant === 1) {
-      return sub === 0 || sub === 2;
-    }
-    return sub !== 3;
-  }
-  if (styleKey === 'house' || styleKey === 'techno') {
-    if (variant === 0) {
-      return sub === 0 || sub === 2;
-    }
-    if (variant === 1) {
-      return sub % 2 === 0;
-    }
-    return true;
-  }
-  if (styleKey === 'disco') {
-    if (variant === 0) {
-      return sub === 0 || sub === 2;
-    }
-    return sub % 2 === 0 || (variant > 1 && sub === 3);
-  }
-  if (styleKey === 'rock') {
-    if (variant === 0) {
-      return sub === 0 || sub === 2;
-    }
-    if (variant === 1) {
-      return true;
-    }
-    return sub !== 1;
-  }
-  const hatStride = variant === 0 ? 2 : 1;
-  return sub % hatStride === 0;
-}
-
-function shouldOpenHat(styleKey: string, beat: number, sub: number, variant: number,
-  stepsPerBeat: number): boolean {
-  if (stepsPerBeat < 4) {
-    return variant > 0 && sub === stepsPerBeat - 1 && beat % 2 === 1;
-  }
-  if (styleKey === 'jazz') {
-    return variant > 0 && beat === 3 && sub === 2;
-  }
-  if (styleKey === 'funk') {
-    return variant > 1 && beat % 2 === 1 && sub === 3;
-  }
-  if (styleKey === 'disco') {
-    return variant > 0 && sub === stepsPerBeat - 1 && beat % 2 === 0;
-  }
-  if (styleKey === 'rock' && variant > 1) {
-    return beat === 3 && sub === 0;
-  }
-  return variant > 0 && sub === stepsPerBeat - 1 && beat % 2 === 1;
-}
-
-function hatVelocity(styleKey: string, beat: number, sub: number, variant: number, isOpen: boolean): number {
-  if (isOpen) {
-    return 0.68;
-  }
-  if (styleKey === 'jazz') {
-    if (variant === 0) {
-      return sub === 0 ? 0.62 : 0.44;
-    }
-    return sub === 0 ? 0.72 : 0.5;
-  }
-  if (styleKey === 'reggae') {
-    return 0.58;
-  }
-  if (styleKey === 'trap' && variant > 1) {
-    return sub === 0 ? 0.78 : 0.42;
-  }
-  return sub === 0 ? 0.72 : 0.52;
-}
-
-function shouldStylePerc(styleKey: string, beat: number, sub: number, variant: number,
-  stepsPerBeat: number): boolean {
-  if (styleKey === 'latin') {
-    if (stepsPerBeat < 4) {
-      return sub === 0 && (beat === 0 || beat === 2 || beat === 3);
-    }
-    if (variant === 0) {
-      return (beat === 0 && sub === 3) || (beat === 2 && sub === 1) || (beat === 3 && sub === 2);
-    }
-    if (variant === 1) {
-      return (beat === 0 && sub === 3) || (beat === 1 && sub === 2) || (beat === 2 && sub === 1) ||
-        (beat === 3 && sub === 2);
-    }
-    return sub === 1 || sub === 3;
-  }
-  if (styleKey === 'funk') {
-    return stepsPerBeat >= 4 && sub === stepsPerBeat - 1 &&
-      (variant === 0 ? beat % 2 === 1 : true);
-  }
-  if (styleKey === 'reggae' && variant > 0) {
-    return sub === 2 && beat !== 2;
-  }
-  return false;
-}
-
-function kickVelocity(styleKey: string, beat: number, sub: number, variant: number): number {
-  if (styleKey === 'jazz') {
-    return beat === 0 ? 0.82 : 0.58;
-  }
-  if (styleKey === 'reggae' && variant === 0) {
-    return 0.92;
-  }
-  if (styleKey === 'psychedelic' && variant === 0) {
-    return 0.78;
-  }
-  return 1;
-}
-
 function customPattern(rows: string[], beatsPerBar: number, beatUnit: number): SequencerPattern {
   const stepsPerBeat = stepsPerBeatForUnit(beatUnit);
   const stepCount = beatsPerBar * stepsPerBeat;
   const events: SequencerEvent[] = [];
-  for (let track = 0; track < DRUM_TRACKS.length; track++) {
+  const rowKeys: string[] = rows.length <= LEGACY_DRUM_TRACK_KEYS.length ? LEGACY_DRUM_TRACK_KEYS :
+    DRUM_TRACKS.map((track: DrumTrack) => track.key);
+  for (let track = 0; track < rowKeys.length; track++) {
     const row = track < rows.length ? rows[track] : '';
     for (let step = 0; step < stepCount && step < row.length; step++) {
       if (row.charAt(step) === '1') {
-        pushEvent(events, step, stepsPerBeat, DRUM_TRACKS[track].key, step % stepsPerBeat === 0 ? 1 : 0.78);
+        pushEvent(events, step, stepsPerBeat, rowKeys[track], step % stepsPerBeat === 0 ? 1 : 0.78);
       }
     }
   }
@@ -410,301 +275,54 @@ function customPattern(rows: string[], beatsPerBar: number, beatUnit: number): S
   return new SequencerPattern(DEFAULT_TICKS_PER_BEAT, beatsPerBar, events);
 }
 
-function fillWindowBeats(styleKey: string, fillIndex: number): number {
-  if (fillIndex === 2) {
-    if (styleKey === 'rock' || styleKey === 'dnb' || styleKey === 'latin' || styleKey === 'disco' ||
-      styleKey === 'funk') {
-      return 2;
-    }
-  }
-  return 1;
-}
-
-function pushStyleFill(events: SequencerEvent[], styleKey: string, fillIndex: number, step: number,
-  local: number, stepsPerBeat: number, fillSteps: number): void {
-  const lastLocal = fillSteps - 1;
-  const half = Math.floor(stepsPerBeat / 2);
-
-  if (styleKey === 'jazz') {
-    if (fillIndex === 0) {
-      if (local === 0 || local === 2) {
-        pushEvent(events, step, stepsPerBeat, 'snare', local === 0 ? 0.78 : 0.42);
-      }
-      if (stepsPerBeat >= 4 && (local === 0 || local === 3)) {
-        pushEvent(events, step, stepsPerBeat, 'hat_closed', local === 0 ? 0.5 : 0.38);
-      }
-      if (local === lastLocal) {
-        pushEvent(events, step, stepsPerBeat, 'kick', 0.55);
-      }
-      return;
-    }
-    if (fillIndex === 1) {
-      pushEvent(events, step, stepsPerBeat, 'snare', local % 2 === 0 ? 0.72 : 0.48);
-      if (stepsPerBeat >= 4 && (local === 0 || local === 3)) {
-        pushEvent(events, step, stepsPerBeat, 'hat_closed', 0.4);
-      }
-      return;
-    }
-    pushEvent(events, step, stepsPerBeat, local % 2 === 0 ? 'hat_open' : 'snare', local % 2 === 0 ? 0.55 : 0.88);
-    if (local === lastLocal) {
-      pushEvent(events, step, stepsPerBeat, 'kick', 0.7);
-    }
-    return;
-  }
-
-  if (styleKey === 'latin') {
-    if (fillIndex === 0) {
-      if (local === 0 || local === 2) {
-        pushEvent(events, step, stepsPerBeat, 'perc', 0.78);
-      }
-      if (local === lastLocal) {
-        pushEvent(events, step, stepsPerBeat, 'snare', 0.9);
-      }
-      return;
-    }
-    if (fillIndex === 1) {
-      pushEvent(events, step, stepsPerBeat, local % 2 === 0 ? 'perc' : 'snare', 0.8);
-      return;
-    }
-    const cascade = ['tom_high', 'perc', 'tom_low', 'snare'];
-    pushEvent(events, step, stepsPerBeat, cascade[local % cascade.length], local === lastLocal ? 1 : 0.82);
-    if (local === 0) {
-      pushEvent(events, step, stepsPerBeat, 'kick', 0.85);
-    }
-    return;
-  }
-
-  if (styleKey === 'funk') {
-    if (fillIndex === 0) {
-      if (local % 2 === 0) {
-        pushEvent(events, step, stepsPerBeat, 'snare', 0.86);
-      } else {
-        pushEvent(events, step, stepsPerBeat, 'perc', 0.68);
-      }
-      return;
-    }
-    if (fillIndex === 1) {
-      pushEvent(events, step, stepsPerBeat, 'snare', local === 0 ? 1 : 0.58);
-      if (local === 1 || local === 3) {
-        pushEvent(events, step, stepsPerBeat, 'perc', 0.64);
-      }
-      return;
-    }
-    if (local === 0) {
-      pushEvent(events, step, stepsPerBeat, 'kick', 1);
-    }
-    pushEvent(events, step, stepsPerBeat, local < half ? 'snare' : 'tom_high', local === lastLocal ? 1 : 0.76);
-    if (local === lastLocal) {
-      pushEvent(events, step, stepsPerBeat, 'perc', 0.72);
-    }
-    return;
-  }
-
-  if (styleKey === 'reggae') {
-    if (fillIndex === 0) {
-      if (local === 1 || local === 3) {
-        pushEvent(events, step, stepsPerBeat, 'perc', 0.7);
-      }
-      return;
-    }
-    if (fillIndex === 1) {
-      if (local < lastLocal) {
-        pushEvent(events, step, stepsPerBeat, 'snare', 0.45);
-      }
-      if (local === lastLocal) {
-        pushEvent(events, step, stepsPerBeat, 'kick', 0.75);
-      }
-      return;
-    }
-    if (local === lastLocal) {
-      pushEvent(events, step, stepsPerBeat, 'kick', 1);
-      pushEvent(events, step, stepsPerBeat, 'snare', 0.95);
-    }
-    return;
-  }
-
-  if (styleKey === 'trap' || styleKey === 'hiphop') {
-    if (fillIndex === 0) {
-      if (local === 0 || local === 2) {
-        pushEvent(events, step, stepsPerBeat, 'snare', 0.88);
-      }
-      if (stepsPerBeat >= 4) {
-        pushEvent(events, step, stepsPerBeat, 'hat_closed', local % 2 === 0 ? 0.62 : 0.38);
-      }
-      return;
-    }
-    if (fillIndex === 1) {
-      pushEvent(events, step, stepsPerBeat, 'hat_closed', local % 2 === 0 ? 0.7 : 0.42);
-      if (local === 0 || local === lastLocal) {
-        pushEvent(events, step, stepsPerBeat, 'snare', 0.9);
-      }
-      return;
-    }
-    pushEvent(events, step, stepsPerBeat, 'hat_closed', local === 0 ? 0.85 : 0.48);
-    if (local === lastLocal) {
-      pushEvent(events, step, stepsPerBeat, 'kick', 1);
-      pushEvent(events, step, stepsPerBeat, 'snare', 1);
-    }
-    return;
-  }
-
-  if (styleKey === 'dnb') {
-    if (fillIndex === 0) {
-      if (local === 1) {
-        pushEvent(events, step, stepsPerBeat, 'snare', 0.85);
-      }
-      if (local === 2) {
-        pushEvent(events, step, stepsPerBeat, 'kick', 0.9);
-      }
-      return;
-    }
-    if (fillIndex === 1) {
-      pushEvent(events, step, stepsPerBeat, local % 2 === 0 ? 'snare' : 'tom_high', 0.8);
-      return;
-    }
-    const breakKeys = ['kick', 'snare', 'hat_closed', 'kick', 'snare', 'tom_low', 'snare', 'kick'];
-    const key = breakKeys[local % breakKeys.length];
-    pushEvent(events, step, stepsPerBeat, key, local === lastLocal ? 1 : 0.78);
-    return;
-  }
-
-  if (styleKey === 'house' || styleKey === 'techno') {
-    if (fillIndex === 0) {
-      if (local % 2 === 0) {
-        pushEvent(events, step, stepsPerBeat, 'clap', 0.72);
-      }
-      return;
-    }
-    if (fillIndex === 1) {
-      pushEvent(events, step, stepsPerBeat, 'hat_closed', local % 2 === 0 ? 0.68 : 0.44);
-      if (local === lastLocal) {
-        pushEvent(events, step, stepsPerBeat, 'clap', 0.88);
-      }
-      return;
-    }
-    pushEvent(events, step, stepsPerBeat, 'kick', 0.95);
-    pushEvent(events, step, stepsPerBeat, local % 2 === 0 ? 'hat_open' : 'clap', 0.75);
-    return;
-  }
-
-  if (styleKey === 'disco') {
-    if (fillIndex === 0) {
-      if (local % 2 === 0) {
-        pushEvent(events, step, stepsPerBeat, 'clap', 0.8);
-      }
-      return;
-    }
-    if (fillIndex === 1) {
-      pushEvent(events, step, stepsPerBeat, local % 2 === 0 ? 'clap' : 'hat_open', 0.78);
-      return;
-    }
-    pushEvent(events, step, stepsPerBeat, 'kick', 1);
-    pushEvent(events, step, stepsPerBeat, local % 2 === 0 ? 'clap' : 'hat_open', local === lastLocal ? 0.95 : 0.7);
-    return;
-  }
-
-  if (styleKey === 'psychedelic') {
-    if (fillIndex === 0) {
-      if (local === 0 || local === lastLocal) {
-        pushEvent(events, step, stepsPerBeat, 'tom_low', 0.65);
-      }
-      return;
-    }
-    if (fillIndex === 1) {
-      pushEvent(events, step, stepsPerBeat, local < half ? 'tom_low' : 'tom_high', 0.58 + local * 0.08);
-      pushEvent(events, step, stepsPerBeat, 'hat_open', 0.35);
-      return;
-    }
-    pushEvent(events, step, stepsPerBeat, 'tom_high', 0.72);
-    pushEvent(events, step, stepsPerBeat, 'hat_open', 0.62);
-    if (local === lastLocal) {
-      pushEvent(events, step, stepsPerBeat, 'kick', 0.68);
-    }
-    return;
-  }
-
-  if (styleKey === 'rock') {
-    if (fillIndex === 0) {
-      if (local % 2 === 0) {
-        pushEvent(events, step, stepsPerBeat, local < half ? 'tom_high' : 'tom_low', 0.9);
-      }
-      return;
-    }
-    if (fillIndex === 1) {
-      pushEvent(events, step, stepsPerBeat, local % 2 === 0 ? 'snare' : 'tom_high', 0.84);
-      return;
-    }
-    pushEvent(events, step, stepsPerBeat, local < half ? 'tom_high' : 'tom_low', 0.92);
-    if (local === lastLocal) {
-      pushEvent(events, step, stepsPerBeat, 'kick', 1);
-      pushEvent(events, step, stepsPerBeat, 'hat_open', 0.88);
-      pushEvent(events, step, stepsPerBeat, 'snare', 1);
-    } else if (local === 0 && fillSteps > stepsPerBeat) {
-      pushEvent(events, step, stepsPerBeat, 'snare', 0.7);
-    }
-    return;
-  }
-
-  // Default rock-like fills for remaining styles (e.g. psychedelic already handled — rock default)
-  if (fillIndex === 0 && local % 2 === 0) {
-    pushEvent(events, step, stepsPerBeat, local < half ? 'tom_high' : 'tom_low', 0.9);
-  } else if (fillIndex === 1) {
-    pushEvent(events, step, stepsPerBeat, local % 2 === 0 ? 'snare' : 'tom_high', 0.82);
-  } else {
-    pushEvent(events, step, stepsPerBeat, local < half ? 'tom_high' : 'tom_low', 1);
-    if (local === lastLocal) {
-      pushEvent(events, step, stepsPerBeat, 'clap', 0.85);
-    }
-  }
-}
-
 export function buildDrumPattern(styleKey: string, variant: number, beatsPerBar: number,
-  beatUnit: number, fillIndex: number = -1, customRows?: string[]): SequencerPattern {
-  const stepsPerBeat = stepsPerBeatForUnit(beatUnit);
-  const stepCount = beatsPerBar * stepsPerBeat;
+  beatUnit: number, fillIndex: number = -1, customRows?: string[], customEvents?: SequencerEvent[]): SequencerPattern {
+  const barTicks = beatsPerBar * DEFAULT_TICKS_PER_BEAT;
+  const hasCustomEvents = customEvents !== undefined;
   const hasCustomRows = customRows !== undefined && customRows.length > 0;
-  const events: SequencerEvent[] = hasCustomRows ?
-    customPattern(customRows, beatsPerBar, beatUnit).events.slice() : [];
-  if (!hasCustomRows) {
-    for (let step = 0; step < stepCount; step++) {
-      const beat = Math.floor(step / stepsPerBeat);
-      const sub = step % stepsPerBeat;
-      if (shouldKick(styleKey, beat, sub, variant)) {
-        pushEvent(events, step, stepsPerBeat, 'kick', kickVelocity(styleKey, beat, sub, variant));
-      }
-      if (shouldSnare(styleKey, beat, sub, variant)) {
-        pushEvent(events, step, stepsPerBeat, styleKey === 'disco' ? 'clap' : 'snare', 0.96);
-      }
-      if (shouldGhostSnare(styleKey, beat, sub, variant, stepsPerBeat)) {
-        pushEvent(events, step, stepsPerBeat, 'snare', styleKey === 'jazz' ? 0.32 : 0.4);
-      }
-      if (shouldHat(styleKey, beat, sub, variant, stepsPerBeat)) {
-        const open = shouldOpenHat(styleKey, beat, sub, variant, stepsPerBeat);
-        pushEvent(events, step, stepsPerBeat, open ? 'hat_open' : 'hat_closed',
-          hatVelocity(styleKey, beat, sub, variant, open));
-      }
-      if (shouldStylePerc(styleKey, beat, sub, variant, stepsPerBeat)) {
-        pushEvent(events, step, stepsPerBeat, 'perc', styleKey === 'latin' ? 0.72 : 0.62);
-      }
-    }
-  }
+  const events: SequencerEvent[] = hasCustomEvents ? copyDrumEvents(customEvents, barTicks) :
+    (hasCustomRows ? customPattern(customRows, beatsPerBar, beatUnit).events.slice() :
+      (styleKey === 'jazz' ? buildJazzPattern(variant, beatsPerBar, beatUnit) :
+        buildStyleDrumPattern(styleKey, variant, beatsPerBar, beatUnit)));
 
   if (fillIndex >= 0) {
-    const fillBeats = fillWindowBeats(styleKey, fillIndex);
-    const fillStart = Math.max(0, stepCount - fillBeats * stepsPerBeat);
-    const fillTickStart = fillStart * DEFAULT_TICKS_PER_BEAT / stepsPerBeat;
+    const fillBeats = styleKey === 'jazz' ? jazzFillWindowBeats(fillIndex) :
+      styleFillWindowBeats(styleKey, fillIndex);
+    const fillTickStart = Math.max(0, beatsPerBar - fillBeats) * DEFAULT_TICKS_PER_BEAT;
     for (let i = events.length - 1; i >= 0; i--) {
       if (events[i].tick >= fillTickStart) {
         events.splice(i, 1);
       }
     }
-    const fillSteps = stepCount - fillStart;
-    for (let step = fillStart; step < stepCount; step++) {
-      pushStyleFill(events, styleKey, fillIndex, step, step - fillStart, stepsPerBeat, fillSteps);
+    const fill = styleKey === 'jazz' ? buildJazzFill(fillIndex, beatsPerBar, beatUnit) :
+      buildStyleDrumFill(styleKey, fillIndex, beatsPerBar, beatUnit);
+    for (let i = 0; i < fill.length; i++) {
+      events.push(fill[i]);
     }
   }
-  events.sort((a: SequencerEvent, b: SequencerEvent) => a.tick - b.tick);
+  if (!hasCustomEvents) {
+    events.sort((a: SequencerEvent, b: SequencerEvent) => a.tick - b.tick);
+  }
   return new SequencerPattern(DEFAULT_TICKS_PER_BEAT, beatsPerBar, events);
+}
+
+/** Resolve a full audible bar without converting its events through the editor's visible grid. */
+export function buildSectionPattern(program: DrumProgram, section: DrumSection,
+  withFill: boolean): SequencerPattern {
+  if (withFill && section.customFill !== undefined) {
+    const fill = cloneDrumCustomPattern(section.customFill);
+    if (fill !== undefined) {
+      return new SequencerPattern(DEFAULT_TICKS_PER_BEAT, program.beatsPerBar,
+        copyDrumEvents(fill.events, program.beatsPerBar * DEFAULT_TICKS_PER_BEAT));
+    }
+  }
+  if (withFill && section.customFillRows !== undefined && section.customFillRows.length > 0) {
+    return customPattern(section.customFillRows, program.beatsPerBar, program.beatUnit);
+  }
+  const main = cloneDrumCustomPattern(section.customPattern);
+  return buildDrumPattern(program.styleKey, section.patternIndex, program.beatsPerBar,
+    program.beatUnit, withFill ? section.fillIndex : -1, section.customRows,
+    main === undefined ? undefined : main.events);
 }
 
 export function buildProgramSequence(program: DrumProgram): SequencerPattern[] {
@@ -713,12 +331,7 @@ export function buildProgramSequence(program: DrumProgram): SequencerPattern[] {
     const section = program.sections[sectionIndex];
     for (let repeat = 0; repeat < section.repeats; repeat++) {
       const useFill = section.fillEvery > 0 && (repeat + 1) % section.fillEvery === 0;
-      if (useFill && section.customFillRows !== undefined && section.customFillRows.length > 0) {
-        sequence.push(customPattern(section.customFillRows, program.beatsPerBar, program.beatUnit));
-      } else {
-        sequence.push(buildDrumPattern(program.styleKey, section.patternIndex, program.beatsPerBar,
-          program.beatUnit, useFill ? section.fillIndex : -1, section.customRows));
-      }
+      sequence.push(buildSectionPattern(program, section, useFill));
     }
   }
   if (sequence.length === 0) {

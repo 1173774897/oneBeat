@@ -17,7 +17,8 @@ export class DrumSampleBank {
     const bank: Map<string, ArrayBuffer> = new Map();
     const manager = DrumSampleBank.manager;
     if (manager === undefined) {
-      return bank;
+      // An empty kit would route every drum event through the generic click fallback.
+      throw new Error('鼓机音色资源尚未初始化，请重试');
     }
     for (let i = 0; i < DRUM_TRACKS.length; i++) {
       const sampleKey = DRUM_TRACKS[i].key;

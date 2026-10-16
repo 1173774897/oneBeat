@@ -1,5 +1,6 @@
 import { common } from '@kit.AbilityKit';
 import { router, promptAction } from '@kit.ArkUI';
+import { navigateToHome } from '../app/HomeNavigation';
 import { ComicCharacter, PAPER, INK, CORAL, LILAC, TEAL, CARD_SHADOW, CONTROL_SHADOW, INK_SHADOW_RADIUS } from '../components/ComicKit';
 import { isTeamWifiActive, openWirelessSettings } from '../network/join/TeamNetworkPermissions';
 
@@ -29,6 +30,11 @@ struct TeamPage {
   aboutToAppear(): void {
     const savedName = (AppStorage.get<string>(PLAYER_DISPLAY_NAME_KEY) ?? '').trim();
     this.displayName = savedName === 'Player' || savedName === 'Member' || savedName === '我' ? '' : savedName;
+  }
+
+  onBackPress(): boolean {
+    void navigateToHome();
+    return true;
   }
 
   private randomNicknameValue(): string {
@@ -127,7 +133,7 @@ struct TeamPage {
           Text('‹')
             .fontSize(32)
             .width(32)
-            .onClick(() => router.back())
+            .onClick(() => { void navigateToHome(); })
           Column({ space: 0 }) {
             Text('多人练习')
               .fontSize(32)

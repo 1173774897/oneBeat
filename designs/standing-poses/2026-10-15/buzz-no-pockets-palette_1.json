@@ -1,0 +1,29 @@
+{
+  "date": "2026-10-15",
+  "id": "buzz/palette_1",
+  "tool": "built-in image_gen",
+  "transparent_background": true,
+  "edit_target": "entry/src/main/resources/rawfile/stand/buzz/palette_1/frame_01.png",
+  "style_reference": "entry/src/main/resources/rawfile/walk/buzz/palette_1/frame_01.png",
+  "generated": "/Users/lizhe/.codex/generated_images/01a13f58-8ac6-7fd2-9020-af16d94b2e29/exec-e8021e56-eb06-43ee-8d9e-dae1a247527a.png",
+  "saved": "entry/src/main/resources/rawfile/stand/buzz/palette_1/frame_01.png",
+  "prompt": "Use case: precise-object-edit.\nAsset type: oneBeat Buzz palette_1 transparent idle standing sprite.\nInput image 1 is the EDIT TARGET: the existing standing sprite (charcoal shirt, gray trousers, one hand in pocket). Image 2 is STYLE/IDENTITY reference: original walk frame_01 for that exact palette.\nPrimary edit: Regenerate this same relaxed standing pose with BOTH HANDS OUTSIDE THE POCKETS AND CLEARLY VISIBLE. The near arm hangs naturally down next to the thigh, elbow soft, wrist loose and fingers naturally relaxed. The far arm also hangs outside the trousers, its hand visible beside the far thigh. No tucked thumbs, hands on pocket opening, hand hidden behind body, folded arms, or hands in pockets. Hands must be obviously free and outside clothing. Maintain the casual soft knees, asymmetric weight and slight slouch, never stiff at attention.\nPreserve everything else from image 1: exact buzz-cut head and face with half-lidded eyes, rightward profile, warm tan skin, loose charcoal black shirt, gray drawstring joggers, black-and-cream sneakers, all original ink hatching marks, stippled hair texture, handmade contour thickness, shadow blocks, clothing folds and muted palette. Follow image 2 only to retain exact original ink and hatching style. Do not change body proportions or make the figure taller/narrower.\nComposition invariants: one complete character in the SAME square canvas, same overall scale, position, transparent padding, face/head location, foot locations and foot baseline as edit target image 1. Both feet planted; do not crop anything. Keep subtle black contact shadows under feet. Genuine transparent RGBA background. No scenery, props, text, watermark, border or checkerboard.",
+  "inspection": "Both hands visibly outside pockets and hanging naturally; relaxed standing retained; generated PNG copied without image postprocessing.",
+  "saved_inspection": {
+    "size": [
+      1254,
+      1254
+    ],
+    "mode": "RGBA",
+    "alpha_extrema": [
+      0,
+      255
+    ],
+    "alpha32_bbox": [
+      426,
+      64,
+      974,
+      1232
+    ]
+  }
+}

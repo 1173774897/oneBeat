@@ -1,12 +1,20 @@
 #!/usr/bin/env python3
 """Generate the original OneBeat drum one-shot library using deterministic DSP."""
 
+import argparse
 import json
 import math
 import random
 import struct
 import wave
 from pathlib import Path
+
+from drum_clap import render_clap
+from drum_percussion import render_percussion
+from drum_kick import render_kick
+from drum_ride import render_ride
+from drum_shaker import render_shaker
+from drum_tom import render_tom
 
 SAMPLE_RATE = 44100
 STYLES = [
@@ -23,7 +31,9 @@ STYLES = [
     ("latin", 1.42, 0.66, 0.90),
     ("reggae", 0.88, 0.90, 0.78),
 ]
-SAMPLE_NAMES = ["kick", "snare", "hat_closed", "hat_open", "clap", "tom_low", "tom_high", "perc"]
+# Keep the first eight indices stable: their per-style random seeds are part
+# of the existing asset library. Display order is owned by DRUM_TRACKS.
+SAMPLE_NAMES = ["kick", "snare", "hat_closed", "hat_open", "clap", "tom_low", "tom_high", "perc", "ride", "shaker"]
 
 
 def envelope(t: float, decay: float, attack: float = 0.001) -> float:
@@ -39,11 +49,27 @@ def render(style_index: int, name: str, pitch: float, tail: float, drive: float)
     durations = {
         "kick": 0.52, "snare": 0.34, "hat_closed": 0.10, "hat_open": 0.52,
         "clap": 0.30, "tom_low": 0.48, "tom_high": 0.36, "perc": 0.30,
+        "ride": 1.40, "shaker": 0.22,
     }
-    count = int(SAMPLE_RATE * durations[name] * tail)
+    duration_scale = tail ** 0.35 if name in ("ride", "shaker") else tail
+    count = int(SAMPLE_RATE * durations[name] * duration_scale)
+    # These acoustic models already shape their transients. The legacy drive
+    # would flatten the contact and make them sound like electronic noise again.
+    if name == "clap":
+        return finish(render_clap(rng, count, SAMPLE_RATE, pitch, tail, drive))
+    if name == "perc":
+        return finish(render_percussion(rng, count, SAMPLE_RATE, style_index, pitch, tail, drive))
+    if name == "kick":
+        return finish(render_kick(rng, count, SAMPLE_RATE, pitch, tail, drive))
+    if name == "ride":
+        return finish(render_ride(rng, count, SAMPLE_RATE, pitch, tail, drive))
+    if name == "shaker":
+        return finish(render_shaker(rng, count, SAMPLE_RATE, pitch, tail, drive))
+    if name in ("tom_low", "tom_high"):
+        return finish(render_tom(rng, count, SAMPLE_RATE, pitch, tail, drive, high=name == "tom_high"))
+
     out: list[float] = []
     previous_noise = 0.0
-    phase = 0.0
     for i in range(count):
         t = i / SAMPLE_RATE
         noise = rng.uniform(-1.0, 1.0)
@@ -51,13 +77,7 @@ def render(style_index: int, name: str, pitch: float, tail: float, drive: float)
         previous_noise = noise
         value = 0.0
 
-        if name == "kick":
-            freq = (150.0 * pitch) * math.exp(-t * 25.0) + 42.0 * pitch
-            phase += 2.0 * math.pi * freq / SAMPLE_RATE
-            body = math.sin(phase) * envelope(t, 0.16 * tail, 0.0005)
-            click = high_noise * math.exp(-t * 150.0) * 0.22
-            value = body * 1.15 + click
-        elif name == "snare":
+        if name == "snare":
             body = math.sin(2.0 * math.pi * 185.0 * pitch * t) * envelope(t, 0.10 * tail)
             wire = high_noise * envelope(t, 0.14 * tail, 0.0003)
             value = body * 0.38 + wire * 0.82
@@ -65,31 +85,12 @@ def render(style_index: int, name: str, pitch: float, tail: float, drive: float)
             decay = (0.025 if name == "hat_closed" else 0.22) * tail
             metallic = sum(math.sin(2.0 * math.pi * f * pitch * t) for f in (4100, 5630, 7310, 9180)) / 4.0
             value = (high_noise * 0.72 + metallic * 0.38) * envelope(t, decay, 0.00015)
-        elif name == "clap":
-            burst = 0.0
-            for offset in (0.0, 0.018, 0.037):
-                dt = t - offset
-                if dt >= 0:
-                    burst += math.exp(-dt * 85.0)
-            value = high_noise * min(1.0, burst) * math.exp(-t * 5.5 / tail)
-        elif name in ("tom_low", "tom_high"):
-            base = (108.0 if name == "tom_low" else 176.0) * pitch
-            freq = base * (1.0 + 0.55 * math.exp(-t * 20.0))
-            phase += 2.0 * math.pi * freq / SAMPLE_RATE
-            value = math.sin(phase) * envelope(t, (0.22 if name == "tom_low" else 0.15) * tail)
-            value += math.sin(phase * 1.98) * envelope(t, 0.08 * tail) * 0.18
-        else:
-            if style_index in (6, 8, 9):
-                freqs = (720.0, 1130.0, 1670.0)
-                metallic = sum(math.sin(2.0 * math.pi * f * pitch * t) for f in freqs) / len(freqs)
-                value = metallic * envelope(t, 0.11 * tail)
-            else:
-                block = math.sin(2.0 * math.pi * 860.0 * pitch * t)
-                block += 0.55 * math.sin(2.0 * math.pi * 1290.0 * pitch * t)
-                value = block * envelope(t, 0.055 * tail)
-
         out.append(saturate(value, drive))
 
+    return finish(out)
+
+
+def finish(out: list[float]) -> list[float]:
     fade = min(128, len(out))
     for i in range(fade):
         out[-1 - i] *= i / fade
@@ -101,6 +102,8 @@ def render(style_index: int, name: str, pitch: float, tail: float, drive: float)
 def write_wav(path: Path, samples: list[float]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     pcm = b"".join(struct.pack("<h", int(sample * 32767.0)) for sample in samples)
+    # DrumSampleBank reads PCM after a fixed 44-byte header. Keep this simple
+    # mono/LE16 WAV layout; metadata chunks would be interpreted as audio.
     with wave.open(str(path), "wb") as handle:
         handle.setnchannels(1)
         handle.setsampwidth(2)
@@ -109,8 +112,20 @@ def write_wav(path: Path, samples: list[float]) -> None:
 
 
 def main() -> None:
-    output = Path(__file__).resolve().parent / "generated-drums"
-    manifest = {"generator": "OneBeat deterministic DSP v1", "license": "Original project asset", "styles": {}}
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--output", type=Path, default=Path(__file__).resolve().parent / "generated-drums")
+    output = parser.parse_args().output
+    manifest = {
+        "generator": "OneBeat deterministic DSP v4",
+        "license": "Original project asset",
+        "models": {
+            "kick": "acoustic bass drum v3", "ride": "struck ride cymbal v3",
+            "shaker": "granular shaker v3", "clap": "single-person palm contact v2",
+            "perc": "skin-and-wood hand drum v2", "tom_low": "acoustic floor tom v4",
+            "tom_high": "acoustic rack tom v4", "other": "original DSP v1",
+        },
+        "styles": {},
+    }
     for index, (style, pitch, tail, drive) in enumerate(STYLES):
         manifest["styles"][style] = []
         for sample_name in SAMPLE_NAMES:

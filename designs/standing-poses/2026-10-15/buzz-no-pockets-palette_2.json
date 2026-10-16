@@ -1,0 +1,58 @@
+{
+  "date": "2026-10-15",
+  "id": "buzz/palette_2",
+  "tool": "built-in image_gen",
+  "primary": "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/stand/buzz/palette_2/frame_01.png",
+  "style_reference": "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/walk/buzz/palette_2/frame_01.png",
+  "generated": "/Users/lizhe/.codex/generated_images/01a13f5b-686d-7cd0-9568-ce26e4255c64/exec-99543871-f829-4c11-b4a0-442755892ac7.png",
+  "saved": "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/stand/buzz/palette_2/frame_01.png",
+  "transparent_background": true,
+  "prompt": "Use case: identity-preserve. Asset type: transparent 2D hand-ink game character idle sprite. Image 1 is the primary existing standing image to edit. Image 2 is ONLY the original character's ink, hatching, shadow and palette reference; do not use its walking pose. Make one narrow pose correction to Image 1: remove the hand from the trouser pocket. BOTH hands must now be completely visible OUTSIDE all pockets, hanging naturally beside the thighs, soft slightly bent elbows, slack wrists and relaxed loose fingers. Both thumbs must also be visibly outside pockets. Neither hand may be in a pocket, hidden behind the back, crossed, or clutching clothing. Keep the current asymmetrically weighted, informal, calm standing stance with both feet settled on the ground and relaxed knees; no stiff military pose. Preserve the exact buzz-cut character, pink skin, purple t-shirt, cyan drawstring joggers, orange cream sneakers, half-lidded facial expression, right-facing view, proportions, clothing details, original ink line weight, all scratchy hatching and shadow treatment. Preserve Image 1 square 1254 by 1254 framing, head-top, overall body height, foot baseline and transparent padding as closely as possible. Do not crop, zoom, recenter, recolor, restyle or introduce props. Actual alpha transparency, no opaque background and no checkerboard image. One full character only.",
+  "inspection": "Accepted: both hands clearly visible outside pockets, relaxed elbows/fingers; original asymmetric standing, face, palette, ink and hatching preserved. No raster post-processing.",
+  "primary_inspection": {
+    "size": [
+      1254,
+      1254
+    ],
+    "mode": "RGBA",
+    "alpha_extrema": [
+      0,
+      255
+    ],
+    "alpha_gt128_bbox": [
+      441,
+      54,
+      966,
+      1216
+    ],
+    "normalized_bbox": [
+      0.3517,
+      0.0431,
+      0.7703,
+      0.9697
+    ]
+  },
+  "generated_inspection": {
+    "size": [
+      1254,
+      1254
+    ],
+    "mode": "RGBA",
+    "alpha_extrema": [
+      0,
+      255
+    ],
+    "alpha_gt128_bbox": [
+      441,
+      54,
+      957,
+      1216
+    ],
+    "normalized_bbox": [
+      0.3517,
+      0.0431,
+      0.7632,
+      0.9697
+    ]
+  }
+}

@@ -22,7 +22,14 @@ import {
   ownedSceneKeys,
   storeItemAccessReason
 } from '../store/EntitlementStore';
-import { queryStoreProductPrices, StoreProductPrice } from '../store/IapCatalogService';
+import {
+  emptyStoreProductPriceQueryResult,
+  formatStoreIapError,
+  queryStoreProductPrices,
+  storePriceUnavailableMessage,
+  StoreProductPrice,
+  StoreProductPriceQueryResult
+} from '../store/IapCatalogService';
 import {
   clearStoreSession,
   currentStoreSessionToken,
@@ -151,6 +158,10 @@ struct StorePage {
   aboutToAppear(): void {
     initializeEntitlementCache();
     this.loadPurchases();
+  }
+
+  onPageShow(): void {
+    // Runs on first open and when returning from system Settings after Huawei ID sign-in.
     void this.refreshStoreData();
   }
 
@@ -188,9 +199,16 @@ struct StorePage {
   }
 
   private async refreshStoreData(): Promise<void> {
-    const priceTask: Promise<StoreProductPrice[]> = isStoreApiConfigured() ?
-      queryStoreProductPrices(this.hostContext()).catch((_e: Object) => [] as StoreProductPrice[]) :
-      Promise.resolve([] as StoreProductPrice[]);
+    const priceTask: Promise<StoreProductPriceQueryResult> = isStoreApiConfigured() ?
+      queryStoreProductPrices(this.hostContext()).catch((err: Object) => {
+        console.error(`[StoreIap] StorePage price task rejected: ${formatStoreIapError(err)}`);
+        return emptyStoreProductPriceQueryResult('unknown');
+      }) :
+      Promise.resolve(emptyStoreProductPriceQueryResult('none'));
+
+    if (!isStoreApiConfigured()) {
+      console.info('[StoreIap] StorePage skipped IAP query: store API base URL not configured');
+    }
 
     if (!isStoreApiConfigured()) {
       this.serviceStatus = '开发配置：请填写测试与生产 API 地址';
@@ -225,15 +243,21 @@ struct StorePage {
     }
 
     try {
-      const prices = await priceTask;
-      this.productPrices = prices;
+      const priceResult = await priceTask;
+      this.productPrices = priceResult.prices;
       this.productPriceEpoch++;
-      if (prices.length === 0 && this.serviceStatus.length === 0 && isStoreApiConfigured()) {
-        this.serviceStatus = '商品价格暂时不可用，请稍后重试';
+      if (priceResult.prices.length === 0 && this.serviceStatus.length === 0 && isStoreApiConfigured()) {
+        if (priceResult.unavailableReason !== 'none') {
+          this.serviceStatus = storePriceUnavailableMessage(priceResult.unavailableReason);
+          console.warn(`[StoreIap] StorePage empty-price banner reason=${priceResult.unavailableReason}`);
+        }
+      } else if (priceResult.prices.length > 0) {
+        console.info(`[StoreIap] StorePage loaded ${priceResult.prices.length} product price(s)`);
       }
-    } catch (_e) {
+    } catch (err) {
+      console.error(`[StoreIap] StorePage price apply failed: ${formatStoreIapError(err)}`);
       if (this.serviceStatus.length === 0) {
-        this.serviceStatus = '商品价格暂时不可用，请稍后重试';
+        this.serviceStatus = storePriceUnavailableMessage('unknown');
       }
     }
   }
@@ -997,15 +1021,17 @@ struct StorePage {
   @Builder
   private sunsetPreview() {
     Stack() {
-      Image($rawfile('background/sunset_sky.png')).width('100%').height('100%').objectFit(ImageFit.Cover)
-      Image($rawfile('background/sunset_sun.png')).width(90).height(90).objectFit(ImageFit.Contain)
+      Image($rawfile('scenes/sunset/sunset_sky.png')).width('100%').height('100%').objectFit(ImageFit.Cover)
+      Image($rawfile('scenes/sunset/sunset_sun.png')).width(90).height(90).objectFit(ImageFit.Contain)
         .position({ x: '64%', y: 4 })
-      Image($rawfile('background/sunset_clouds.png')).width('150%').height(92).objectFit(ImageFit.Fill)
+      Image($rawfile('scenes/sunset/sunset_clouds.png')).width('150%').height(92).objectFit(ImageFit.Fill)
         .position({ x: -30, y: 5 })
-      Image($rawfile('background/ocean.png')).width('100%').height(72).objectFit(ImageFit.Fill)
+      Image($rawfile('scenes/sunset/sunset_ocean.png')).width('100%').height(72).objectFit(ImageFit.Fill)
         .position({ x: 0, y: 72 })
-      Image($rawfile('background/midground_dirt.png')).width('100%').height(62).objectFit(ImageFit.Fill)
-        .position({ x: 0, y: 116 })
+      Image($rawfile('scenes/sunset/sunset_midground_dirt.png')).width('100%').height(62).objectFit(ImageFit.Fill)
+        .position({ x: 0, y: 86 })
+      Image($rawfile('scenes/sunset/sunset_road.png')).width('125%').height(72).objectFit(ImageFit.Fill)
+        .position({ x: -20, y: 116 })
       Text('夕阳海边').fontSize(22).fontWeight(900).fontStyle(FontStyle.Italic)
         .fontColor(PAPER).textShadow({ radius: 0, offsetX: 2, offsetY: 2, color: INK })
         .position({ x: 14, y: 116 })
@@ -1018,10 +1044,12 @@ struct StorePage {
       Image($rawfile('scenes/neon/neon_sky.png')).width('100%').height('100%').objectFit(ImageFit.Cover)
       Image($rawfile('scenes/neon/neon_far_skyline.png')).width('115%').height(104).objectFit(ImageFit.Fill)
         .position({ x: -12, y: 20 })
-      Image($rawfile('scenes/neon/neon_street_blocks.png')).width('130%').height(112).objectFit(ImageFit.Fill)
-        .position({ x: -36, y: 36 })
+      Image($rawfile('scenes/neon/neon_street_blocks.png')).width('92%').height(112).objectFit(ImageFit.Fill)
+        .position({ x: 0, y: 36 })
       Image($rawfile('scenes/neon/neon_road.png')).width('125%').height(72).objectFit(ImageFit.Fill)
         .position({ x: -20, y: 106 })
+      Image($rawfile('scenes/neon/neon_front_occluders3.png')).width('48%').height(178).objectFit(ImageFit.Fill)
+        .position({ x: 208, y: 0 })
       Text('霓虹街口').fontSize(22).fontWeight(900).fontStyle(FontStyle.Italic)
         .fontColor(PAPER).textShadow({ radius: 0, offsetX: 2, offsetY: 2, color: INK })
         .position({ x: 14, y: 116 })

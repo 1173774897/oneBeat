@@ -1,0 +1,757 @@
+{
+  "scope": "Static source call sites, not unique messages or observed user occurrences. Registered route does not prove UI reachability. Custom overlays and inline copy audited separately.",
+  "registered_pages": [
+    "pages/AudioCalibrationPage",
+    "pages/DrumMachinePage",
+    "pages/Index",
+    "pages/LeaderLobbyPage",
+    "pages/MainPage",
+    "pages/MemberJoinPage",
+    "pages/PrivacyPage",
+    "pages/StorePage",
+    "pages/TeamPage",
+    "pages/TimeCardCalibrationPage"
+  ],
+  "counts": {
+    "showToast": 81,
+    "showDialog": 1
+  },
+  "sites": [
+    {
+      "kind": "showToast",
+      "file": "entry/src/main/ets/app/AppSession.ets",
+      "line": 133,
+      "registered_page": null,
+      "call": "promptAction.showToast({ message: err.message })",
+      "audit_id": "T001",
+      "recommendation": "保留真实路由恢复失败；用户文案映射，单次展示"
+    },
+    {
+      "kind": "showToast",
+      "file": "entry/src/main/ets/app/AppSession.ets",
+      "line": 364,
+      "registered_page": null,
+      "call": "promptAction.showToast({\n      message: reason === 'leader_exit' ? '队长已退出，队伍已解散' :\n        '与队长的连接已断开，已退出队伍'\n    })",
+      "audit_id": "T002",
+      "recommendation": "保留一次断线／队伍解散原因"
+    },
+    {
+      "kind": "showToast",
+      "file": "entry/src/main/ets/components/EditableBpm.ets",
+      "line": 36,
+      "registered_page": null,
+      "call": "promptAction.showToast({ message: `请输入 ${BPM_MIN}–${BPM_MAX} 之间的 BPM` })",
+      "audit_id": "T003",
+      "recommendation": "保留校验，改为输入框附近反馈"
+    },
+    {
+      "kind": "showToast",
+      "file": "entry/src/main/ets/pages/AudioCalibrationPage.ets",
+      "line": 157,
+      "registered_page": true,
+      "call": "promptAction.showToast({ message: '当前没有检测到蓝牙耳机输出，请返回大厅重新确认' })",
+      "audit_id": "T004",
+      "recommendation": "非主流程：旧／未注册校准页。保留必要故障语义，优先不在本轮产品流程中复制；21处不计日常打扰"
+    },
+    {
+      "kind": "showToast",
+      "file": "entry/src/main/ets/pages/AudioCalibrationPage.ets",
+      "line": 162,
+      "registered_page": true,
+      "call": "promptAction.showToast({ message: '当前没有可用会话，请从队伍大厅进入' })",
+      "audit_id": "T005",
+      "recommendation": "非主流程：旧／未注册校准页。保留必要故障语义，优先不在本轮产品流程中复制；21处不计日常打扰"
+    },
+    {
+      "kind": "showToast",
+      "file": "entry/src/main/ets/pages/AudioCalibrationPage.ets",
+      "line": 353,
+      "registered_page": true,
+      "call": "promptAction.showToast({ message: '蓝牙耳机已断开，本次结果没有保存' })",
+      "audit_id": "T006",
+      "recommendation": "非主流程：旧／未注册校准页。保留必要故障语义，优先不在本轮产品流程中复制；21处不计日常打扰"
+    },
+    {
+      "kind": "showToast",
+      "file": "entry/src/main/ets/pages/AudioCalibrationPage.ets",
+      "line": 363,
+      "registered_page": true,
+      "call": "promptAction.showToast({\n        message: `已保存 ${this.resultMs} ms，请保持耳机连接；蓝牙重连后推荐重测`\n      })",
+      "audit_id": "T007",
+      "recommendation": "非主流程：旧／未注册校准页。保留必要故障语义，优先不在本轮产品流程中复制；21处不计日常打扰"
+    },
+    {
+      "kind": "showToast",
+      "file": "entry/src/main/ets/pages/AudioCalibrationPage.ets",
+      "line": 368,
+      "registered_page": true,
+      "call": "promptAction.showToast({ message: `保存失败：${(err as Error).message}` })",
+      "audit_id": "T008",
+      "recommendation": "非主流程：旧／未注册校准页。保留必要故障语义，优先不在本轮产品流程中复制；21处不计日常打扰"
+    },
+    {
+      "kind": "showToast",
+      "file": "entry/src/main/ets/pages/AudioCalibrationPage.ets",
+      "line": 375,
+      "registered_page": true,
+      "call": "promptAction.showToast({ message: '当前没有检测到蓝牙耳机输出' })",
+      "audit_id": "T009",
+      "recommendation": "非主流程：旧／未注册校准页。保留必要故障语义，优先不在本轮产品流程中复制；21处不计日常打扰"
+    },
+    {
+      "kind": "showToast",
+      "file": "entry/src/main/ets/pages/AudioCalibrationPage.ets",
+      "line": 414,
+      "registered_page": true,
+      "call": "promptAction.showToast({ message: `试听启动失败：${(err as Error).message}` })",
+      "audit_id": "T010",
+      "recommendation": "非主流程：旧／未注册校准页。保留必要故障语义，优先不在本轮产品流程中复制；21处不计日常打扰"
+    },
+    {
+      "kind": "showToast",
+      "file": "entry/src/main/ets/pages/DrumMachinePage.ets",
+      "line": 144,
+      "registered_page": true,
+      "call": "promptAction.showToast({ message: 'PRO 定制鼓机包含在畅游月卡中' })",
+      "audit_id": "T011",
+      "recommendation": "保留权益守卫兜底，入口先体现锁定状态"
+    },
+    {
+      "kind": "showToast",
+      "file": "entry/src/main/ets/pages/DrumMachinePage.ets",
+      "line": 221,
+      "registered_page": true,
+      "call": "promptAction.showToast({ message: '请填写节奏名称' })",
+      "audit_id": "T012",
+      "recommendation": "改为名称字段错误"
+    },
+    {
+      "kind": "showToast",
+      "file": "entry/src/main/ets/pages/DrumMachinePage.ets",
+      "line": 256,
+      "registered_page": true,
+      "call": "promptAction.showToast({ message: replaced ? '已更新我的节奏' : '已保存到我的节奏' })",
+      "audit_id": "T013",
+      "recommendation": "保存结果择一轻反馈，避免列表与Toast叠加"
+    },
+    {
+      "kind": "showToast",
+      "file": "entry/src/main/ets/pages/DrumMachinePage.ets",
+      "line": 273,
+      "registered_page": true,
+      "call": "promptAction.showToast({ message: '已删除这个节奏' })",
+      "audit_id": "T014",
+      "recommendation": "删除重复成功Toast，列表变化已可见"
+    },
+    {
+      "kind": "showToast",
+      "file": "entry/src/main/ets/pages/DrumMachinePage.ets",
+      "line": 290,
+      "registered_page": true,
+      "call": "promptAction.showToast({ message: `已载入 ${saved.name}` })",
+      "audit_id": "T015",
+      "recommendation": "删除重复成功Toast，编排已直接切换"
+    },
+    {
+      "kind": "showToast",
+      "file": "entry/src/main/ets/pages/DrumMachinePage.ets",
+      "line": 624,
+      "registered_page": true,
+      "call": "promptAction.showToast({ message: '最多编排 8 个段落' })",
+      "audit_id": "T016",
+      "recommendation": "用新增按钮禁用与局部上限状态表达"
+    },
+    {
+      "kind": "showToast",
+      "file": "entry/src/main/ets/pages/DrumMachinePage.ets",
+      "line": 641,
+      "registered_page": true,
+      "call": "promptAction.showToast({ message: '至少保留一个段落' })",
+      "audit_id": "T017",
+      "recommendation": "只剩一段时禁用删除，避免反复Toast"
+    },
+    {
+      "kind": "showToast",
+      "file": "entry/src/main/ets/pages/DrumMachinePage.ets",
+      "line": 1065,
+      "registered_page": true,
+      "call": "promptAction.showToast({ message: '试听启动失败' })",
+      "audit_id": "T018",
+      "recommendation": "保留试听失败，统一短文案"
+    },
+    {
+      "kind": "showToast",
+      "file": "entry/src/main/ets/pages/DrumMachinePage.ets",
+      "line": 1137,
+      "registered_page": true,
+      "call": "promptAction.showToast({ message: this.editorMode === 0 ? '节奏型已编辑' : '加花已编辑' })",
+      "audit_id": "T019",
+      "recommendation": "删除重复成功Toast，已编辑标签已反馈"
+    },
+    {
+      "kind": "showToast",
+      "file": "entry/src/main/ets/pages/DrumMachinePage.ets",
+      "line": 1297,
+      "registered_page": true,
+      "call": "promptAction.showToast({ message: '试听更新失败，继续播放原编排' })",
+      "audit_id": "T020",
+      "recommendation": "保留：新版修改未进入试听；优先当前试听区域反馈"
+    },
+    {
+      "kind": "showToast",
+      "file": "entry/src/main/ets/pages/DrumMachinePage.ets",
+      "line": 1330,
+      "registered_page": true,
+      "call": "promptAction.showToast({ message: '试听启动失败' })",
+      "audit_id": "T021",
+      "recommendation": "保留试听失败，合并同一操作反馈"
+    },
+    {
+      "kind": "showToast",
+      "file": "entry/src/main/ets/pages/DrumMachinePage.ets",
+      "line": 1408,
+      "registered_page": true,
+      "call": "promptAction.showToast({ message: '切换试听失败' })",
+      "audit_id": "T022",
+      "recommendation": "保留切换失败，合并同一操作反馈"
+    },
+    {
+      "kind": "showToast",
+      "file": "entry/src/main/ets/pages/DrumMachinePage.ets",
+      "line": 1461,
+      "registered_page": true,
+      "call": "promptAction.showToast({ message: '切换试听失败' })",
+      "audit_id": "T023",
+      "recommendation": "保留切换失败，合并同一操作反馈"
+    },
+    {
+      "kind": "showToast",
+      "file": "entry/src/main/ets/pages/DrumMachinePage.ets",
+      "line": 1468,
+      "registered_page": true,
+      "call": "promptAction.showToast({ message: '已保存编排' })",
+      "audit_id": "T024",
+      "recommendation": "未调用旧saveLocal方法；代码清理时移除，不计当前打扰"
+    },
+    {
+      "kind": "showToast",
+      "file": "entry/src/main/ets/pages/DrumMachinePage.ets",
+      "line": 1512,
+      "registered_page": true,
+      "call": "promptAction.showToast({ message: '鼓机编排已应用到队伍' })",
+      "audit_id": "T025",
+      "recommendation": "保留跨页应用结果或由大厅已应用状态反馈，择一"
+    },
+    {
+      "kind": "showToast",
+      "file": "entry/src/main/ets/pages/DrumMachinePage.ets",
+      "line": 1515,
+      "registered_page": true,
+      "call": "promptAction.showToast({ message: '应用失败，请重试' })",
+      "audit_id": "T026",
+      "recommendation": "保留失败并留在当前操作区"
+    },
+    {
+      "kind": "showToast",
+      "file": "entry/src/main/ets/pages/LeaderLobbyPage.ets",
+      "line": 181,
+      "registered_page": true,
+      "call": "promptAction.showToast({ message: '当前没有检测到蓝牙耳机输出' })",
+      "audit_id": "T027",
+      "recommendation": "当前校准入口就地说明，不重复全局Toast"
+    },
+    {
+      "kind": "showToast",
+      "file": "entry/src/main/ets/pages/LeaderLobbyPage.ets",
+      "line": 195,
+      "registered_page": true,
+      "call": "promptAction.showToast({ message: '当前没有检测到蓝牙耳机输出' })",
+      "audit_id": "T028",
+      "recommendation": "试音步骤就地显示未连接"
+    },
+    {
+      "kind": "showToast",
+      "file": "entry/src/main/ets/pages/LeaderLobbyPage.ets",
+      "line": 210,
+      "registered_page": true,
+      "call": "promptAction.showToast({ message: `试音失败：${(err as Error).message}` })",
+      "audit_id": "T029",
+      "recommendation": "保留试音失败，统一短文案／同次去重"
+    },
+    {
+      "kind": "showToast",
+      "file": "entry/src/main/ets/pages/LeaderLobbyPage.ets",
+      "line": 241,
+      "registered_page": true,
+      "call": "promptAction.showToast({ message: '未进入校准，请先把媒体声音切到蓝牙耳机' })",
+      "audit_id": "T030",
+      "recommendation": "改为校准步骤内说明和重试动作，避免关闭后再弹"
+    },
+    {
+      "kind": "showToast",
+      "file": "entry/src/main/ets/pages/LeaderLobbyPage.ets",
+      "line": 572,
+      "registered_page": true,
+      "call": "promptAction.showToast({ message: '退出队伍失败，请重试' })",
+      "audit_id": "T031",
+      "recommendation": "保留真实操作失败，统一短文案；一次操作仅一个主要反馈出口"
+    },
+    {
+      "kind": "showToast",
+      "file": "entry/src/main/ets/pages/LeaderLobbyPage.ets",
+      "line": 612,
+      "registered_page": true,
+      "call": "promptAction.showToast({ message: '拍号修改失败，请重试' })",
+      "audit_id": "T032",
+      "recommendation": "保留真实操作失败，统一短文案；一次操作仅一个主要反馈出口"
+    },
+    {
+      "kind": "showToast",
+      "file": "entry/src/main/ets/pages/LeaderLobbyPage.ets",
+      "line": 754,
+      "registered_page": true,
+      "call": "promptAction.showToast({ message: '随机头像同步失败，请重试' })",
+      "audit_id": "T033",
+      "recommendation": "保留真实操作失败，统一短文案；一次操作仅一个主要反馈出口"
+    },
+    {
+      "kind": "showToast",
+      "file": "entry/src/main/ets/pages/LeaderLobbyPage.ets",
+      "line": 817,
+      "registered_page": true,
+      "call": "promptAction.showToast({ message: '角色同步失败，请重试' })",
+      "audit_id": "T034",
+      "recommendation": "保留真实操作失败，统一短文案；一次操作仅一个主要反馈出口"
+    },
+    {
+      "kind": "showToast",
+      "file": "entry/src/main/ets/pages/LeaderLobbyPage.ets",
+      "line": 920,
+      "registered_page": true,
+      "call": "promptAction.showToast({ message: '出发同步失败，请重试' })",
+      "audit_id": "T035",
+      "recommendation": "保留真实操作失败，统一短文案；一次操作仅一个主要反馈出口"
+    },
+    {
+      "kind": "showToast",
+      "file": "entry/src/main/ets/pages/LeaderLobbyPage.ets",
+      "line": 927,
+      "registered_page": true,
+      "call": "promptAction.showToast({ message: '请先在收藏小铺解锁这个场景' })",
+      "audit_id": "T036",
+      "recommendation": "保留真实操作失败，统一短文案；一次操作仅一个主要反馈出口"
+    },
+    {
+      "kind": "showToast",
+      "file": "entry/src/main/ets/pages/LeaderLobbyPage.ets",
+      "line": 934,
+      "registered_page": true,
+      "call": "promptAction.showToast({ message: '场景同步失败，请重试' })",
+      "audit_id": "T037",
+      "recommendation": "保留真实操作失败，统一短文案；一次操作仅一个主要反馈出口"
+    },
+    {
+      "kind": "showToast",
+      "file": "entry/src/main/ets/pages/LeaderLobbyPage.ets",
+      "line": 969,
+      "registered_page": true,
+      "call": "promptAction.showToast({ message: 'PRO 定制鼓机包含在畅游月卡中' })",
+      "audit_id": "T038",
+      "recommendation": "保留权益守卫，一次操作不重复提示"
+    },
+    {
+      "kind": "showToast",
+      "file": "entry/src/main/ets/pages/LeaderLobbyPage.ets",
+      "line": 1026,
+      "registered_page": true,
+      "call": "promptAction.showToast({ message: '进入行进页失败，请重试' })",
+      "audit_id": "T039",
+      "recommendation": "保留真实操作失败，统一短文案；一次操作仅一个主要反馈出口"
+    },
+    {
+      "kind": "showToast",
+      "file": "entry/src/main/ets/pages/LeaderLobbyPage.ets",
+      "line": 1056,
+      "registered_page": true,
+      "call": "promptAction.showToast({ message: '添加人机失败' })",
+      "audit_id": "T040",
+      "recommendation": "保留真实操作失败，统一短文案；一次操作仅一个主要反馈出口"
+    },
+    {
+      "kind": "showToast",
+      "file": "entry/src/main/ets/pages/LeaderLobbyPage.ets",
+      "line": 1069,
+      "registered_page": true,
+      "call": "promptAction.showToast({ message: '移除人机失败' })",
+      "audit_id": "T041",
+      "recommendation": "保留真实操作失败，统一短文案；一次操作仅一个主要反馈出口"
+    },
+    {
+      "kind": "showToast",
+      "file": "entry/src/main/ets/pages/MainPage.ets",
+      "line": 214,
+      "registered_page": true,
+      "call": "promptAction.showToast({ message: '播放操作失败，请重试' })",
+      "audit_id": "T042",
+      "recommendation": "保留真实操作失败，统一短文案；一次操作仅一个主要反馈出口"
+    },
+    {
+      "kind": "showToast",
+      "file": "entry/src/main/ets/pages/MainPage.ets",
+      "line": 227,
+      "registered_page": true,
+      "call": "promptAction.showToast({ message: '拍号修改失败，请重试' })",
+      "audit_id": "T043",
+      "recommendation": "保留真实操作失败，统一短文案；一次操作仅一个主要反馈出口"
+    },
+    {
+      "kind": "showToast",
+      "file": "entry/src/main/ets/pages/MainPage.ets",
+      "line": 241,
+      "registered_page": true,
+      "call": "promptAction.showToast({ message: '拍点修改失败，请重试' })",
+      "audit_id": "T044",
+      "recommendation": "保留真实操作失败，统一短文案；一次操作仅一个主要反馈出口"
+    },
+    {
+      "kind": "showToast",
+      "file": "entry/src/main/ets/pages/MainPage.ets",
+      "line": 323,
+      "registered_page": true,
+      "call": "promptAction.showToast({ message: '返回队伍大厅失败，请重试' })",
+      "audit_id": "T045",
+      "recommendation": "保留真实操作失败，统一短文案；一次操作仅一个主要反馈出口"
+    },
+    {
+      "kind": "showToast",
+      "file": "entry/src/main/ets/pages/MainPage.ets",
+      "line": 342,
+      "registered_page": true,
+      "call": "promptAction.showToast({ message: '会话已退出，部分网络资源稍后释放' })",
+      "audit_id": "T046",
+      "recommendation": "删除用户提示，资源释放详情留日志"
+    },
+    {
+      "kind": "showToast",
+      "file": "entry/src/main/ets/pages/MainPage.ets",
+      "line": 348,
+      "registered_page": true,
+      "call": "promptAction.showToast({ message: '返回首页失败，请重试' })",
+      "audit_id": "T047",
+      "recommendation": "保留真实操作失败，统一短文案；一次操作仅一个主要反馈出口"
+    },
+    {
+      "kind": "showToast",
+      "file": "entry/src/main/ets/pages/MainPage.ets",
+      "line": 654,
+      "registered_page": true,
+      "call": "promptAction.showToast({ message: '检测到蓝牙耳机输出，节拍可能延迟，建议外放或有线耳机' })",
+      "audit_id": "T048",
+      "recommendation": "删除蓝牙连接时通用延迟Toast；大厅保留可选入口"
+    },
+    {
+      "kind": "showToast",
+      "file": "entry/src/main/ets/pages/MicLoopbackCalibrationPage.ets",
+      "line": 134,
+      "registered_page": false,
+      "call": "promptAction.showToast({ message: '当前没有检测到蓝牙耳机输出，请返回大厅重新确认' })",
+      "audit_id": "T049",
+      "recommendation": "非主流程：旧／未注册校准页。保留必要故障语义，优先不在本轮产品流程中复制；21处不计日常打扰"
+    },
+    {
+      "kind": "showToast",
+      "file": "entry/src/main/ets/pages/MicLoopbackCalibrationPage.ets",
+      "line": 140,
+      "registered_page": false,
+      "call": "promptAction.showToast({ message: microphonePermissionDeniedHint() })",
+      "audit_id": "T050",
+      "recommendation": "非主流程：旧／未注册校准页。保留必要故障语义，优先不在本轮产品流程中复制；21处不计日常打扰"
+    },
+    {
+      "kind": "showToast",
+      "file": "entry/src/main/ets/pages/MicLoopbackCalibrationPage.ets",
+      "line": 145,
+      "registered_page": false,
+      "call": "promptAction.showToast({ message: '当前没有可用会话，请从队伍大厅进入' })",
+      "audit_id": "T051",
+      "recommendation": "非主流程：旧／未注册校准页。保留必要故障语义，优先不在本轮产品流程中复制；21处不计日常打扰"
+    },
+    {
+      "kind": "showToast",
+      "file": "entry/src/main/ets/pages/MicLoopbackCalibrationPage.ets",
+      "line": 234,
+      "registered_page": false,
+      "call": "promptAction.showToast({ message: '请把媒体输出切到手机扬声器后再测输入侧时延（只需测一次）' })",
+      "audit_id": "T052",
+      "recommendation": "非主流程：旧／未注册校准页。保留必要故障语义，优先不在本轮产品流程中复制；21处不计日常打扰"
+    },
+    {
+      "kind": "showToast",
+      "file": "entry/src/main/ets/pages/MicLoopbackCalibrationPage.ets",
+      "line": 240,
+      "registered_page": false,
+      "call": "promptAction.showToast({ message: microphonePermissionDeniedHint() })",
+      "audit_id": "T053",
+      "recommendation": "非主流程：旧／未注册校准页。保留必要故障语义，优先不在本轮产品流程中复制；21处不计日常打扰"
+    },
+    {
+      "kind": "showToast",
+      "file": "entry/src/main/ets/pages/MicLoopbackCalibrationPage.ets",
+      "line": 245,
+      "registered_page": false,
+      "call": "promptAction.showToast({ message: '当前没有可用会话，请从队伍大厅进入' })",
+      "audit_id": "T054",
+      "recommendation": "非主流程：旧／未注册校准页。保留必要故障语义，优先不在本轮产品流程中复制；21处不计日常打扰"
+    },
+    {
+      "kind": "showToast",
+      "file": "entry/src/main/ets/pages/MicLoopbackCalibrationPage.ets",
+      "line": 279,
+      "registered_page": false,
+      "call": "promptAction.showToast({ message: `输入侧时延 ${this.inputLatencyMs} ms 已保存` })",
+      "audit_id": "T055",
+      "recommendation": "非主流程：旧／未注册校准页。保留必要故障语义，优先不在本轮产品流程中复制；21处不计日常打扰"
+    },
+    {
+      "kind": "showToast",
+      "file": "entry/src/main/ets/pages/MicLoopbackCalibrationPage.ets",
+      "line": 296,
+      "registered_page": false,
+      "call": "promptAction.showToast({ message: '回环值小于输入侧值，本次差分结果无效，请重测两步' })",
+      "audit_id": "T056",
+      "recommendation": "非主流程：旧／未注册校准页。保留必要故障语义，优先不在本轮产品流程中复制；21处不计日常打扰"
+    },
+    {
+      "kind": "showToast",
+      "file": "entry/src/main/ets/pages/MicLoopbackCalibrationPage.ets",
+      "line": 298,
+      "registered_page": false,
+      "call": "promptAction.showToast({ message: '还没有足够的有效测量结果' })",
+      "audit_id": "T057",
+      "recommendation": "非主流程：旧／未注册校准页。保留必要故障语义，优先不在本轮产品流程中复制；21处不计日常打扰"
+    },
+    {
+      "kind": "showToast",
+      "file": "entry/src/main/ets/pages/MicLoopbackCalibrationPage.ets",
+      "line": 303,
+      "registered_page": false,
+      "call": "promptAction.showToast({ message: '蓝牙耳机已断开，本次结果没有保存' })",
+      "audit_id": "T058",
+      "recommendation": "非主流程：旧／未注册校准页。保留必要故障语义，优先不在本轮产品流程中复制；21处不计日常打扰"
+    },
+    {
+      "kind": "showToast",
+      "file": "entry/src/main/ets/pages/MicLoopbackCalibrationPage.ets",
+      "line": 307,
+      "registered_page": false,
+      "call": "promptAction.showToast({ message: '请先完成输入侧校准，再保存耳机输出补偿' })",
+      "audit_id": "T059",
+      "recommendation": "非主流程：旧／未注册校准页。保留必要故障语义，优先不在本轮产品流程中复制；21处不计日常打扰"
+    },
+    {
+      "kind": "showToast",
+      "file": "entry/src/main/ets/pages/MicLoopbackCalibrationPage.ets",
+      "line": 349,
+      "registered_page": false,
+      "call": "promptAction.showToast({ message: '保存期间播放基准发生变化，本次结果已丢弃' })",
+      "audit_id": "T060",
+      "recommendation": "非主流程：旧／未注册校准页。保留必要故障语义，优先不在本轮产品流程中复制；21处不计日常打扰"
+    },
+    {
+      "kind": "showToast",
+      "file": "entry/src/main/ets/pages/MicLoopbackCalibrationPage.ets",
+      "line": 356,
+      "registered_page": false,
+      "call": "promptAction.showToast({ message: `已保存输出补偿 ${outputMs} ms，蓝牙重连后推荐重测` })",
+      "audit_id": "T061",
+      "recommendation": "非主流程：旧／未注册校准页。保留必要故障语义，优先不在本轮产品流程中复制；21处不计日常打扰"
+    },
+    {
+      "kind": "showToast",
+      "file": "entry/src/main/ets/pages/MicLoopbackCalibrationPage.ets",
+      "line": 359,
+      "registered_page": false,
+      "call": "promptAction.showToast({ message: `保存失败：${(err as Error).message}` })",
+      "audit_id": "T062",
+      "recommendation": "非主流程：旧／未注册校准页。保留必要故障语义，优先不在本轮产品流程中复制；21处不计日常打扰"
+    },
+    {
+      "kind": "showToast",
+      "file": "entry/src/main/ets/pages/StorePage.ets",
+      "line": 315,
+      "registered_page": true,
+      "call": "promptAction.showToast({ message: `已切换到 ${item.name}` })",
+      "audit_id": "T063",
+      "recommendation": "删除重复切换成功Toast，保留选中状态"
+    },
+    {
+      "kind": "showToast",
+      "file": "entry/src/main/ets/pages/StorePage.ets",
+      "line": 373,
+      "registered_page": true,
+      "call": "promptAction.showToast({ message: message })",
+      "audit_id": "T064",
+      "recommendation": "权益状态／购买入口附近说明，不反复Toast"
+    },
+    {
+      "kind": "showToast",
+      "file": "entry/src/main/ets/pages/StorePage.ets",
+      "line": 377,
+      "registered_page": true,
+      "call": "promptAction.showToast({ message: '当前暂不能购买自动续费月卡' })",
+      "audit_id": "T065",
+      "recommendation": "入口附近保留不可购买原因"
+    },
+    {
+      "kind": "showToast",
+      "file": "entry/src/main/ets/pages/StorePage.ets",
+      "line": 462,
+      "registered_page": true,
+      "call": "promptAction.showToast({ message: '购买成功，权益已到账' })",
+      "audit_id": "T066",
+      "recommendation": "保留一次购买成功及到账结果"
+    },
+    {
+      "kind": "showToast",
+      "file": "entry/src/main/ets/pages/StorePage.ets",
+      "line": 477,
+      "registered_page": true,
+      "call": "promptAction.showToast({ message: '已同步华为账号中的购买记录' })",
+      "audit_id": "T067",
+      "recommendation": "保留一次权益同步结果"
+    },
+    {
+      "kind": "showToast",
+      "file": "entry/src/main/ets/pages/StorePage.ets",
+      "line": 483,
+      "registered_page": true,
+      "call": "promptAction.showToast({ message: this.purchaseFailureMessage(e) })",
+      "audit_id": "T068",
+      "recommendation": "页面状态与Toast择一；取消支付静默，真实失败保留"
+    },
+    {
+      "kind": "showToast",
+      "file": "entry/src/main/ets/pages/StorePage.ets",
+      "line": 547,
+      "registered_page": true,
+      "call": "promptAction.showToast({ message: '口令兑换成功，畅游月卡已到账' })",
+      "audit_id": "T069",
+      "recommendation": "兑换区到期状态与Toast择一，推荐局部结果"
+    },
+    {
+      "kind": "showToast",
+      "file": "entry/src/main/ets/pages/StorePage.ets",
+      "line": 551,
+      "registered_page": true,
+      "call": "promptAction.showToast({ message: detail })",
+      "audit_id": "T070",
+      "recommendation": "保留兑换字段／任务错误，不与状态重复"
+    },
+    {
+      "kind": "showToast",
+      "file": "entry/src/main/ets/pages/StorePage.ets",
+      "line": 607,
+      "registered_page": true,
+      "call": "promptAction.showToast({ message: toastMessage })",
+      "audit_id": "T071",
+      "recommendation": "用户主动恢复需有一个明确结果"
+    },
+    {
+      "kind": "showToast",
+      "file": "entry/src/main/ets/pages/StorePage.ets",
+      "line": 611,
+      "registered_page": true,
+      "call": "promptAction.showToast({ message: detail.length > 0 ? detail : '恢复购买失败，请稍后重试' })",
+      "audit_id": "T072",
+      "recommendation": "恢复失败仅一个主要出口，给账号／网络检查与重试"
+    },
+    {
+      "kind": "showDialog",
+      "file": "entry/src/main/ets/pages/TeamPage.ets",
+      "line": 96,
+      "registered_page": true,
+      "call": "promptAction.showDialog({\n          title: '建队前先打开 Wi-Fi',\n          message: 'OneBeat 使用 Wi-Fi 直连组队，不需要连接同一个路由器。打开后再回来创建队伍。',\n          buttons: [\n            { text: '暂不创建', color: '#625B53' },\n            { text: '去打开 Wi-Fi', color: CORAL, primary: true }\n          ]\n        })"
+    },
+    {
+      "kind": "showToast",
+      "file": "entry/src/main/ets/pages/TimeCardCalibrationPage.ets",
+      "line": 423,
+      "registered_page": true,
+      "call": "promptAction.showToast({ message: '请先连接蓝牙耳机，再开始打卡' })",
+      "audit_id": "T073",
+      "recommendation": "未连接状态＋禁用开始；瞬时断开再明确反馈"
+    },
+    {
+      "kind": "showToast",
+      "file": "entry/src/main/ets/pages/TimeCardCalibrationPage.ets",
+      "line": 432,
+      "registered_page": true,
+      "call": "promptAction.showToast({ message: '当前没有可用会话，请从队伍大厅进入' })",
+      "audit_id": "T074",
+      "recommendation": "会话失效留一个原因与返回入口"
+    },
+    {
+      "kind": "showToast",
+      "file": "entry/src/main/ets/pages/TimeCardCalibrationPage.ets",
+      "line": 472,
+      "registered_page": true,
+      "call": "promptAction.showToast({ message: '请先重新连接蓝牙耳机' })",
+      "audit_id": "T075",
+      "recommendation": "耳机未重连在当前状态区说明"
+    },
+    {
+      "kind": "showToast",
+      "file": "entry/src/main/ets/pages/TimeCardCalibrationPage.ets",
+      "line": 476,
+      "registered_page": true,
+      "call": "promptAction.showToast({ message: '当前会话已结束，请返回大厅重新进入' })",
+      "audit_id": "T076",
+      "recommendation": "会话结束在当前状态区说明"
+    },
+    {
+      "kind": "showToast",
+      "file": "entry/src/main/ets/pages/TimeCardCalibrationPage.ets",
+      "line": 769,
+      "registered_page": true,
+      "call": "promptAction.showToast({ message: '蓝牙耳机已断开，本次结果没有保存' })",
+      "audit_id": "T077",
+      "recommendation": "保留断开导致本次未保存的明确结果"
+    },
+    {
+      "kind": "showToast",
+      "file": "entry/src/main/ets/pages/TimeCardCalibrationPage.ets",
+      "line": 786,
+      "registered_page": true,
+      "call": "promptAction.showToast({ message: `已保存 ${result} ms，请保持当前耳机连接` })",
+      "audit_id": "T078",
+      "recommendation": "保存并生效只反馈一次；连接说明放详情"
+    },
+    {
+      "kind": "showToast",
+      "file": "entry/src/main/ets/pages/TimeCardCalibrationPage.ets",
+      "line": 790,
+      "registered_page": true,
+      "call": "promptAction.showToast({ message: `保存失败：${(err as Error).message}` })",
+      "audit_id": "T079",
+      "recommendation": "保留保存失败，映射工程错误"
+    },
+    {
+      "kind": "showToast",
+      "file": "entry/src/main/ets/pages/TimeCardCalibrationPage.ets",
+      "line": 804,
+      "registered_page": true,
+      "call": "promptAction.showToast({ message: '当前没有检测到蓝牙耳机输出' })",
+      "audit_id": "T080",
+      "recommendation": "试听区显示未连接状态，避免重复Toast"
+    },
+    {
+      "kind": "showToast",
+      "file": "entry/src/main/ets/pages/TimeCardCalibrationPage.ets",
+      "line": 837,
+      "registered_page": true,
+      "call": "promptAction.showToast({ message: `试听启动失败：${(err as Error).message}` })",
+      "audit_id": "T081",
+      "recommendation": "保留试听失败，统一短文案"
+    }
+  ]
+}

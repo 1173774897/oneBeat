@@ -7,7 +7,7 @@ const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 const SERVICE = '4f6e6542-6561-7452-6f6f-6d0000000001';
 const FEEDBACK = '4f6e6542-6561-744a-6f69-6e0000000001';
-const invitation = { code: '123456', roomId: 'room', protocolVersion: 4, expiresAt: 60000 };
+const invitation = { code: '123456', roomId: 'room', protocolVersion: 6, expiresAt: 60000 };
 const target = { serviceUuid: SERVICE, characteristicUuid: FEEDBACK,
   characteristicValue: new ArrayBuffer(0), descriptors: [] };
 const services = [{ serviceUuid: SERVICE, characteristics: [target] }];
