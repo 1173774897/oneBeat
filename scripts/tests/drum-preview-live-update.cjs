@@ -623,10 +623,10 @@ function testCatalogFillWindows() {
       assert.equal(catalog.sectionFillStartBeat(program, section), Math.max(0, beatsPerBar - length),
         'A preset phrase owns only its replacement window in denominator beats');
       assert.equal(catalog.sectionFillStartBeat(program, { ...section,
-        customFill: { subdivision: 3, events: [] } }), 0,
-      'An intentionally silent custom fill still replaces the entire bar');
-      assert.equal(catalog.sectionFillStartBeat(program, { ...section, customFillRows: [''] }), 0,
-        'Legacy custom fill rows also own their complete bar');
+        customFill: { subdivision: 3, events: [] } }), Math.max(0, beatsPerBar - length),
+      'Custom fills share the same audible fill window as their preset index');
+      assert.equal(catalog.sectionFillStartBeat(program, { ...section, customFillRows: [''] }), Math.max(0, beatsPerBar - length),
+        'Legacy custom fill rows share the same fill window for phrase boundaries');
     }
   }
 }
@@ -638,10 +638,10 @@ async function testAudibleFillWindows() {
     { styleKey: 'jazz', fillIndex: 1, startBeat: 3 },
     { styleKey: 'jazz', fillIndex: 2, startBeat: 2 },
     { styleKey: 'trap', fillIndex: 1, startBeat: 3 },
-    { styleKey: 'rock', fillIndex: 0, startBeat: 0,
+    { styleKey: 'rock', fillIndex: 0, startBeat: 3,
       customFill: { subdivision: 3, events: [{ tick: 0, sampleKey: 'kick', velocity: 0.9 }] } },
-    { styleKey: 'rock', fillIndex: 0, startBeat: 0, customFillRows: ['1000000000000000'] },
-    { styleKey: 'rock', fillIndex: 0, startBeat: 0, customFill: { subdivision: 4, events: [] } }
+    { styleKey: 'rock', fillIndex: 0, startBeat: 3, customFillRows: ['1000000000000000'] },
+    { styleKey: 'rock', fillIndex: 0, startBeat: 3, customFill: { subdivision: 4, events: [] } }
   ]) {
     const sections = [{ key: 'key-a', repeats: 2, velocity: 0.2, fillEvery: 2, ...variant }];
     const h = await start(sections, { styleKey: variant.styleKey, bank: phraseBank() });
@@ -652,11 +652,16 @@ async function testAudibleFillWindows() {
     const fillSource = variant.startBeat * RATE / 2;
     const pcm = write(h, 3 * BAR, false);
     h.inWrite = undefined;
-    assert.equal(pcm[BAR - 1 + fillSource], expected.samples[fillSource],
-      'The fill boundary must be measured against the actual scheduled PCM');
+    if (variant.customFill !== undefined || variant.customFillRows !== undefined) {
+      assert.equal(pcm[BAR - 1], expected.samples[0],
+        'Custom fill PCM still originates at the bar start even though phrase UI waits for the fill window');
+    } else {
+      assert.equal(pcm[BAR - 1 + fillSource], expected.samples[fillSource],
+        'The fill boundary must be measured against the actual scheduled PCM');
+    }
     position(h, 'key-a', 0, false);
     presentFrame(h, first + BAR + 1);
-    position(h, 'key-a', 1, variant.startBeat === 0);
+    position(h, 'key-a', 1, false);
     if (variant.startBeat > 0) {
       presentFrame(h, first + BAR + fillSource - 1);
       position(h, 'key-a', 1, false);
@@ -705,13 +710,11 @@ async function testQueuedFillMetadataAndFallback() {
     presentFrame(h, first + 3 * RATE / 2 + 1);
     position(h, 'key-a', 0, true);
     presentFrame(h, first + BAR + 1);
-    position(h, 'key-a', 1, custom);
-    if (!custom) {
-      presentFrame(h, first + BAR + RATE - 1);
-      position(h, 'key-a', 1, false);
-      presentFrame(h, first + BAR + RATE + 1);
-      position(h, 'key-a', 1, true);
-    }
+    position(h, 'key-a', 1, false);
+    presentFrame(h, first + BAR + RATE - 1);
+    position(h, 'key-a', 1, false);
+    presentFrame(h, first + BAR + RATE + 1);
+    position(h, 'key-a', 1, true);
     assertUninterrupted(h, before);
   }
 }

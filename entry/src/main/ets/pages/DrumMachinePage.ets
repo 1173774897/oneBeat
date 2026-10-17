@@ -19,6 +19,7 @@ import { DEFAULT_TICKS_PER_BEAT, SequencerEvent } from '../audio/RhythmTimeline'
 import {
   buildSectionPattern,
   cloneDrumCustomPattern,
+  sectionFillStartBeat,
   defaultDrumProgram,
   DrumCustomPattern,
   DrumProgram,
@@ -85,6 +86,8 @@ const DRUM_EDITOR_SUBDIVISION_HEIGHT: number = 34;
 const DRUM_EDITOR_SUBDIVISION_GAP: number = 6;
 const DRUM_EDITOR_OFF_GRID_SIZE: number = 10;
 const DRUM_EDITOR_OFF_GRID_HIT_SIZE: number = 18;
+const DRUM_EDITOR_FILL_FOCUS_DELAY_MS: number = 1000;
+const DRUM_EDITOR_LOCKED_CELL_OPACITY: number = 0.52;
 const DRUM_SECTION_PLAYING_COLOR: string = '#EDE4FA';
 const DRUM_PHRASE_PLAYING_COLOR: string = '#FFF0B8';
 const DRUM_SONG_PREVIEW_PROGRESS_MS: number = 16;
@@ -143,6 +146,7 @@ struct DrumMachinePage {
   private editorPreviewTimerId: number = -1;
   private editorPreviewRevision: number = 0;
   private editorPreviewCycle: number = -1;
+  private editorFillFocusTimerId: number = -1;
   private bpmUpdateRevision: number = 0;
   private pageLifetimeRevision: number = 0;
 
@@ -314,6 +318,7 @@ struct DrumMachinePage {
   aboutToDisappear(): void {
     this.pageLifetimeRevision++;
     this.bpmUpdateRevision++;
+    this.clearEditorFillFocusTimer();
     this.stopActivePreview();
   }
 
@@ -707,6 +712,70 @@ struct DrumMachinePage {
     this.editorPlayheadBeats = step < 0 ? -1 : step / this.editorSubdivision;
   }
 
+  private editorFillStartBeat(): number {
+    if (this.editorMode !== 1 || this.selectedSection < 0 || this.selectedSection >= this.sections.length) {
+      return 0;
+    }
+    return sectionFillStartBeat(this.currentProgram(), this.sections[this.selectedSection]);
+  }
+
+  private editorFillStartTick(): number {
+    return this.editorFillStartBeat() * DEFAULT_TICKS_PER_BEAT;
+  }
+
+  private editorStepEditable(step: number): boolean {
+    return this.editorMode === 0 || step >= this.editorFillStartBeat() * this.editorSubdivision;
+  }
+
+  private editorEventTickEditable(tick: number): boolean {
+    return this.editorMode === 0 || tick + 0.000001 >= this.editorFillStartTick();
+  }
+
+  private clearEditorFillFocusTimer(): void {
+    if (this.editorFillFocusTimerId >= 0) {
+      clearTimeout(this.editorFillFocusTimerId);
+      this.editorFillFocusTimerId = -1;
+    }
+  }
+
+  private scheduleEditorFillFocusScroll(): void {
+    this.clearEditorFillFocusTimer();
+    if (this.editorMode !== 1) {
+      return;
+    }
+    const fillStartBeat = this.editorFillStartBeat();
+    if (fillStartBeat <= 0) {
+      return;
+    }
+    this.editorFillFocusTimerId = setTimeout(() => {
+      this.editorFillFocusTimerId = -1;
+      if (!this.editorVisible || this.editorMode !== 1) {
+        return;
+      }
+      const xOffset = fillStartBeat * this.editorSubdivision * DRUM_EDITOR_CELL_WIDTH;
+      const maxOffset = Math.max(0, this.editorGridWidth() - this.editorViewportWidth);
+      this.editorScroller.scrollTo({ xOffset: Math.min(xOffset, maxOffset), yOffset: 0, animation: true });
+    }, DRUM_EDITOR_FILL_FOCUS_DELAY_MS);
+  }
+
+  private cloneSequencerEvent(event: SequencerEvent): SequencerEvent {
+    return { tick: event.tick, sampleKey: event.sampleKey, velocity: event.velocity };
+  }
+
+  private buildFillEditorEvents(section: DrumSection): SequencerEvent[] {
+    const program = this.currentProgram();
+    const fillStartTick = sectionFillStartBeat(program, section) * DEFAULT_TICKS_PER_BEAT;
+    const mainEvents = buildSectionPattern(program, section, false).events.filter((event: SequencerEvent) => {
+      return event.tick < fillStartTick;
+    }).map((event: SequencerEvent): SequencerEvent => this.cloneSequencerEvent(event));
+    const fillEvents = buildSectionPattern(program, section, true).events.filter((event: SequencerEvent) => {
+      return event.tick >= fillStartTick;
+    }).map((event: SequencerEvent): SequencerEvent => this.cloneSequencerEvent(event));
+    const events = mainEvents.concat(fillEvents);
+    events.sort((a: SequencerEvent, b: SequencerEvent) => a.tick - b.tick);
+    return events;
+  }
+
   private copyEditorEvents(): SequencerEvent[] {
     return this.editorEvents.map((event: SequencerEvent): SequencerEvent => {
       return { tick: event.tick, sampleKey: event.sampleKey, velocity: event.velocity };
@@ -784,6 +853,7 @@ struct DrumMachinePage {
       subdivision === this.editorSubdivision) {
       return;
     }
+    this.clearEditorFillFocusTimer();
     if (this.previewTarget === 'editor') {
       this.updateEditorPreviewProgress(false);
     }
@@ -845,6 +915,7 @@ struct DrumMachinePage {
 
   private snapEditorEventToGrid(trackIndex: number, eventTick: number): void {
     if (!this.editorVisible || trackIndex < 0 || trackIndex >= DRUM_TRACKS.length ||
+      !this.editorEventTickEditable(eventTick) ||
       !this.editorOffGridEvents(trackIndex).some((event: SequencerEvent) => event.tick === eventTick)) {
       return;
     }
@@ -859,7 +930,16 @@ struct DrumMachinePage {
     if (!this.editorVisible || this.editorOffGridCount() === 0) {
       return;
     }
-    this.editorEvents = this.snappedEditorEvents();
+    const fillStartTick = this.editorFillStartTick();
+    const locked = this.editorEvents.filter((event: SequencerEvent) => {
+      return !this.isEditorEventOnGrid(event) && event.tick < fillStartTick;
+    }).map((event: SequencerEvent): SequencerEvent => this.cloneSequencerEvent(event));
+    const editable = this.editorEvents.filter((event: SequencerEvent) => {
+      return this.isEditorEventOnGrid(event) || event.tick >= fillStartTick;
+    });
+    this.editorEvents = editable;
+    this.editorEvents = this.snappedEditorEvents().concat(locked);
+    this.editorEvents.sort((a: SequencerEvent, b: SequencerEvent) => a.tick - b.tick);
     this.refreshEditorGridProjection();
     if (this.previewTarget === 'editor') {
       void this.restartEditorPreview();
@@ -940,6 +1020,7 @@ struct DrumMachinePage {
   private openEditor(index: number, mode: number): void {
     // The overlay only owns its own audition. Keep the song's transport and
     // pending preparation alive until the user explicitly auditions this draft.
+    this.clearEditorFillFocusTimer();
     if (this.previewTarget === 'song') {
       this.stopEditorPreviewProgress();
     } else {
@@ -948,18 +1029,18 @@ struct DrumMachinePage {
     this.selectedSection = index;
     this.editorMode = mode;
     const section = this.sections[index];
-    this.editorEvents = buildSectionPattern(this.currentProgram(), section, mode === 1).events.map(
-      (event: SequencerEvent): SequencerEvent => {
-        return { tick: event.tick, sampleKey: event.sampleKey, velocity: event.velocity };
-      });
+    this.editorEvents = mode === 1 ? this.buildFillEditorEvents(section) :
+      buildSectionPattern(this.currentProgram(), section, false).events.map(
+        (event: SequencerEvent): SequencerEvent => this.cloneSequencerEvent(event));
     this.editorSubdivision = this.initialEditorSubdivision(section, mode);
     this.refreshEditorGridProjection();
     this.editorVisible = true;
+    this.scheduleEditorFillFocusScroll();
   }
 
   private toggleStep(track: number, step: number): void {
     if (!this.editorVisible || track < 0 || track >= DRUM_TRACKS.length || !Number.isInteger(step) ||
-      step < 0 || step >= this.editorStepCount()) {
+      step < 0 || step >= this.editorStepCount() || !this.editorStepEditable(step)) {
       return;
     }
     const sampleKey = DRUM_TRACKS[track].key;
@@ -981,6 +1062,7 @@ struct DrumMachinePage {
   }
 
   private closeEditor(): void {
+    this.clearEditorFillFocusTimer();
     if (this.previewTarget === 'editor') {
       this.stopActivePreview();
     } else {
@@ -1053,7 +1135,7 @@ struct DrumMachinePage {
     }
     const revision = this.editorPreviewRevision;
     const startPositionBeats = Math.max(0, this.editorPlayheadBeats);
-    this.editorPreviewCycle = this.editorPlayheadStep >= 0 ? 0 : -1;
+    this.editorPreviewCycle = startPositionBeats > 0 || this.editorPlayheadBeats >= 0 ? 0 : -1;
     this.previewTarget = 'editor';
     try {
       await this.startPreviewPlayback(this.buildEditorPreviewProgram(), true, startPositionBeats);
@@ -1062,6 +1144,10 @@ struct DrumMachinePage {
       if (revision !== this.editorPreviewRevision || !this.editorVisible || this.previewTarget !== 'editor') {
         return;
       }
+      if (this.editorPlayheadBeats < 0) {
+        this.editorPlayheadBeats = 0;
+      }
+      this.editorPreviewCycle = 0;
       this.updateEditorPreviewProgress();
       this.editorPreviewTimerId = setInterval(() => {
         if (revision === this.editorPreviewRevision) {
@@ -1133,7 +1219,11 @@ struct DrumMachinePage {
 
   private saveEditor(): void {
     const section = this.copySection(this.sections[this.selectedSection]);
-    const pattern: DrumCustomPattern = { subdivision: this.editorSubdivision, events: this.copyEditorEvents() };
+    const fillStartTick = this.editorFillStartTick();
+    const events = this.copyEditorEvents().filter((event: SequencerEvent) => {
+      return this.editorMode === 0 || event.tick + 0.000001 >= fillStartTick;
+    });
+    const pattern: DrumCustomPattern = { subdivision: this.editorSubdivision, events: events };
     if (this.editorMode === 0) {
       section.customPattern = pattern;
       section.customRows = undefined;
@@ -1975,7 +2065,11 @@ struct DrumMachinePage {
                                   .backgroundColor(this.editorCellColor(trackIndex, step))
                                   .border({ width: 0.8, color: '#776F65', radius: DRUM_EDITOR_CELL_RADIUS })
                                   .borderRadius(DRUM_EDITOR_CELL_RADIUS).clip(true)
-                                  .accessibilityText(`${_track.name}，第 ${Math.floor(step / this.editorSubdivision) + 1} 拍第 ${step % this.editorSubdivision + 1} 格，${this.editorCellEnabled(trackIndex, step) ? '关闭' : '添加'}鼓点`)
+                                  .enabled(this.editorStepEditable(step))
+                                  .opacity(this.editorStepEditable(step) ? 1 : DRUM_EDITOR_LOCKED_CELL_OPACITY)
+                                  .accessibilityText(this.editorStepEditable(step) ?
+                                    `${_track.name}，第 ${Math.floor(step / this.editorSubdivision) + 1} 拍第 ${step % this.editorSubdivision + 1} 格，${this.editorCellEnabled(trackIndex, step) ? '关闭' : '添加'}鼓点` :
+                                    `${_track.name}，第 ${Math.floor(step / this.editorSubdivision) + 1} 拍第 ${step % this.editorSubdivision + 1} 格，主节奏，不可编辑`)
                                   .onClick(() => this.toggleStep(trackIndex, step))
                               }.width(DRUM_EDITOR_CELL_WIDTH).height(this.editorTrackRowHeight)
                                 .justifyContent(FlexAlign.Center)
@@ -1990,8 +2084,12 @@ struct DrumMachinePage {
                                 .fill(INK).stroke(PAPER).strokeWidth(1).rotate({ angle: 45 })
                             }.width(DRUM_EDITOR_OFF_GRID_HIT_SIZE).height(this.editorTrackRowHeight).padding(0)
                               .backgroundColor('#00000000').borderRadius(0)
+                              .enabled(this.editorEventTickEditable(event.tick))
+                              .opacity(this.editorEventTickEditable(event.tick) ? 1 : DRUM_EDITOR_LOCKED_CELL_OPACITY)
                               .position({ x: this.editorOffGridX(event), y: 0 })
-                              .accessibilityText(`${_track.name}，第 ${(event.tick / DEFAULT_TICKS_PER_BEAT + 1).toFixed(2)} 拍，点按就近保留到当前格子`)
+                              .accessibilityText(this.editorEventTickEditable(event.tick) ?
+                                `${_track.name}，第 ${(event.tick / DEFAULT_TICKS_PER_BEAT + 1).toFixed(2)} 拍，点按就近保留到当前格子` :
+                                `${_track.name}，第 ${(event.tick / DEFAULT_TICKS_PER_BEAT + 1).toFixed(2)} 拍，主节奏，不可编辑`)
                               .onClick(() => this.snapEditorEventToGrid(trackIndex, event.tick))
                           }, (event: SequencerEvent) => `${event.sampleKey}-${event.tick}`)
                         }.height(this.editorTrackRowHeight).width(this.editorGridWidth())
@@ -2002,12 +2100,12 @@ struct DrumMachinePage {
                     Rect().width(DRUM_EDITOR_PLAYHEAD_WIDTH).height(this.editorTracksHeight())
                       .fill(CORAL).position({ x: this.editorPlayheadX(), y: DRUM_EDITOR_HEADER_HEIGHT })
                       .visibility(this.editorPlayheadStep >= 0 ? Visibility.Visible : Visibility.Hidden)
-                      .hitTestBehavior(HitTestMode.None)
+                      .zIndex(10).hitTestBehavior(HitTestMode.None)
                     Polygon().width(DRUM_EDITOR_PLAYHEAD_CAP_WIDTH).height(7)
                       .points([[0, 0], [DRUM_EDITOR_PLAYHEAD_CAP_WIDTH, 0], [DRUM_EDITOR_PLAYHEAD_CAP_WIDTH / 2, 7]])
                       .fill(CORAL).position({ x: this.editorPlayheadCapX(), y: DRUM_EDITOR_BEAT_HEIGHT - 7 })
                       .visibility(this.editorPlayheadStep >= 0 ? Visibility.Visible : Visibility.Hidden)
-                      .hitTestBehavior(HitTestMode.None)
+                      .zIndex(10).hitTestBehavior(HitTestMode.None)
                   }.width(this.editorGridWidth()).height(this.editorGridHeight())
                 }
                 .scrollable(ScrollDirection.Horizontal)

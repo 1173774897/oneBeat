@@ -62,6 +62,35 @@ function deferred() {
 
 function plain(value) { return JSON.parse(JSON.stringify(value)); }
 
+function fillStartTick(program, section) {
+  return catalog.sectionFillStartBeat(program, section) * 480;
+}
+
+function editorOpenEvents(program, section, mode) {
+  if (mode === 0) {
+    return plain(catalog.buildSectionPattern(program, section, false).events);
+  }
+  const startTick = fillStartTick(program, section);
+  const main = catalog.buildSectionPattern(program, section, false).events.filter(event => event.tick < startTick);
+  const fill = catalog.buildSectionPattern(program, section, true).events.filter(event => event.tick >= startTick);
+  return plain(main.concat(fill).sort((a, b) => a.tick - b.tick));
+}
+
+function savedFillEvents(program, section, events) {
+  const startTick = fillStartTick(program, section);
+  return events.filter(event => event.tick + 0.000001 >= startTick);
+}
+
+function fillEditableStep(program, section, subdivision = 4) {
+  return catalog.sectionFillStartBeat(program, section) * subdivision;
+}
+
+function settleFillFocusScroll(h, mode) {
+  if (mode === 1) {
+    h.runTimeouts(1000);
+  }
+}
+
 function harness() {
   const calls = [];
   const audioActions = [];
@@ -319,7 +348,10 @@ async function testIndependentSectionExpansion() {
     const savedDraft = plain(p.editorEvents);
     p.saveEditor();
     assert.deepEqual(expansion(p), [true, true, false], 'Applying B edits must leave A and B expanded');
-    assert.deepEqual(plain(p.sections[1][mode === 0 ? 'customPattern' : 'customFill'].events), savedDraft);
+    const program = p.currentProgram();
+    const expectedSaved = mode === 0 ? savedDraft :
+      savedFillEvents(program, p.sections[1], savedDraft);
+    assert.deepEqual(plain(p.sections[1][mode === 0 ? 'customPattern' : 'customFill'].events), expectedSaved);
     assert.deepEqual(plain(p.sections[0]), originalA, 'Editing B must preserve A content as well as its visible card');
     p.updateRepeats(1, 1);
     p.updatePattern(1, 2);
@@ -510,14 +542,15 @@ async function testSongPhraseProgress() {
   assert.equal(p.isSongPhrasePlaying(0, false), false, 'Preroll has no active dropdown');
   for (const [time, section, fill] of [[0, 0, false], [1999.99, 0, false], [2000, 0, false],
     [3499.99, 0, false], [3500, 0, true], [3999.99, 0, true],
-    [4000, 1, true], [5999.99, 1, true], [6000, 0, false]]) {
+    [4000, 1, false], [5499.99, 1, false], [5500, 1, true], [5999.99, 1, true],
+    [6000, 0, false]]) {
     h.tick({ mainPlayheadMs: time });
     assert.equal(p.playingSongSection, section);
     for (let index = 0; index < p.sections.length; index++) {
       assert.equal(p.isSongPhrasePlaying(index, false), index === section && !fill,
         `${time} ms: only the audible main phrase may highlight its dropdown`);
       assert.equal(p.isSongPhrasePlaying(index, true), index === section && fill,
-        `${time} ms: preset fill starts on the final beat, custom fill owns the whole bar`);
+        `${time} ms: fill dropdown highlights only inside the preset fill window`);
     }
   }
   p.sections[0].fillEvery = 0;
@@ -1140,18 +1173,23 @@ async function testSongBehindEditor() {
       };
 
       p.openEditor(0, mode);
+      settleFillFocusScroll(h, mode);
       assert.equal(p.editorVisible, true);
       assert.equal(p.editorPlayheadStep, -1, 'A fresh draft cannot borrow the whole-song playhead');
       assertSongUntouched();
-      p.toggleStep(3, 5);
+      p.toggleStep(3, mode === 0 ? 5 : fillEditableStep(p.currentProgram(), p.sections[0], p.editorSubdivision));
       p.chooseEditorSubdivision(3);
-      const single = p.editorOffGridEvents(3).find(event => event.tick === 600);
-      assert.ok(single, 'The draft fixture must contain a note to snap individually');
-      p.snapEditorEventToGrid(3, single.tick);
-      p.toggleStep(8, 1);
+      if (mode === 0) {
+        const single = p.editorOffGridEvents(3).find(event => event.tick === 600);
+        assert.ok(single, 'The draft fixture must contain a note to snap individually');
+        p.snapEditorEventToGrid(3, single.tick);
+      }
+      p.toggleStep(8, mode === 0 ? 1 : fillEditableStep(p.currentProgram(), p.sections[0], p.editorSubdivision));
       p.chooseEditorSubdivision(4);
-      assert.ok(p.editorOffGridCount() > 0);
-      p.snapAllEditorOffGridEvents();
+      if (mode === 0) {
+        assert.ok(p.editorOffGridCount() > 0);
+        p.snapAllEditorOffGridEvents();
+      }
       p.chooseEditorSubdivision(6);
       p.seekEditorStep(15);
       assert.equal(p.editorPlayheadBeats, 2.5, 'Timeline taps select the future draft audition origin');
@@ -1164,14 +1202,14 @@ async function testSongBehindEditor() {
       assertSongUntouched();
 
       p.openEditor(0, 1 - mode);
-      assert.deepEqual(plain(p.editorEvents), plain(catalog.buildSectionPattern(
-        p.currentProgram(), p.sections[0], mode === 0).events),
+      settleFillFocusScroll(h, 1 - mode);
+      assert.deepEqual(plain(p.editorEvents), editorOpenEvents(p.currentProgram(), p.sections[0], 1 - mode),
       'Reopening the opposite editor must load that source phrase while the song continues');
       p.seekEditorStep(4);
       p.openEditor(0, mode);
+      settleFillFocusScroll(h, mode);
       assert.equal(p.editorPlayheadStep, -1, 'Switching drafts must reset the selected editor origin');
-      assert.deepEqual(plain(p.editorEvents), plain(catalog.buildSectionPattern(
-        p.currentProgram(), p.sections[0], mode === 1).events),
+      assert.deepEqual(plain(p.editorEvents), editorOpenEvents(p.currentProgram(), p.sections[0], mode),
       'Reopening a discarded draft cannot restore unsaved changes');
       assertSongUntouched();
       p.closeEditor();
@@ -1199,7 +1237,7 @@ async function testSongToEditorHandoff() {
       const songRevision = p.sectionPreviewRevision;
       p.openEditor(0, mode);
       p.seekEditorStep(12);
-      p.toggleStep(3, 5);
+      p.toggleStep(3, mode === 0 ? 5 : fillEditableStep(p.currentProgram(), p.sections[0], p.editorSubdivision));
       p.chooseEditorSubdivision(3);
       const draft = plain(p.editorEvents);
       const saved = plain(p.sections);
@@ -1262,6 +1300,7 @@ async function testPendingSongSurvivesDraftNavigation() {
         assert.equal(h.stopCount(), 0);
         assert.equal(h.calls.length, 1);
         assert.equal(p.previewTarget, 'song');
+        h.runTimeouts(1000);
         assert.equal(h.timers.size, 0, 'Pending songs cannot highlight a section before playback is prepared');
         if (fail) pending.reject(new Error('Current song sample preparation failed'));
         else pending.resolve();
@@ -1291,6 +1330,7 @@ async function testPendingSongSurvivesDraftNavigation() {
       const oldTimers = [...h.archivedTimers.values()];
       assert.equal(h.timers.size, 1);
       h.page.openEditor(0, mode);
+      settleFillFocusScroll(h, mode);
       assert.equal(h.stopCount(), 1, 'Opening a draft must still stop a standalone pattern/fill audition');
       assert.equal(h.page.previewTarget, '');
       assert.ok(h.page.sectionPreviewRevision > previousRevision);
@@ -1311,10 +1351,11 @@ async function testDraftsAndLifecycle() {
     p.previewTarget = 'song';
     const original = plain(p.sections);
     p.openEditor(0, mode);
+    settleFillFocusScroll(h, mode);
     assert.equal(h.stopCount(), 0, 'Opening the editor must preserve a whole-song audition');
-    assert.deepEqual(plain(p.editorEvents), plain(catalog.buildSectionPattern(p.currentProgram(), p.sections[0], mode === 1).events),
+    assert.deepEqual(plain(p.editorEvents), editorOpenEvents(p.currentProgram(), p.sections[0], mode),
       'An editor draft must preserve the source notes and dynamics');
-    p.toggleStep(3, 5);
+    p.toggleStep(3, mode === 0 ? 5 : fillEditableStep(p.currentProgram(), p.sections[0], p.editorSubdivision));
     assert.deepEqual(plain(p.sections), original, 'Draft edits must remain unsaved while auditioning');
     await p.toggleEditorPreview();
     assert.equal(p.previewTarget, 'editor');
@@ -1328,7 +1369,8 @@ async function testDraftsAndLifecycle() {
     assert.equal(audition.bpm, 120);
     assert.equal(audition.beats, 4);
     assert.equal(audition.positionBeats, 0, 'A fresh draft without a cursor must audition from the beginning');
-    assert.equal(p.editorPlayheadStep, -1, 'The scheduled preparation interval has no active grid step');
+    assert.ok(Math.abs(p.editorPlayheadBeats) < 1e-9,
+      'A fresh draft audition anchors the orange playhead at the bar start');
     assert.equal(h.timers.size, 1);
     const initialTimer = p.editorPreviewTimerId;
     assert.equal(h.timers.get(initialTimer).delay, 32);
@@ -1337,7 +1379,7 @@ async function testDraftsAndLifecycle() {
     assert.equal(p.editorPlayheadStep, 5, 'The cursor must reflect the engine timeline');
     const playingEvents = plain(p.editorEvents);
     h.setSnapshot({ mainPlayheadMs: 687.5 });
-    p.toggleStep(2, 7);
+    p.toggleStep(2, mode === 0 ? 7 : fillEditableStep(p.currentProgram(), p.sections[0], p.editorSubdivision) + 1);
     await settle();
     assert.equal(h.calls.length, 2, 'Toggling a cell while auditioning must restart with the updated draft');
     assert.equal(h.calls[1].positionBeats, 1.375,
@@ -1362,7 +1404,8 @@ async function testDraftsAndLifecycle() {
     assert.deepEqual(plain(p.sections), original, 'Close must discard the draft without saving it');
 
     p.openEditor(0, mode);
-    p.toggleStep(4, 3);
+    settleFillFocusScroll(h, mode);
+    p.toggleStep(4, mode === 0 ? 3 : fillEditableStep(p.currentProgram(), p.sections[0], p.editorSubdivision));
     await p.toggleEditorPreview();
     const savedDraft = plain(p.editorEvents);
     p.saveEditor();
@@ -1371,13 +1414,15 @@ async function testDraftsAndLifecycle() {
     assert.equal(h.timers.size, 0);
     const savedPattern = mode === 0 ? p.sections[0].customPattern : p.sections[0].customFill;
     assert.equal(savedPattern.subdivision, p.editorSubdivision);
-    assert.deepEqual(plain(savedPattern.events), savedDraft);
+    assert.deepEqual(plain(savedPattern.events),
+      mode === 0 ? savedDraft : savedFillEvents(p.currentProgram(), p.sections[0], savedDraft));
     assert.notEqual(savedPattern.events, p.editorEvents, 'Applying must store a distinct copy of the draft');
   }
 
   for (const close of [p => p.closeEditor(), p => assert.equal(p.onBackPress(), true), p => p.aboutToDisappear()]) {
     const h = harness();
     h.page.openEditor(0, 1);
+    h.runTimeouts(1000);
     await h.page.toggleEditorPreview();
     h.tick({ mainPlayheadMs: 1100 });
     const stops = h.stopCount();
@@ -1392,6 +1437,7 @@ async function testDraftsAndLifecycle() {
 
   const absent = harness();
   absent.page.openEditor(0, 1);
+  absent.runTimeouts(1000);
   absent.setSessionAvailable(false);
   await absent.page.toggleEditorPreview();
   assert.equal(absent.calls.length, 0);
@@ -1569,7 +1615,8 @@ async function testStoppedCursor() {
     assert.deepEqual(pending.toasts, []);
     await pending.page.toggleEditorPreview();
     await pending.page.toggleEditorPreview();
-    assert.equal(pending.page.editorPlayheadStep, -1, 'Stopping the scheduled warm-up cannot invent a played step');
+    assert.equal(pending.page.editorPlayheadStep, 0,
+      'Stopping after preparation must retain the anchored bar-start cursor, not an unrelated engine snapshot');
     assert.equal(pending.timers.size, 0);
   }
 
@@ -1627,14 +1674,17 @@ async function testCursorSeeking() {
     const h = harness();
     const p = h.page;
     p.openEditor(0, mode);
+    settleFillFocusScroll(h, mode);
     p.updateEditorViewport(6 * CELL_WIDTH + PLAYHEAD_WIDTH);
     const saved = plain(p.sections);
     const draft = plain(p.editorEvents);
     const stoppedAudioCalls = h.stopCount();
     p.seekEditorStep(12);
     assert.equal(p.editorPlayheadStep, 12);
-    assert.equal(p.editorScroller.offset, p.editorGridWidth() - (6 * CELL_WIDTH + PLAYHEAD_WIDTH),
-      'A stopped seek must reveal the chosen cursor once');
+    if (mode === 0) {
+      assert.equal(p.editorScroller.offset, p.editorGridWidth() - (6 * CELL_WIDTH + PLAYHEAD_WIDTH),
+        'A stopped seek must reveal the chosen cursor once');
+    }
     assert.equal(h.calls.length, 0, 'Choosing a cursor while stopped must not start playback');
     assert.equal(h.stopCount(), stoppedAudioCalls, 'Choosing a cursor while stopped must not touch audio');
     p.editorScroller.offset = 0;
@@ -1762,6 +1812,7 @@ async function testSupersededArrangementPreview() {
       assert.notEqual(h.page.previewTarget, '');
       assert.equal(h.calls[0].positionBeats, 0, `${previous.name} must retain its normal start-from-zero behavior`);
       h.page.openEditor(0, 1);
+      h.runTimeouts(1000);
       await h.page.toggleEditorPreview();
       const currentTimer = h.page.editorPreviewTimerId;
       assert.equal(h.calls.length, 2);
@@ -1784,6 +1835,7 @@ async function testTransportAndScrolling() {
   const h = harness();
   const p = h.page;
   p.openEditor(0, 1);
+  h.runTimeouts(1000);
   const firstViewport = 10 * CELL_WIDTH + PLAYHEAD_WIDTH;
   const lastPageOffset = p.editorGridWidth() - firstViewport;
   p.updateEditorViewport(firstViewport);
@@ -1794,7 +1846,8 @@ async function testTransportAndScrolling() {
     { mainPlayheadMs: -1 }
   ]) {
     h.tick(unavailable);
-    assert.equal(p.editorPlayheadStep, -1, 'Stopped, count-in and predeadline snapshots have no active step');
+    assert.equal(p.editorPlayheadStep, 0,
+      'Stopped, count-in and predeadline snapshots keep the anchored bar-start cursor');
   }
   h.tick({ mainPlayheadMs: 0 });
   assert.equal(p.editorPlayheadStep, 0);
@@ -1980,14 +2033,18 @@ async function testSubdivisionDraftsAndSnapping() {
     page.sections[0].customRows = rows.slice();
     page.sections[0].customFillRows = rows.slice();
     page.openEditor(0, mode);
-    assert.deepEqual(plain(page.editorEvents), [event(240, 'kick', 0.78), event(2640, 'kick', 0.78)],
+    const legacyEvents = [event(240, 'kick', 0.78), event(2640, 'kick', 0.78)];
+    const program = page.currentProgram();
+    const section = page.sections[0];
+    assert.deepEqual(plain(page.editorEvents), mode === 0 ? legacyEvents : editorOpenEvents(program, section, 1),
       'Legacy 6/8 rows must retain half-beat timing when opened on the new four-way view');
     assert.equal(page.editorStepCount(), 24);
     page.chooseEditorSubdivision(6);
+    const draft = plain(page.editorEvents);
     page.saveEditor();
     const applied = mode === 0 ? page.sections[0].customPattern : page.sections[0].customFill;
     assert.equal(applied.subdivision, 6);
-    assert.deepEqual(plain(applied.events), [event(240, 'kick', 0.78), event(2640, 'kick', 0.78)]);
+    assert.deepEqual(plain(applied.events), mode === 0 ? draft : savedFillEvents(program, section, draft));
     assert.deepEqual(plain(mode === 0 ? page.sections[0].customFillRows : page.sections[0].customRows), rows,
       'Applying one mode must preserve the other mode including unmigrated legacy data');
   }
@@ -2104,7 +2161,9 @@ async function testBuiltInGridSelection() {
     const saved = plain(p.sections);
     p.openEditor(0, mode);
     assert.equal(p.editorSubdivision, subdivision, 'An explicitly saved grid always wins, including mixed or silent custom patterns');
-    assert.deepEqual(plain(p.editorEvents), notes, 'Automatic view selection cannot reinterpret saved custom events or fall back to legacy rows');
+    const expectedEvents = mode === 0 ? notes : editorOpenEvents(p.currentProgram(), section, 1);
+    assert.deepEqual(plain(p.editorEvents), expectedEvents,
+      'Automatic view selection cannot reinterpret saved custom events or fall back to legacy rows');
     assert.deepEqual(plain(p.sections), saved);
     assert.deepEqual(h.storageWrites, []);
     p.closeEditor();
@@ -2123,7 +2182,9 @@ async function testBuiltInGridSelection() {
     const saved = plain(p.sections);
     p.openEditor(0, mode);
     assert.equal(p.editorSubdivision, 4, 'Legacy rows retain their four-way opening view despite a triplet preset name');
-    assert.deepEqual(plain(p.editorEvents), [event(240, 'kick', 0.78), event(2640, 'kick', 0.78)],
+    const legacyEvents = [event(240, 'kick', 0.78), event(2640, 'kick', 0.78)];
+    assert.deepEqual(plain(p.editorEvents), mode === 0 ? legacyEvents :
+      editorOpenEvents(p.currentProgram(), section, 1),
       'The four-way projection must preserve the original denominator-dependent half-beat legacy timing');
     assert.deepEqual(plain(p.sections), saved);
     assert.deepEqual(h.storageWrites, []);
@@ -2154,7 +2215,7 @@ async function testBuiltInGridSelection() {
     const p = h.page;
     p.styleKey = style;
     p.sections = [freshSection(variant, fill)];
-    const notes = plain(catalog.buildSectionPattern(p.currentProgram(), p.sections[0], mode === 1).events);
+    const notes = editorOpenEvents(p.currentProgram(), p.sections[0], mode);
     p.openEditor(0, mode);
     assert.equal(p.editorSubdivision, expected, 'The opening view must fit the actual opened main/fill phrase rather than just the style name');
     assert.equal(p.editorOffGridCount(), expectedOffGrid, 'A genuinely mixed phrase retains its unmatched notes rather than quantizing them on open');
@@ -2186,6 +2247,45 @@ async function testBuiltInGridSelection() {
   p.closeEditor();
 }
 
+async function testFillEditWindow() {
+  const h = harness();
+  const p = h.page;
+  p.styleKey = 'rock';
+  p.sections = [{ id: 'A', patternIndex: 0, repeats: 4, fillIndex: 2, fillEvery: 4 }];
+  const program = p.currentProgram();
+  const editable = fillEditableStep(program, p.sections[0], 4);
+  p.openEditor(0, 1);
+  const before = plain(p.editorEvents);
+  p.toggleStep(0, 1);
+  assert.deepEqual(plain(p.editorEvents), before, 'Locked main-pattern cells cannot change the draft');
+  p.toggleStep(0, editable);
+  assert.notDeepEqual(plain(p.editorEvents), before, 'Fill-window cells remain editable');
+  p.saveEditor();
+  for (const event of p.sections[0].customFill.events) {
+    assert.ok(event.tick + 0.000001 >= fillStartTick(program, p.sections[0]),
+      'Applied custom fills must store only the fill window');
+  }
+}
+
+async function testFillFocusScroll() {
+  const h = harness();
+  const p = h.page;
+  p.styleKey = 'rock';
+  p.sections = [{ id: 'A', patternIndex: 0, repeats: 4, fillIndex: 2, fillEvery: 4 }];
+  const program = p.currentProgram();
+  const expected = fillEditableStep(program, p.sections[0], 4) * numericConstant('DRUM_EDITOR_CELL_WIDTH');
+  p.updateEditorViewport(6 * CELL_WIDTH);
+  p.openEditor(0, 1);
+  assert.equal(p.editorScroller.offset, 0, 'Fill editor opens on the full bar');
+  h.runTimeouts(1000);
+  assert.equal(p.editorScroller.offset, expected, 'After one second the fill window snaps to the left edge');
+  p.openEditor(0, 0);
+  const patternOffset = p.editorScroller.offset;
+  h.runTimeouts(1000);
+  assert.equal(p.editorScroller.offset, patternOffset,
+    'A delayed fill focus timer from the prior editor must not scroll the pattern editor');
+}
+
 async function main() {
   await testSongSectionProgress();
   await testSongPhraseProgress();
@@ -2208,6 +2308,8 @@ async function main() {
   await testBuiltInGridSelection();
   await testSubdivisionDraftsAndSnapping();
   await testDraftsAndLifecycle();
+  await testFillEditWindow();
+  await testFillFocusScroll();
   await testStartRaces();
   await testStoppedCursor();
   await testCursorSeeking();

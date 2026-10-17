@@ -304,20 +304,14 @@ export function buildDrumPattern(styleKey: string, variant: number, beatsPerBar:
   return new SequencerPattern(DEFAULT_TICKS_PER_BEAT, beatsPerBar, events);
 }
 
-function presetFillStartBeat(styleKey: string, fillIndex: number, beatsPerBar: number): number {
+export function presetFillStartBeat(styleKey: string, fillIndex: number, beatsPerBar: number): number {
   const fillBeats = styleKey === 'jazz' ? jazzFillWindowBeats(fillIndex) :
     styleFillWindowBeats(styleKey, fillIndex);
   return Math.max(0, beatsPerBar - fillBeats);
 }
 
-/** A scheduled custom fill owns the whole bar, including rests; presets replace only their final window. */
+/** First beat of the audible fill window for phrase UI, preview boundaries and the fill grid editor. */
 export function sectionFillStartBeat(program: DrumProgram, section: DrumSection): number {
-  if (section.customFill !== undefined && section.customFill !== null && Array.isArray(section.customFill.events)) {
-    return 0;
-  }
-  if (section.customFillRows !== undefined && section.customFillRows.length > 0) {
-    return 0;
-  }
   return section.fillIndex < 0 ? program.beatsPerBar :
     presetFillStartBeat(program.styleKey, section.fillIndex, program.beatsPerBar);
 }
