@@ -3,6 +3,7 @@
 #include <cmath>
 #include <cstdint>
 #include <iostream>
+#include <vector>
 using namespace onebeat_recording;
 int main()
 {
@@ -34,6 +35,119 @@ int main()
     assert(FramesForMicroseconds(-11000) == -528);
     assert(FramesForNanoseconds(20000000) == 960);
     assert(FramesForNanoseconds(3600000000000LL) == 172800000);
+
+    // Callback timestamps may jitter, but every delivered PCM frame remains
+    // contiguous. The timeline validates clocks without authoring zero/skip seams.
+    ContiguousPcmTimeline pcm;
+    constexpr int64_t pcmStartNs = 10000000000LL;
+    assert(pcm.Append(pcmStartNs, 960));
+    assert(pcm.Append(pcmStartNs + 20500000, 960));
+    assert(pcm.Append(pcmStartNs + 39800000, 960));
+    assert(pcm.FirstTimestampNs() == pcmStartNs);
+    assert(pcm.FramesWritten() == 2880);
+    assert(pcm.LastDriftFrames() == -10);
+    ContiguousPcmTimeline discontinuous;
+    assert(discontinuous.Append(pcmStartNs, 960));
+    assert(!discontinuous.Append(pcmStartNs + 40000000, 960));
+    ContiguousPcmTimeline gradualClockSlope;
+    for (int chunk = 0; chunk < 10000; chunk++) {
+        assert(gradualClockSlope.Append(pcmStartNs + chunk * 20001000LL, 960));
+    }
+    assert(std::abs(gradualClockSlope.LastDriftFrames()) >
+        PCM_TIMESTAMP_DRIFT_STEP_TOLERANCE_FRAMES);
+
+    // Estimate both acoustic delay and level. A fixed full-scale subtraction
+    // would inject an inverted app track; a per-encoder-block delay would reset at 1024.
+    constexpr int estimateFrames = 12000;
+    constexpr int actualDelay = 347;
+    constexpr double actualCoefficient = 0.34;
+    std::vector<int16_t> inner(estimateFrames * 2);
+    std::vector<int16_t> microphone(estimateFrames * 2);
+    uint32_t random = 0x13579bdu;
+    for (int frame = 0; frame < estimateFrames; frame++) {
+        random ^= random << 13; random ^= random >> 17; random ^= random << 5;
+        const int16_t app = static_cast<int16_t>(static_cast<int>(random % 12001) - 6000);
+        const int16_t voice = static_cast<int16_t>(800 * std::sin(2 * M_PI * 997 * frame / SAMPLE_RATE));
+        const int16_t bleed = frame >= actualDelay ?
+            static_cast<int16_t>(std::lround(inner[(frame - actualDelay) * 2] * actualCoefficient)) : 0;
+        inner[frame * 2] = app;
+        inner[frame * 2 + 1] = app;
+        microphone[frame * 2] = static_cast<int16_t>(bleed + voice);
+        microphone[frame * 2 + 1] = static_cast<int16_t>(bleed + voice);
+    }
+    const SpeakerBleedEstimate bleed = EstimateSpeakerBleed(inner.data(), microphone.data(),
+        estimateFrames, SPEAKER_BLEED_LAG_SEARCH_MAX_FRAMES, DEFAULT_SPEAKER_BLEED_CANCEL);
+    assert(bleed.delayFrames == actualDelay);
+    assert(std::abs(bleed.coefficient - actualCoefficient) < 0.01);
+    assert(bleed.correlation > 0.8);
+    const int checkFrame = 4097;
+    const int16_t expectedVoice =
+        static_cast<int16_t>(800 * std::sin(2 * M_PI * 997 * checkFrame / SAMPLE_RATE));
+    const int16_t cleaned = MicAfterSpeakerBleedCancelMono(
+        StereoMono(inner[(checkFrame - bleed.delayFrames) * 2],
+            inner[(checkFrame - bleed.delayFrames) * 2 + 1]),
+        microphone[checkFrame * 2], bleed.coefficient);
+    assert(std::abs(cleaned - expectedVoice) <= 2);
+    assert(SpeakerReferenceOutputFrame(1023, 384) == 639);
+    assert(SpeakerReferenceOutputFrame(1024, 384) == 640);
+
+    // Rendering must be byte-identical regardless of AAC input chunking. The
+    // 1536-frame case proves that a delay longer than one 1024-frame block is
+    // still read from the preceding absolute output position.
+    for (const int delay : {384, 1536}) {
+        std::vector<int16_t> delayedMic(estimateFrames * 2);
+        for (int frame = 0; frame < estimateFrames; frame++) {
+            const int16_t voice =
+                static_cast<int16_t>(800 * std::sin(2 * M_PI * 997 * frame / SAMPLE_RATE));
+            const int16_t delayedBleed = frame >= delay ?
+                static_cast<int16_t>(std::lround(inner[(frame - delay) * 2] * actualCoefficient)) : 0;
+            delayedMic[frame * 2] = static_cast<int16_t>(delayedBleed + voice);
+            delayedMic[frame * 2 + 1] = static_cast<int16_t>(delayedBleed + voice);
+        }
+        auto render = [&](int chunkFrames) {
+            std::vector<int16_t> output(estimateFrames * 2);
+            for (int base = 0; base < estimateFrames; base += chunkFrames) {
+                const int count = std::min(chunkFrames, estimateFrames - base);
+                for (int local = 0; local < count; local++) {
+                    const int frame = base + local;
+                    const int64_t referenceFrame = SpeakerReferenceOutputFrame(frame, delay);
+                    const int32_t reference = referenceFrame >= 0 ?
+                        StereoMono(inner[referenceFrame * 2], inner[referenceFrame * 2 + 1]) : 0;
+                    for (int channel = 0; channel < 2; channel++) {
+                        const int index = frame * 2 + channel;
+                        const int16_t micSample = MicAfterSpeakerBleedCancelMono(
+                            reference, delayedMic[index], actualCoefficient);
+                        output[index] = MixSample(inner[index], micSample, 1);
+                    }
+                }
+            }
+            return output;
+        };
+        const std::vector<int16_t> chunks257 = render(257);
+        const std::vector<int16_t> chunks1024 = render(1024);
+        const std::vector<int16_t> chunks4096 = render(4096);
+        assert(chunks257 == chunks1024);
+        assert(chunks1024 == chunks4096);
+        for (int frame = 0; frame < estimateFrames; frame++) {
+            const int16_t voice =
+                static_cast<int16_t>(800 * std::sin(2 * M_PI * 997 * frame / SAMPLE_RATE));
+            for (int channel = 0; channel < 2; channel++) {
+                const int index = frame * 2 + channel;
+                assert(chunks1024[index] == MixSample(inner[index], voice, 1));
+            }
+        }
+    }
+
+    std::vector<int16_t> uncorrelated(estimateFrames * 2);
+    for (int frame = 0; frame < estimateFrames; frame++) {
+        random ^= random << 13; random ^= random >> 17; random ^= random << 5;
+        const int16_t sample = static_cast<int16_t>(static_cast<int>(random % 12001) - 6000);
+        uncorrelated[frame * 2] = sample;
+        uncorrelated[frame * 2 + 1] = sample;
+    }
+    assert(EstimateSpeakerBleed(inner.data(), uncorrelated.data(),
+        estimateFrames, SPEAKER_BLEED_LAG_SEARCH_MAX_FRAMES,
+        DEFAULT_SPEAKER_BLEED_CANCEL).coefficient == 0);
 
     constexpr int64_t startUs = 9123450000LL;
     constexpr int64_t firstUs = 9123456789LL;
@@ -77,5 +191,6 @@ int main()
     assert(longUptime.Normalize(longUs * 1000 + 987, longUs + 10000, normalized));
     assert(normalized == longUs && longUptime.Divisor() == 1000);
 
-    std::cout << "PASS recording audio math: independent MIC gain, Surface ns/us normalization, preserved offsets, clock guards and long uptime\n";
+    std::cout << "PASS recording audio math: contiguous PCM, estimated cross-block speaker bleed, "
+        "independent MIC gain, timestamp normalization and clock guards\n";
 }

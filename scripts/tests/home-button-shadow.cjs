@@ -12,24 +12,32 @@ const hardStart = button.indexOf('if (this.hardShadow !== undefined)');
 const fallbackStart = button.indexOf('} else {', hardStart);
 assert.ok(hardStart >= 0 && fallbackStart > hardStart, 'Keep hard shadows opt-in');
 const hard = button.slice(hardStart, fallbackStart);
-for (const [kind, title] of [['team', '多人练习'], ['solo', '单人练习'], ['store', '收藏小铺']]) {
-  assert.ok(home.includes(`this.entryCard('${kind}', '${title}',`), title + ' uses the shared home card');
-}
-const homeCard = home.slice(home.indexOf('  private entryCard('), home.indexOf('  build()'));
+assert.match(home, /this\.practiceEntryPanel\('team', '多人练习', '组队同行 · 同拍出发', CORAL\)/);
+assert.match(home, /this\.practiceEntryPanel\('solo', '单人练习', '跟着节奏 · 找到步调', WHITE\)/);
+assert.match(home, /Row\(\{ space: HOME_PRACTICE_GAP \}\)[\s\S]*this\.storeEntryPanel\(\)/);
+assert.match(home, /scenes\/sunset\/entities\/tree\.png/);
+assert.match(home, /vegetation\/plant_06\.png/);
+assert.match(home, /vegetation\/plant_08\.png/);
+assert.match(home, /scenes\/sunset\/entities\/sign\.png/);
+const homeCard = home.slice(home.indexOf('  private practiceEntryPanel('), home.indexOf('  @Builder\n  private storeEntryPanel'));
 const cardFaceStart = homeCard.indexOf('      Column()');
 assert.ok(cardFaceStart > 0);
 const homeBacking = homeCard.slice(0, cardFaceStart);
-assert.match(homeBacking, /backgroundColor\(INK\)\.borderRadius\(HOME_CARD_RADIUS\)/);
-assert.match(homeBacking, /translate\(\{ x: HOME_CARD_SHADOW_X, y: HOME_CARD_SHADOW_Y \}\)/);
+assert.match(homeBacking, /backgroundColor\(INK\)\.borderRadius\(HOME_ENTRY_RADIUS\)/);
+assert.match(homeBacking, /translate\(\{ x: HOME_ENTRY_SHADOW_X, y: HOME_ENTRY_SHADOW_Y \}\)/);
 assert.match(homeBacking, /hitTestBehavior\(HitTestMode\.None\)\.accessibilityLevel\('no'\)/);
 assert.doesNotMatch(homeBacking, /\.onClick/);
 assert.doesNotMatch(home, /recording_share_hero|worksEntry\(|HOME_WORKS_|stopPropagation|badgeLabel: '(?:TEAM|SOLO)'/);
-assert.equal((homeCard.match(/Button\(\{ type: ButtonType\.Normal \}\)/g) || []).length, 3,
-  'Practice header, metric and works use sibling controls rather than nested buttons');
-assert.equal((homeCard.match(/onClick\(\(\) => this\.goPrimary\(kind\)\)/g) || []).length, 2);
+assert.equal((homeCard.match(/Button\(\{ type: ButtonType\.Normal \}\)/g) || []).length, 2,
+  'Practice and works use sibling controls rather than nested buttons');
+assert.equal((homeCard.match(/onClick\(\(\) => this\.goPrimary\(kind\)\)/g) || []).length, 1);
 assert.equal((homeCard.match(/onClick\(\(\) => this\.goSecondary\(kind\)\)/g) || []).length, 1);
-assert.doesNotMatch(homeCard.slice(homeCard.lastIndexOf('      }.width')), /\.onClick/,
-  'The shared face/wrapper must not intercept works taps');
+const storeCard = home.slice(home.indexOf('  private storeEntryPanel('), home.indexOf('  build()'));
+assert.doesNotMatch(storeCard, /Image\(/, 'The selected store panel intentionally has no illustration');
+assert.match(storeCard, /backgroundColor\(LILAC\)/);
+assert.match(storeCard, /onClick\(\(\) => this\.goPrimary\('store'\)\)/);
+assert.match(home, /onebeat_wordmark\.png[\s\S]*entry_burst\.png[\s\S]*height\(245\)\.clip\(true\)/,
+  'The existing title and hero remain unchanged above the redesigned entries');
 assert.match(button, /@Prop hardShadow: ComicHardShadowOptions \| undefined = undefined/);
 assert.ok(hard.indexOf('Row()') < hard.indexOf('this.buttonFace()'), 'Backing must paint before the face');
 assert.match(hard, /backgroundColor\(this\.hardShadow\?\.color \?\? INK\)/);
@@ -73,18 +81,14 @@ vm.runInNewContext(compiled.outputText, context);
 const page = new context.exports.Index();
 page.aboutToAppear();
 assert.equal(bootstraps, 1);
-assert.equal(page.secondaryLabel('team'), '作品 2');
-assert.equal(page.secondaryLabel('solo'), '作品 1');
-assert.equal(page.entryMetric('team'), '累计录制 2:35');
-assert.equal(page.entryMetric('solo'), '累计录制 1小时1分');
-assert.equal(page.entryMetric('store'), '角色 · 场景 · 鼓机');
-assert.match(page.secondaryAccessibility('team'), /多人练习作品，2段/);
+assert.equal(page.worksCount('team'), 2);
+assert.equal(page.worksCount('solo'), 1);
+assert.match(page.practiceAccessibility('team', '多人练习'), /组队同行，同拍出发/);
+assert.match(page.worksAccessibility('team'), /多人练习作品，2段/);
 clips = [{ scope: 'team', durationMs: 65000 }];
 page.onPageShow();
-assert.equal(page.secondaryLabel('team'), '作品 1', 'Returning from deletion refreshes the real count');
-assert.equal(page.entryMetric('team'), '累计录制 1:05');
-assert.equal(page.secondaryLabel('solo'), '作品 0');
-assert.equal(page.entryMetric('solo'), '累计录制 0:00', 'Empty libraries do not show fabricated practice stats');
+assert.equal(page.worksCount('team'), 1, 'Returning from deletion refreshes the real count');
+assert.equal(page.worksCount('solo'), 0, 'Empty libraries do not show fabricated works');
 for (const kind of ['team', 'solo', 'store']) page.goPrimary(kind);
 for (const kind of ['team', 'solo', 'store']) page.goSecondary(kind);
 assert.deepEqual(JSON.parse(JSON.stringify(routes)), [
@@ -95,4 +99,4 @@ assert.deepEqual(JSON.parse(JSON.stringify(routes)), [
   { url: 'pages/RecordingLibraryPage', params: { scope: 'solo' } },
   { url: 'pages/StorePage' }
 ], 'Practice navigation and scoped works navigation remain distinct');
-console.log('PASS: home cards use non-interactive ink backings, independent works controls, real scoped counts/durations; shared ComicButton fallback retained');
+console.log('PASS: paired home panels preserve the hero, use selected scene assets, independent works controls and scoped counts; shared ComicButton fallback retained');

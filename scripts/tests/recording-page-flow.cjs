@@ -2,6 +2,13 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const ts = require(process.argv[2] || '/Applications/DevEco-Studio.app/Contents/tools/hvigor/hvigor/node_modules/typescript/lib/typescript.js');
+const mainPageSource = fs.readFileSync('entry/src/main/ets/pages/MainPage.ets', 'utf8');
+assert.match(mainPageSource,
+  /private recordingSavedOverlay\(\)[\s\S]*Button\('继续行进'[\s\S]*Button\('去查看'/,
+  'Recording success must offer continue and view actions');
+assert.match(mainPageSource,
+  /private recordingErrorOverlay\(\)[\s\S]*Text\(this\.recordingErrorMessage\)[\s\S]*Button\('知道了，继续行进'/,
+  'Recording failures must show their error detail in a dialog');
 
 function loadPage(name, context) {
   const source = fs.readFileSync(`entry/src/main/ets/pages/${name}.ets`, 'utf8');
@@ -25,7 +32,7 @@ const clip = { id: 'clip-1', path: '/private/clip.mp4', createdAt: 1, durationMs
   width: 720, height: 1280, interrupted: false, stopReason: 'user', scope: 'solo',
   sourcePath: '/private/source.mp4', micPath: '/private/mic.pcm', innerPath: '/private/inner.pcm', renderedGain: 1 };
 
-function harness() {
+function harness(options = {}) {
   const trace = [], routes = [], notices = [];
   let snapshot = { state: 'idle', elapsedMs: 0, amplitude: 0, error: '', saveFailureDetail: '', micMuted: false };
   let pending;
@@ -39,17 +46,26 @@ function harness() {
     Curve: { EaseInOut: 'ease' },
     AppSession: { get: () => session },
     AppStorage: { get: key => storage.get(key), setOrCreate: (key, value) => storage.set(key, value) },
-    defaultBeatPointStates: () => [], logUserFailure() {}, userErrorMessage: (_error, fallback) => fallback,
+    defaultBeatPointStates: () => [], logUserFailure() {},
+    userErrorMessage: (_error, fallback) => fallback.trim().length > 0 ? fallback : '操作未完成，请重试',
     showUserNotice: message => notices.push(message),
     router: { async pushUrl(args) { routes.push(args); } },
     setInterval: () => 1, clearInterval() {},
     animateTo: (_options, action) => { trace.push('animate'); action(); },
     RecordingCoordinator: {
       getSnapshot: () => snapshot,
+      saveFailureNoticeText: view => {
+        const state = view ?? snapshot;
+        return state.saveFailureDetail ? `${state.error}（${state.saveFailureDetail}）` : state.error;
+      },
       async stop(reason) { trace.push(`stop:${reason}`); snapshot = { ...snapshot, state: 'idle' }; },
-      async retrySave() { trace.push('retry-save'); snapshot = { ...snapshot, state: 'idle', pendingClip: undefined, lastClip: clip }; return clip; },
+      async retrySave() { trace.push('retry-save'); snapshot = { ...snapshot, state: 'idle',
+        error: '', saveFailureDetail: '', pendingClip: undefined, lastClip: clip }; return clip; },
       async discardPending() { trace.push('discard-pending'); snapshot = { ...snapshot, state: 'idle', pendingClip: undefined }; },
-      async start() { trace.push('start-recording'); }
+      async start() {
+        trace.push('start-recording');
+        if (options.startFailure) { throw new Error('synthetic start failure'); }
+      }
     },
     RecordingRepository: {
       list: scope => storedClips.filter(item => scope === undefined || item.scope === scope),
@@ -106,20 +122,65 @@ function harness() {
   walking.refreshRecordingState();
   walking.refreshRecordingState();
   assert.equal(finished.routes.length, 0, 'Completing a recording keeps the walking page in place');
-  assert.equal(finished.notices.length, 1, 'A completed clip reports its home library destination once');
-  assert.match(finished.notices[0], /首页.*单人练习作品/);
+  assert.equal(finished.notices.length, 0, 'Successful recording must not use a transient toast');
+  assert.equal(walking.showRecordingSaved, true, 'A completed clip opens the saved-location dialog once');
+  assert.equal(walking.savedRecordingLabel, '单人练习作品');
+  walking.continueWalkingAfterRecording();
+  assert.equal(walking.showRecordingSaved, false, 'Continue walking dismisses only the saved dialog');
+  assert.equal(finished.routes.length, 0);
   assert.equal(finished.trace.includes('pause-practice'), false, 'Stopping a video does not pause the shared practice');
+
+  const viewing = harness();
+  const viewingPage = loadPage('MainPage', viewing.context);
+  const teamClip = { ...clip, id: 'clip-team', scope: 'team' };
+  viewingPage.recordingState = 'recording';
+  viewing.setSnapshot({ state: 'idle', lastClip: teamClip });
+  viewingPage.refreshRecordingState();
+  assert.equal(viewingPage.savedRecordingLabel, '多人练习作品');
+  await viewingPage.viewSavedRecording();
+  assert.equal(viewing.routes.length, 1);
+  assert.equal(viewing.routes[0].url, 'pages/RecordingLibraryPage');
+  assert.equal(viewing.routes[0].params.scope, 'team');
+  assert.equal(viewing.routes[0].params.clipId, teamClip.id,
+    'View opens the matching library and selects the newly saved clip');
+  assert.equal(viewing.trace.includes('pause-practice'), false, 'Viewing works does not pause practice implicitly');
+
+  const startFailure = harness({ startFailure: true });
+  const startFailurePage = loadPage('MainPage', startFailure.context);
+  await startFailurePage.startRecording();
+  assert.equal(startFailure.notices.length, 0);
+  assert.equal(startFailurePage.showRecordingError, true);
+  assert.equal(startFailurePage.recordingErrorTitle, '无法开始录制');
+  assert.match(startFailurePage.recordingErrorMessage, /麦克风和录屏授权/);
+
+  const failedStart = harness();
+  const failedStartPage = loadPage('MainPage', failedStart.context);
+  failedStart.setSnapshot({ state: 'failed', error: '麦克风不可用，录制已结束' });
+  failedStartPage.refreshRecordingState();
+  failedStartPage.refreshRecordingState();
+  assert.equal(failedStart.notices.length, 0, 'Recording failures must not use toast');
+  assert.equal(failedStartPage.showRecordingError, true);
+  assert.equal(failedStartPage.recordingErrorTitle, '录制未完成');
+  assert.equal(failedStartPage.recordingErrorMessage, '麦克风不可用，录制已结束');
+  assert.equal(failedStartPage.onBackPress(), true);
+  assert.equal(failedStartPage.showRecordingError, false, 'Back dismisses the recording failure dialog');
 
   const recovery = harness();
   const saving = loadPage('MainPage', recovery.context);
-  recovery.setSnapshot({ state: 'failed', pendingClip: clip });
+  recovery.setSnapshot({ state: 'failed', pendingClip: clip,
+    error: '原始音轨已保留，合成成品视频失败', saveFailureDetail: '编码器暂时不可用' });
   saving.refreshRecordingState();
   assert.equal(saving.showSaveRecovery, true);
+  assert.equal(saving.showRecordingError, false, 'A retained capture uses the actionable recovery dialog');
+  assert.equal(recovery.notices.length, 0, 'Save failures must not also show toast');
+  assert.equal(saving.recordingSaveSummary, '原始音轨已保留，合成成品视频失败');
+  assert.equal(saving.recordingSaveDetail, '编码器暂时不可用');
   saving.requestRecording();
   assert.equal(recovery.trace.includes('start-recording'), false, 'A pending video must be saved before another recording');
   await saving.retryRecordingSave();
-  assert.equal(recovery.routes.length, 0, 'Recovering a save also keeps the walking page in place');
-  assert.match(recovery.notices[0], /首页/);
+  assert.equal(recovery.routes.length, 0, 'Recovering a save waits for an explicit dialog choice');
+  assert.equal(recovery.notices.length, 0);
+  assert.equal(saving.showRecordingSaved, true, 'A recovered save uses the same saved-location dialog');
 
   const discarded = harness();
   const failedRecording = loadPage('MainPage', discarded.context);
@@ -227,5 +288,5 @@ function harness() {
   await delayedMix;
   assert.equal(staleLibrary.selectedId, 'another-clip', 'A late render must not restore the previously selected clip');
   assert.equal(staleLibrary.clips[0].path, clip.path, 'A hidden page must not apply a stale preview source');
-  console.log('PASS: capture consent, reopenable controls, save-in-place, preview focus gate, explicit check-in and independent MIC render ordering');
+  console.log('PASS: capture consent, saved/error dialogs, reopenable controls, preview focus gate, explicit check-in and independent MIC render ordering');
 })().catch(error => { console.error(error); process.exitCode = 1; });

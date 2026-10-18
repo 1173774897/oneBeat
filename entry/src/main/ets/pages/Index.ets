@@ -1,20 +1,23 @@
 import { router } from '@kit.ArkUI';
-import { ComicCharacter, PAPER, INK, WHITE } from '../components/ComicKit';
+import { ComicCharacter, PAPER, INK, CORAL, LILAC, WHITE } from '../components/ComicKit';
 import { RecordingRepository } from '../recording/RecordingRepository';
-import { RecordingClip, RecordingScope } from '../recording/RecordingModels';
+import { RecordingScope } from '../recording/RecordingModels';
 import { ensureStoreBootstrapReady } from '../store/StoreBootstrapSync';
 
 type HomeEntryKind = RecordingScope | 'store';
 
-const HOME_CARD_HEIGHT: number = 128;
-const HOME_CARD_HEADER_HEIGHT: number = 76;
-const HOME_CARD_RADIUS: number = 10;
-const HOME_CARD_INSET: number = 16;
-const HOME_CARD_ICON_SIZE: number = 34;
-const HOME_CARD_PILL_HEIGHT: number = 30;
-const HOME_CARD_PILL_WIDTH: number = 124;
-const HOME_CARD_SHADOW_X: number = 3;
-const HOME_CARD_SHADOW_Y: number = 4;
+const HOME_ENTRY_RADIUS: number = 9;
+const HOME_ENTRY_SHADOW_X: number = 3;
+const HOME_ENTRY_SHADOW_Y: number = 4;
+const HOME_PRACTICE_GAP: number = 12;
+const HOME_PRACTICE_HEIGHT: number = 214;
+const HOME_PRACTICE_FOOTER_HEIGHT: number = 46;
+const HOME_PRACTICE_ART_HEIGHT: number = 88;
+const HOME_STORE_HEIGHT: number = 98;
+const HOME_TEAM_TREE_HEIGHT: number = 84;
+const HOME_TEAM_PLANT_06_WIDTH: number = 78;
+const HOME_TEAM_PLANT_08_WIDTH: number = 48;
+const HOME_SOLO_SIGN_HEIGHT: number = 78;
 
 @Entry
 @Component
@@ -24,8 +27,6 @@ struct Index {
   @StorageLink('recordingLibraryEpoch') @Watch('refreshWorks') libraryEpoch: number = 0;
   @State teamWorksCount: number = 0;
   @State soloWorksCount: number = 0;
-  @State teamRecordedMs: number = 0;
-  @State soloRecordedMs: number = 0;
 
   aboutToAppear(): void {
     void ensureStoreBootstrapReady();
@@ -39,8 +40,6 @@ struct Index {
     const soloClips = RecordingRepository.list('solo');
     this.teamWorksCount = teamClips.length;
     this.soloWorksCount = soloClips.length;
-    this.teamRecordedMs = teamClips.reduce((total: number, clip: RecordingClip) => total + clip.durationMs, 0);
-    this.soloRecordedMs = soloClips.reduce((total: number, clip: RecordingClip) => total + clip.durationMs, 0);
   }
 
   private goSolo(): void {
@@ -65,77 +64,99 @@ struct Index {
     router.pushUrl({ url: 'pages/RecordingLibraryPage', params: { scope: kind } });
   }
 
-  private recordedDuration(kind: HomeEntryKind): string {
-    const totalSeconds = Math.floor((kind === 'team' ? this.teamRecordedMs : this.soloRecordedMs) / 1000);
-    if (totalSeconds >= 3600) { return `${Math.floor(totalSeconds / 3600)}小时${Math.floor(totalSeconds % 3600 / 60)}分`; }
-    return `${Math.floor(totalSeconds / 60)}:${(totalSeconds % 60).toString().padStart(2, '0')}`;
+  private worksCount(kind: RecordingScope): number {
+    return kind === 'team' ? this.teamWorksCount : this.soloWorksCount;
   }
 
-  private entryMetric(kind: HomeEntryKind): string {
-    return kind === 'store' ? '角色 · 场景 · 鼓机' : `累计录制 ${this.recordedDuration(kind)}`;
+  private practiceAccessibility(kind: RecordingScope, title: string): string {
+    return `${title}，${kind === 'team' ? '组队同行，同拍出发' : '跟着节奏，找到步调'}`;
   }
 
-  private secondaryLabel(kind: HomeEntryKind): string {
-    return kind === 'store' ? '逛逛小铺' : `作品 ${kind === 'team' ? this.teamWorksCount : this.soloWorksCount}`;
-  }
-
-  private secondaryAccessibility(kind: HomeEntryKind): string {
-    if (kind === 'store') { return '进入收藏小铺'; }
-    return `${kind === 'team' ? '多人' : '单人'}练习作品，${kind === 'team' ? this.teamWorksCount : this.soloWorksCount}段，查看作品`;
+  private worksAccessibility(kind: RecordingScope): string {
+    return `${kind === 'team' ? '多人' : '单人'}练习作品，${this.worksCount(kind)}段，查看作品`;
   }
 
   @Builder
-  private entryCard(kind: HomeEntryKind, title: string, subtitle: string, icon: string, tint: string) {
+  private teamEntryArtwork() {
+    Stack({ alignContent: Alignment.Bottom }) {
+      Image($rawfile('scenes/sunset/entities/tree.png'))
+        .height(HOME_TEAM_TREE_HEIGHT).objectFit(ImageFit.Contain).align(Alignment.Bottom)
+      Image($rawfile('vegetation/plant_06.png'))
+        .width(HOME_TEAM_PLANT_06_WIDTH).height(38).objectFit(ImageFit.Contain)
+        .align(Alignment.BottomStart).translate({ x: -2, y: 3 })
+      Image($rawfile('vegetation/plant_08.png'))
+        .width(HOME_TEAM_PLANT_08_WIDTH).height(43).objectFit(ImageFit.Contain)
+        .align(Alignment.BottomEnd).translate({ x: -1, y: 3 })
+    }.width('100%').height(HOME_PRACTICE_ART_HEIGHT).hitTestBehavior(HitTestMode.None)
+  }
+
+  @Builder
+  private soloEntryArtwork() {
+    Stack({ alignContent: Alignment.Bottom }) {
+      Image($rawfile('scenes/sunset/entities/sign.png'))
+        .height(HOME_SOLO_SIGN_HEIGHT).objectFit(ImageFit.Contain).align(Alignment.Bottom)
+    }.width('100%').height(HOME_PRACTICE_ART_HEIGHT).hitTestBehavior(HitTestMode.None)
+  }
+
+  @Builder
+  private practiceEntryPanel(kind: RecordingScope, title: string, subtitle: string, fill: string) {
     Stack({ alignContent: Alignment.TopStart }) {
-      Row().width('100%').height(HOME_CARD_HEIGHT).backgroundColor(INK).borderRadius(HOME_CARD_RADIUS)
-        .translate({ x: HOME_CARD_SHADOW_X, y: HOME_CARD_SHADOW_Y })
+      Row().width('100%').height(HOME_PRACTICE_HEIGHT).backgroundColor(INK).borderRadius(HOME_ENTRY_RADIUS)
+        .translate({ x: HOME_ENTRY_SHADOW_X, y: HOME_ENTRY_SHADOW_Y })
         .hitTestBehavior(HitTestMode.None).accessibilityLevel('no')
-      // The card face has no click handler: its practice areas and works pill are
-      // sibling buttons, so a works tap can never bubble into practice navigation.
+      // Practice and works remain sibling controls so a works tap cannot start a session.
       Column() {
         Button({ type: ButtonType.Normal }) {
-          Row({ space: 12 }) {
-            Stack() {
-              Image($rawfile(icon)).width(HOME_CARD_ICON_SIZE).height(HOME_CARD_ICON_SIZE)
-                .objectFit(ImageFit.Contain)
-            }.width(42).height(42).backgroundColor(tint).borderRadius(12)
-            Column({ space: 4 }) {
-              Text(title).fontSize(21).fontWeight(900).fontColor(INK)
-              Text(subtitle).fontSize(11).fontColor('#817B76').maxLines(1)
-                .textOverflow({ overflow: TextOverflow.Ellipsis })
-            }.layoutWeight(1).alignItems(HorizontalAlign.Start)
-            Text('›').fontSize(24).fontColor(INK).width(28).height(28).textAlign(TextAlign.Center)
-              .border({ width: 1.2, color: '#817B76' }).borderRadius(14)
+          Column({ space: 3 }) {
+            Text(title).fontSize(21).fontWeight(900).fontColor(INK).width('100%')
+            Text(subtitle).fontSize(10).fontWeight(FontWeight.Bold).fontColor(INK)
+              .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).width('100%')
+            if (kind === 'team') {
+              this.teamEntryArtwork()
+            } else {
+              this.soloEntryArtwork()
+            }
+          }.width('100%').alignItems(HorizontalAlign.Start)
+        }.width('100%').height(HOME_PRACTICE_HEIGHT - HOME_PRACTICE_FOOTER_HEIGHT)
+          .padding({ left: 12, right: 12, top: 13, bottom: 5 })
+          .backgroundColor(Color.Transparent).borderRadius(HOME_ENTRY_RADIUS)
+          .onClick(() => this.goPrimary(kind))
+          .accessibilityText(this.practiceAccessibility(kind, title))
+        Button({ type: ButtonType.Normal }) {
+          Row() {
+            Text(`作品 ${this.worksCount(kind)}`).fontSize(15).fontWeight(900).fontColor(INK)
+            Blank()
+            Text('›').fontSize(22).fontWeight(900).fontColor(INK)
           }.width('100%')
-        }.width('100%').height(HOME_CARD_HEADER_HEIGHT)
-          .padding({ left: HOME_CARD_INSET, right: HOME_CARD_INSET, top: 12, bottom: 4 })
-          .backgroundColor(Color.Transparent).borderRadius(HOME_CARD_RADIUS)
-          .onClick(() => this.goPrimary(kind)).accessibilityText(`${title}，${subtitle}`)
-        Row({ space: 8 }) {
-          Button({ type: ButtonType.Normal }) {
-            Row({ space: 5 }) {
-              Image($rawfile('comic/icons/note-quarter.svg')).width(12).height(14).objectFit(ImageFit.Contain)
-                .opacity(0.55)
-              Text(this.entryMetric(kind)).fontSize(11).fontColor('#817B76').maxLines(1).layoutWeight(1)
-                .textOverflow({ overflow: TextOverflow.Ellipsis })
-            }.width('100%')
-          }.layoutWeight(1).height(HOME_CARD_PILL_HEIGHT).padding(0)
-            .backgroundColor(Color.Transparent).borderRadius(0).onClick(() => this.goPrimary(kind))
-            .accessibilityText(`${title}，${this.entryMetric(kind)}`)
-          Button({ type: ButtonType.Normal }) {
-            Row({ space: 4 }) {
-              Text(this.secondaryLabel(kind)).fontSize(12).fontWeight(FontWeight.Bold).fontColor(INK)
-                .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).layoutWeight(1)
-              Text('›').fontSize(18).fontColor(INK)
-            }.width('100%')
-          }.width(HOME_CARD_PILL_WIDTH).height(HOME_CARD_PILL_HEIGHT).padding({ left: 12, right: 10 })
-            .backgroundColor(tint).borderRadius(15).onClick(() => this.goSecondary(kind))
-            .accessibilityText(this.secondaryAccessibility(kind))
-        }.width('100%').height(HOME_CARD_HEIGHT - HOME_CARD_HEADER_HEIGHT)
-          .padding({ left: HOME_CARD_INSET, right: HOME_CARD_INSET, top: 4, bottom: 14 })
-      }.width('100%').height(HOME_CARD_HEIGHT).backgroundColor(WHITE)
-        .border({ width: 1.2, color: '#655F59' }).borderRadius(HOME_CARD_RADIUS)
-    }.width('100%').height(HOME_CARD_HEIGHT).clip(false)
+        }.width('100%').height(HOME_PRACTICE_FOOTER_HEIGHT)
+          .padding({ left: 14, right: 14 }).backgroundColor(Color.Transparent).borderRadius(0)
+          .border({ width: { top: 1.2 }, color: INK })
+          .onClick(() => this.goSecondary(kind)).accessibilityText(this.worksAccessibility(kind))
+      }.width('100%').height(HOME_PRACTICE_HEIGHT).backgroundColor(fill)
+        .border({ width: 1.2, color: INK }).borderRadius(HOME_ENTRY_RADIUS)
+    }.layoutWeight(1).height(HOME_PRACTICE_HEIGHT).clip(false)
+  }
+
+  @Builder
+  private storeEntryPanel() {
+    Stack({ alignContent: Alignment.TopStart }) {
+      Row().width('100%').height(HOME_STORE_HEIGHT).backgroundColor(INK).borderRadius(HOME_ENTRY_RADIUS)
+        .translate({ x: HOME_ENTRY_SHADOW_X, y: HOME_ENTRY_SHADOW_Y })
+        .hitTestBehavior(HitTestMode.None).accessibilityLevel('no')
+      Button({ type: ButtonType.Normal }) {
+        Row({ space: 10 }) {
+          Column({ space: 5 }) {
+            Text('收藏小铺').fontSize(22).fontWeight(900).fontColor(INK).width('100%')
+            Text('角色 · 场景 · 鼓机').fontSize(12).fontWeight(FontWeight.Bold).fontColor(INK).width('100%')
+          }.layoutWeight(1).alignItems(HorizontalAlign.Start)
+          Text('去逛逛').fontSize(15).fontWeight(900).fontColor(INK)
+          Text('›').fontSize(24).fontWeight(900).fontColor(INK)
+        }.width('100%')
+      }.width('100%').height(HOME_STORE_HEIGHT)
+        .padding({ left: 16, right: 14 }).backgroundColor(LILAC)
+        .border({ width: 1.2, color: INK }).borderRadius(HOME_ENTRY_RADIUS)
+        .onClick(() => this.goPrimary('store')).accessibilityText('进入收藏小铺，角色、场景、鼓机')
+    }.width('100%').height(HOME_STORE_HEIGHT).clip(false)
   }
 
   build() {
@@ -163,9 +184,11 @@ struct Index {
           Text('GOOD PEOPLE. SAME BEAT!').fontSize(12).fontWeight(900)
             .backgroundColor(PAPER).padding(5).align(Alignment.BottomEnd)
         }.width('100%').height(245).clip(true)
-        this.entryCard('team', '多人练习', '组队同行，踩准同一个节拍', 'comic/icons/multi-person.svg', '#E5DCF6')
-        this.entryCard('solo', '单人练习', '跟着节奏，找到自己的步调', 'comic/icons/solo-person.svg', '#FFE0D4')
-        this.entryCard('store', '收藏小铺', '为每一次同行添点新花样', 'comic/icons/limited-free-ticket.svg', '#D5EDE7')
+        Row({ space: HOME_PRACTICE_GAP }) {
+          this.practiceEntryPanel('team', '多人练习', '组队同行 · 同拍出发', CORAL)
+          this.practiceEntryPanel('solo', '单人练习', '跟着节奏 · 找到步调', WHITE)
+        }.width('100%').height(HOME_PRACTICE_HEIGHT)
+        this.storeEntryPanel()
         Row() {
           Blank()
           Text('隐私声明').fontSize(12).fontColor('#66615A').decoration({ type: TextDecorationType.Underline })

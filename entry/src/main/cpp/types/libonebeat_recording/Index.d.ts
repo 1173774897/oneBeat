@@ -31,7 +31,7 @@ export interface NativeMixOptions {
   micOffsetUs: number;
   innerOffsetUs: number;
   gain: number;
-  /** 0–1: subtract scaled app playback from mic before mix (built-in speaker echo). */
+  /** 0–1: maximum estimated correlated app bleed removed from the microphone. */
   speakerBleedCancel: number;
 }
 export const start: (options: NativeCaptureOptions) => Promise<void>;

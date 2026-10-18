@@ -1,6 +1,8 @@
 import * as recordingNative from 'libonebeat_recording.so';
 import { RecordingClip } from './RecordingModels';
 
+const BUILT_IN_SPEAKER_BLEED_LIMIT: number = 0.9;
+
 /** Source tracks are immutable; rendering changes only the microphone coefficient. */
 export class RecordingMixer {
   static validateCaptureTiming(clip: RecordingClip): void {
@@ -32,8 +34,9 @@ export class RecordingMixer {
     // Built-in speaker captures beat bleed on mic before OH_APP_PLAYBACK inner starts.
     const speakerLikeCapture = clip.builtInSpeakerCapture === true ||
       (clip.builtInSpeakerCapture === undefined && innerLeadUs > 80000);
-    // Residual mix subtracts the full mono inner reference from mic before adding gain.
-    const speakerBleedCancel = speakerLikeCapture ? 1 : 0;
+    // Native mix estimates the actual acoustic coefficient and cancels only a
+    // correlated delayed reference; this value is a safety ceiling, not a fixed subtraction.
+    const speakerBleedCancel = speakerLikeCapture ? BUILT_IN_SPEAKER_BLEED_LIMIT : 0;
     if (speakerLikeCapture) {
       console.info(`[RecordingMix] speaker residual innerLeadUs=${innerLeadUs} bleedCancel=${speakerBleedCancel}`);
     }

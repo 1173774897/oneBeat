@@ -78,28 +78,18 @@ struct PcmChunk { bool microphone; int64_t timestampNs; std::vector<uint8_t> byt
 struct TrackWriter {
     int fd = -1;
     int64_t firstTimestampNs = -1;
-    int64_t framesWritten = 0;
+    onebeat_recording::ContiguousPcmTimeline timeline;
     void Append(const PcmChunk &chunk)
     {
-        if (firstTimestampNs < 0) firstTimestampNs = chunk.timestampNs;
-        int64_t targetFrame = std::max<int64_t>(0,
-            onebeat_recording::FramesForNanoseconds(chunk.timestampNs - firstTimestampNs));
-        int64_t missing = targetFrame - framesWritten;
-        // A discontinuity cannot silently shift every subsequent beat in the export.
-        Check(std::abs(missing) <= RATE, "采集时间戳出现跳变，录制已结束");
-        const std::vector<uint8_t> silence(4096, 0);
-        while (missing > 0) {
-            size_t frames = std::min<int64_t>(missing, silence.size() / FRAME_BYTES);
-            WriteAll(fd, silence.data(), frames * FRAME_BYTES);
-            framesWritten += frames;
-            missing -= frames;
-        }
-        size_t skip = static_cast<size_t>(std::max<int64_t>(0, framesWritten - targetFrame)) * FRAME_BYTES;
-        if (skip < chunk.bytes.size()) {
-            size_t length = (chunk.bytes.size() - skip) / FRAME_BYTES * FRAME_BYTES;
-            WriteAll(fd, chunk.bytes.data() + skip, length);
-            framesWritten += length / FRAME_BYTES;
-        }
+        Check(!chunk.bytes.empty() && chunk.bytes.size() % FRAME_BYTES == 0,
+            "采集音频帧格式无效");
+        const int64_t chunkFrames = chunk.bytes.size() / FRAME_BYTES;
+        // Copied AVScreenCapture payloads are already ordered PCM chunks. Their
+        // hardware timestamps can quantize or jitter at callback boundaries;
+        // using that jitter to edit every chunk creates periodic zero/skip seams.
+        Check(timeline.Append(chunk.timestampNs, chunkFrames), "采集时间戳出现跳变，录制已结束");
+        WriteAll(fd, chunk.bytes.data(), chunk.bytes.size());
+        firstTimestampNs = timeline.FirstTimestampNs();
     }
 };
 
@@ -327,10 +317,15 @@ private:
         if (!isMic && !isInner) return;
         auto *address = OH_AVBuffer_GetAddr(buffer);
         int capacity = OH_AVBuffer_GetCapacity(buffer);
-        OH_AVCodecBufferAttr attr{};
-        OH_AVBuffer_GetBufferAttr(buffer, &attr);
-        int size = attr.size > 0 ? attr.size : capacity;
-        if (address == nullptr || size <= 0 || attr.offset < 0 || size > capacity - attr.offset) return;
+        // AVScreenCapture wraps each audio callback in an exact-size raw PCM
+        // allocation. This callback path does not define codec attrs as a PCM
+        // subrange, so using an optional attr offset/size can corrupt both stems.
+        if (address == nullptr || capacity <= 0) return;
+        if (capacity % FRAME_BYTES != 0) {
+            self->Fail("系统返回了不完整的录制音频帧");
+            return;
+        }
+        const int size = capacity;
         try {
             std::lock_guard<std::mutex> lock(self->pcmMutex);
             if (self->queuedPcmBytes + size > MAX_PCM_QUEUE_BYTES) {
@@ -340,7 +335,7 @@ private:
             // The system frees this memory on callback return. Copy into a
             // bounded queue; no filesystem I/O, encoding, or JS callback here.
             PcmChunk chunk{isMic, timestampNs, {}};
-            chunk.bytes.assign(address + attr.offset, address + attr.offset + size);
+            chunk.bytes.assign(address, address + size);
             self->queuedPcmBytes += size;
             self->pcmQueue.push_back(std::move(chunk));
         } catch (...) { self->Fail("录制缓冲区不足"); }
@@ -488,38 +483,53 @@ void ReadAligned(int fd, int64_t outputFrame, int64_t offsetUs, int count, std::
         std::max<int64_t>(0, sourceFrame) * FRAME_BYTES);
     Check(size >= 0, "读取原始声音失败");
 }
-int EstimateSpeakerBleedDelayFrames(int innerFd, int micFd, int64_t innerOffsetUs, int64_t micOffsetUs,
-    int64_t innerActiveFrame, int64_t totalFrames)
+onebeat_recording::SpeakerBleedEstimate EstimateSpeakerBleedFromFiles(int innerFd, int micFd,
+    int64_t innerOffsetUs, int64_t micOffsetUs, int64_t innerActiveFrame, int64_t totalFrames,
+    double maximumCoefficient)
 {
-    constexpr int ANCHOR_SKIP = 2400;
     constexpr int MIN_WINDOW = 480;
     constexpr int WINDOW = 9600;
-    const int64_t anchor = innerActiveFrame + ANCHOR_SKIP;
-    if (anchor + MIN_WINDOW > totalFrames) {
-        return onebeat_recording::SPEAKER_BLEED_ACOUSTIC_DELAY_FRAMES;
+    constexpr int64_t SEARCH_FRAMES = RATE * 5;
+    onebeat_recording::SpeakerBleedEstimate none;
+    const int64_t searchStart = std::max<int64_t>(0, innerActiveFrame);
+    const int64_t searchEnd = std::min(totalFrames, searchStart + SEARCH_FRAMES);
+    if (searchStart + MIN_WINDOW > searchEnd) {
+        return none;
     }
-    const int window = static_cast<int>(std::min<int64_t>(WINDOW, totalFrames - anchor));
+
+    // Correlate the loudest early app-audio window, rather than an arbitrary
+    // 200 ms slice that may contain only silence between two beats.
+    int64_t bestAnchor = searchStart;
+    double bestEnergy = 0;
     std::vector<int16_t> inner;
-    std::vector<int16_t> mic;
-    ReadAligned(innerFd, anchor, innerOffsetUs, window, inner);
-    ReadAligned(micFd, anchor, micOffsetUs, window, mic);
-    int bestLag = onebeat_recording::SPEAKER_BLEED_ACOUSTIC_DELAY_FRAMES;
-    int64_t bestEnergy = 0;
-    for (int lag = 0; lag <= onebeat_recording::SPEAKER_BLEED_LAG_SEARCH_MAX_FRAMES; lag++) {
-        int64_t energy = 0;
-        for (int frame = lag; frame < window; frame++) {
-            const int32_t innerMono = onebeat_recording::StereoMono(inner[(frame - lag) * CHANNELS],
-                inner[(frame - lag) * CHANNELS + 1]);
-            const int32_t micMono = onebeat_recording::StereoMono(mic[frame * CHANNELS],
-                mic[frame * CHANNELS + 1]);
-            energy += static_cast<int64_t>(innerMono) * micMono;
+    for (int64_t anchor = searchStart; anchor + MIN_WINDOW <= searchEnd; anchor += WINDOW) {
+        const int frames = static_cast<int>(std::min<int64_t>(WINDOW, searchEnd - anchor));
+        ReadAligned(innerFd, anchor, innerOffsetUs, frames, inner);
+        double energy = 0;
+        for (int frame = 0; frame < frames; frame++) {
+            const int32_t mono = onebeat_recording::StereoMono(inner[frame * CHANNELS],
+                inner[frame * CHANNELS + 1]);
+            energy += static_cast<double>(mono) * mono;
         }
         if (energy > bestEnergy) {
             bestEnergy = energy;
-            bestLag = lag;
+            bestAnchor = anchor;
         }
     }
-    return bestEnergy > 0 ? bestLag : onebeat_recording::SPEAKER_BLEED_ACOUSTIC_DELAY_FRAMES;
+    if (!(bestEnergy > 0)) {
+        return none;
+    }
+
+    const int probeFrames = static_cast<int>(std::min<int64_t>(
+        WINDOW + onebeat_recording::SPEAKER_BLEED_LAG_SEARCH_MAX_FRAMES, totalFrames - bestAnchor));
+    if (probeFrames < MIN_WINDOW) {
+        return none;
+    }
+    std::vector<int16_t> mic;
+    ReadAligned(innerFd, bestAnchor, innerOffsetUs, probeFrames, inner);
+    ReadAligned(micFd, bestAnchor, micOffsetUs, probeFrames, mic);
+    return onebeat_recording::EstimateSpeakerBleed(inner.data(), mic.data(), probeFrames,
+        onebeat_recording::SPEAKER_BLEED_LAG_SEARCH_MAX_FRAMES, maximumCoefficient);
 }
 void MixFile(const MixOptions &options)
 {
@@ -585,15 +595,16 @@ void MixFile(const MixOptions &options)
         AvCheck(OH_AudioCodec_Start(encoder.codec), "音频编码启动失败");
         int64_t framePosition = 0;
         int64_t totalFrames = options.durationMs * RATE / 1000;
-        const bool speakerMix = options.speakerBleedCancel > 0;
+        const bool speakerMix = options.speakerBleedCancel > 0 && options.gain > 0;
         const int64_t innerActiveFrame = speakerMix ? onebeat_recording::FramesForMicroseconds(
             std::max<int64_t>(0, options.innerOffsetUs)) : 0;
-        const int speakerBleedDelayFrames = speakerMix ?
-            EstimateSpeakerBleedDelayFrames(innerFile.value, micFile.value, options.innerOffsetUs,
-                options.micOffsetUs, innerActiveFrame, totalFrames) :
-            0;
+        const onebeat_recording::SpeakerBleedEstimate speakerBleed = speakerMix ?
+            EstimateSpeakerBleedFromFiles(innerFile.value, micFile.value, options.innerOffsetUs,
+                options.micOffsetUs, innerActiveFrame, totalFrames, options.speakerBleedCancel) :
+            onebeat_recording::SpeakerBleedEstimate{};
+        const bool cancelSpeakerBleed = speakerBleed.coefficient > 0;
         bool sentEos = false, receivedEos = false;
-        std::vector<int16_t> inner, mic;
+        std::vector<int16_t> inner, mic, innerReference;
         while (!receivedEos) {
             CodecBuffer input{}, output{};
             bool hasInput = false, hasOutput = false;
@@ -624,34 +635,29 @@ void MixFile(const MixOptions &options)
                 else {
                     ReadAligned(innerFile.value, framePosition, options.innerOffsetUs, frames, inner);
                     ReadAligned(micFile.value, framePosition, options.micOffsetUs, frames, mic);
+                    if (cancelSpeakerBleed) {
+                        // Read by absolute output frame so the delay line stays
+                        // continuous across every 1024-frame AAC input buffer.
+                        ReadAligned(innerFile.value, onebeat_recording::SpeakerReferenceOutputFrame(
+                            framePosition, speakerBleed.delayFrames), options.innerOffsetUs, frames,
+                            innerReference);
+                    }
                     auto *samples = reinterpret_cast<int16_t *>(OH_AVBuffer_GetAddr(input.buffer));
                     Check(samples != nullptr, "混音缓冲区不可用");
                     for (int frame = 0; frame < frames; frame++) {
-                        const int64_t outputFrame = framePosition + frame;
-                        double micGain = options.gain;
-                        if (speakerMix && outputFrame < innerActiveFrame) {
-                            // Inner playback often joins hundreds of ms after mic;
-                            // until then mic only carries speaker bleed of the beat.
-                            micGain = 0;
-                        } else if (speakerMix && outputFrame < innerActiveFrame +
-                            onebeat_recording::SPEAKER_MIC_FADE_IN_FRAMES) {
-                            micGain *= static_cast<double>(outputFrame - innerActiveFrame) /
-                                onebeat_recording::SPEAKER_MIC_FADE_IN_FRAMES;
-                        }
                         int32_t innerMonoRef = 0;
-                        if (speakerMix && frame >= speakerBleedDelayFrames) {
-                            const int refFrame = frame - speakerBleedDelayFrames;
-                            innerMonoRef = onebeat_recording::StereoMono(inner[refFrame * CHANNELS],
-                                inner[refFrame * CHANNELS + 1]);
+                        if (cancelSpeakerBleed) {
+                            innerMonoRef = onebeat_recording::StereoMono(
+                                innerReference[frame * CHANNELS], innerReference[frame * CHANNELS + 1]);
                         }
                         for (int channel = 0; channel < CHANNELS; channel++) {
                             const int index = frame * CHANNELS + channel;
-                            const int16_t micSample = speakerMix ?
+                            const int16_t micSample = cancelSpeakerBleed ?
                                 onebeat_recording::MicAfterSpeakerBleedCancelMono(innerMonoRef, mic[index],
-                                    options.speakerBleedCancel) : mic[index];
+                                    speakerBleed.coefficient) : mic[index];
                             // The app track always has coefficient 1. No normalization
                             // or whole-mix compressor may change its volume with MIC gain.
-                            samples[index] = onebeat_recording::MixSample(inner[index], micSample, micGain);
+                            samples[index] = onebeat_recording::MixSample(inner[index], micSample, options.gain);
                         }
                     }
                     attr.size = frames * FRAME_BYTES;

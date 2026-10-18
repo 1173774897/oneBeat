@@ -56,18 +56,121 @@ inline int64_t FramesForNanoseconds(int64_t ns)
 { return std::llround(static_cast<double>(ns) * SAMPLE_RATE / 1000000000.0); }
 inline int64_t FramesForMicroseconds(int64_t us)
 { return std::llround(static_cast<double>(us) * SAMPLE_RATE / 1000000.0); }
-/** Typical pickup of app playback into the phone mic when using the built-in speaker. */
-constexpr double DEFAULT_SPEAKER_BLEED_CANCEL = 0.88;
+
+constexpr int PCM_TIMESTAMP_DRIFT_STEP_TOLERANCE_FRAMES = SAMPLE_RATE * 5 / 1000;
+
+/**
+ * Capture timestamps are hardware-clock observations, not editing commands.
+ * Small callback jitter must never insert silence or discard otherwise
+ * contiguous PCM. A larger gap fails closed instead of squeezing lost audio
+ * out of the timeline and silently desynchronizing all following samples.
+ */
+class ContiguousPcmTimeline {
+public:
+    bool Append(int64_t timestampNs, int64_t frameCount)
+    {
+        if (timestampNs < 0 || frameCount <= 0) return false;
+        if (firstTimestampNs_ < 0) firstTimestampNs_ = timestampNs;
+        const int64_t observedFrame = FramesForNanoseconds(timestampNs - firstTimestampNs_);
+        const int64_t driftFrames = observedFrame - framesWritten_;
+        // Clock-rate error accumulates gradually on long recordings. Reject a
+        // sudden step (a missing/duplicated callback), not that harmless slope.
+        if (framesWritten_ > 0 &&
+            std::abs(driftFrames - lastDriftFrames_) > PCM_TIMESTAMP_DRIFT_STEP_TOLERANCE_FRAMES) {
+            return false;
+        }
+        lastDriftFrames_ = driftFrames;
+        framesWritten_ += frameCount;
+        return true;
+    }
+
+    int64_t FirstTimestampNs() const { return firstTimestampNs_; }
+    int64_t FramesWritten() const { return framesWritten_; }
+    int64_t LastDriftFrames() const { return lastDriftFrames_; }
+
+private:
+    int64_t firstTimestampNs_ = -1;
+    int64_t framesWritten_ = 0;
+    int64_t lastDriftFrames_ = 0;
+};
+
+/** Maximum residual coefficient; the actual acoustic pickup is estimated per capture. */
+constexpr double DEFAULT_SPEAKER_BLEED_CANCEL = 0.90;
 /** Default speaker-to-mic lag when correlation cannot find a clear peak. */
 constexpr int SPEAKER_BLEED_ACOUSTIC_DELAY_FRAMES = 384;
 /** Search window for estimating speaker-to-mic lag on each export. */
 constexpr int SPEAKER_BLEED_LAG_SEARCH_MAX_FRAMES = 2400;
-/** Fade mic in after inner capture starts so the two metronome sources do not stack. */
-constexpr int SPEAKER_MIC_FADE_IN_FRAMES = 480;
+/** Weak matches must not synthesize an inverted app track into the microphone. */
+constexpr double SPEAKER_BLEED_MIN_CORRELATION = 0.15;
 
 inline int32_t StereoMono(int16_t left, int16_t right)
 {
     return (static_cast<int32_t>(left) + static_cast<int32_t>(right)) / 2;
+}
+
+struct SpeakerBleedEstimate {
+    int delayFrames = SPEAKER_BLEED_ACOUSTIC_DELAY_FRAMES;
+    double coefficient = 0;
+    double correlation = 0;
+};
+
+/**
+ * Estimate y[t] = coefficient * x[t-delay] from aligned stereo stems.
+ * Mean-centred normalized correlation rejects DC/noise, while least squares
+ * prevents the old full-scale subtraction from turning bleed into a comb filter.
+ */
+inline SpeakerBleedEstimate EstimateSpeakerBleed(const int16_t *inner, const int16_t *microphone,
+    int frameCount, int maximumLagFrames, double maximumCoefficient)
+{
+    SpeakerBleedEstimate estimate;
+    if (inner == nullptr || microphone == nullptr || frameCount < 480 ||
+        maximumLagFrames < 0 || !(maximumCoefficient > 0)) {
+        return estimate;
+    }
+    const int maximumLag = std::min(maximumLagFrames, frameCount - 480);
+    const int comparisonFrames = frameCount - maximumLag;
+    double bestCovariance = 0;
+    double bestInnerVariance = 0;
+    for (int lag = 0; lag <= maximumLag; lag++) {
+        double innerSum = 0;
+        double micSum = 0;
+        double innerSquareSum = 0;
+        double micSquareSum = 0;
+        double productSum = 0;
+        for (int frame = 0; frame < comparisonFrames; frame++) {
+            const double innerMono = StereoMono(inner[frame * 2], inner[frame * 2 + 1]);
+            const int micFrame = frame + lag;
+            const double micMono = StereoMono(microphone[micFrame * 2], microphone[micFrame * 2 + 1]);
+            innerSum += innerMono;
+            micSum += micMono;
+            innerSquareSum += innerMono * innerMono;
+            micSquareSum += micMono * micMono;
+            productSum += innerMono * micMono;
+        }
+        const double innerVariance = innerSquareSum - innerSum * innerSum / comparisonFrames;
+        const double micVariance = micSquareSum - micSum * micSum / comparisonFrames;
+        const double covariance = productSum - innerSum * micSum / comparisonFrames;
+        if (!(covariance > 0) || !(innerVariance > 1) || !(micVariance > 1)) continue;
+        const double correlation = covariance / std::sqrt(innerVariance * micVariance);
+        if (correlation > estimate.correlation) {
+            estimate.delayFrames = lag;
+            estimate.correlation = correlation;
+            bestCovariance = covariance;
+            bestInnerVariance = innerVariance;
+        }
+    }
+    if (estimate.correlation < SPEAKER_BLEED_MIN_CORRELATION || !(bestInnerVariance > 0)) {
+        estimate.coefficient = 0;
+        return estimate;
+    }
+    estimate.coefficient = std::clamp(bestCovariance / bestInnerVariance, 0.0,
+        std::min(maximumCoefficient, 1.0));
+    return estimate;
+}
+
+inline int64_t SpeakerReferenceOutputFrame(int64_t outputFrame, int delayFrames)
+{
+    return outputFrame - std::max(0, delayFrames);
 }
 
 inline int16_t MicAfterSpeakerBleedCancelMono(int32_t innerMono, int16_t microphone, double bleedCancel)

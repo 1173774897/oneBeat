@@ -3,6 +3,21 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const ts = require(process.argv[2]);
+const nativeSource = fs.readFileSync('entry/src/main/cpp/recording_native.cpp', 'utf8');
+const trackWriterSource = nativeSource.match(/struct TrackWriter \{[\s\S]*?\n\};/)?.[0] ?? '';
+assert.match(trackWriterSource,
+  /WriteAll\(fd,\s*chunk\.bytes\.data\(\),\s*chunk\.bytes\.size\(\)\)/,
+  'Every accepted screen-capture PCM payload must be appended byte-for-byte');
+assert.doesNotMatch(trackWriterSource, /\b(?:targetFrame|missing|skip)\s*=/,
+  'Per-callback timestamps must not edit otherwise contiguous PCM');
+assert.match(nativeSource,
+  /const int size = capacity;[\s\S]*chunk\.bytes\.assign\(address,\s*address \+ size\)/,
+  'Screen-capture audio uses its exact callback capacity, not optional codec attrs');
+assert.match(nativeSource,
+  /SpeakerReferenceOutputFrame\(\s*framePosition,\s*speakerBleed\.delayFrames\)/,
+  'Speaker reference delay must use the absolute output frame across AAC input blocks');
+assert.doesNotMatch(nativeSource, /frame\s*>=\s*speakerBleedDelayFrames/,
+  'Speaker cancellation must not reset its delay at each encoder block');
 function compile(path) {
   const compiled = ts.transpileModule(fs.readFileSync(path, 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021 }, reportDiagnostics: true
@@ -79,6 +94,9 @@ function harness(options = {}) {
     '@kit.CoreFileKit': { fileIo: { access: async path => files.has(path),
       stat: async () => ({ isFile: () => true, size: options.zeroOutput ? 0 : 1000 }),
       unlink: async path => { calls.deleted.push(path); files.delete(path); } } },
+    '../audio/AudioOutputMonitor': { AudioOutputMonitor: {
+      isBuiltInSpeakerActive: () => options.builtInSpeaker === true
+    } },
     '../common/MonotonicClock': { MonotonicClock: { nowMs: () => now } },
     '../session/SessionBackgroundKeeper': { SessionBackgroundKeeper: { setRecordingActive: async value => calls.tasks.push(value) } },
     './RecordingRepository': { RecordingRepository: {
@@ -149,6 +167,11 @@ function harness(options = {}) {
   await normal.mixer.exportMixed(clip, 2, '/recordings/preview-two.mp4');
   assert.equal(normal.calls.mixes.at(-2).gain, 0);
   assert.equal(normal.calls.mixes.at(-1).gain, 2);
+  assert.equal(normal.calls.mixes.at(-1).speakerBleedCancel, 0);
+  await normal.mixer.exportMixed({ ...clip, builtInSpeakerCapture: true }, 1,
+    '/recordings/preview-speaker.mp4');
+  assert.equal(normal.calls.mixes.at(-1).speakerBleedCancel, .9,
+    'Built-in speaker mix passes only a ceiling; native code estimates the actual bleed level');
   await assert.rejects(normal.mixer.exportMixed(clip, 2.01, '/recordings/bad.mp4'), /200%/);
   const legacy = { ...clip, captureSyncValid: undefined, captureMappingVersion: undefined, videoTimestampDivisor: undefined };
   normal.mixer.validateCaptureTiming(legacy);
