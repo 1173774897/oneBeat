@@ -22,8 +22,12 @@ export interface RecordingClip {
   audioSampleRate?: number;
   audioChannels?: number;
   renderedGain?: number;
-  /** Manual edit applied after capture alignment; positive values delay MIC. */
+  /** User edit relative to the automatic post-cleaning baseline; positive delays MIC. */
   renderedMicShiftUs?: number;
+  /** High-confidence post-cleaning baseline inferred from aligned inner/MIC stems. */
+  autoMicShiftUs?: number;
+  autoMicShiftConfidence?: number;
+  autoMicShiftReliable?: boolean;
   /** Export DSP revision; older renders with retained stems are rebuilt without changing the gain. */
   renderedMixVersion?: number;
   renderedAt?: number;

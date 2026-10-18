@@ -5,7 +5,8 @@ const vm = require('node:vm');
 const ts = require(process.argv[2]);
 const nativeSource = fs.readFileSync('entry/src/main/cpp/recording_native.cpp', 'utf8');
 const trackWriterSource = nativeSource.match(/struct TrackWriter \{[\s\S]*?\n\};/)?.[0] ?? '';
-const mixFileSource = nativeSource.slice(nativeSource.indexOf('void MixFile('), nativeSource.indexOf('std::mutex globalMutex'));
+const mixFileSource = nativeSource.slice(
+  nativeSource.indexOf('ProcessedMicInfo MixFile('), nativeSource.indexOf('std::mutex globalMutex'));
 assert.match(trackWriterSource,
   /WriteAll\(fd,\s*chunk\.bytes\.data\(\),\s*chunk\.bytes\.size\(\)\)/,
   'Every accepted screen-capture PCM payload must be appended byte-for-byte');
@@ -20,7 +21,7 @@ assert.match(nativeSource,
 assert.doesNotMatch(nativeSource, /frame\s*>=\s*speakerBleedDelayFrames/,
   'Speaker cancellation must not reset its delay at each encoder block');
 assert.match(nativeSource,
-  /void EnsureProcessedMic[\s\S]*existing\.st_size == expectedBytes[\s\S]*std::vector<float> residual/,
+  /ProcessedMicInfo EnsureProcessedMic[\s\S]*existing\.st_size == expectedBytes[\s\S]*std::vector<float> residual/,
   'Echo-cleaned MIC must be cached once as an unclipped floating-point residual');
 assert.match(nativeSource,
   /constexpr int64_t VIDEO_BITRATE = 8000000;[\s\S]*OH_MD_KEY_BITRATE, VIDEO_BITRATE/,
@@ -28,8 +29,8 @@ assert.match(nativeSource,
 assert.doesNotMatch(mixFileSource, /EstimateEchoAt\(/,
   'A gain or manual alignment remux must not repeat the expensive FIR fit');
 assert.match(mixFileSource,
-  /ReadAlignedProcessedMic\([^;]*options\.micShiftUs[\s\S]*MixProcessedMicSample/,
-  'Manual alignment must shift only the cached MIC residual before the final mix');
+  /effectiveMicShiftUs = options\.micShiftUs \+ processedInfo\.autoMicShiftUs[\s\S]*ReadAlignedProcessedMic\([^;]*effectiveMicShiftUs[\s\S]*MixProcessedMicSample/,
+  'Automatic baseline and manual edit must shift only the cached MIC residual before the final mix');
 function compile(path) {
   const compiled = ts.transpileModule(fs.readFileSync(path, 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021 }, reportDiagnostics: true
@@ -83,10 +84,20 @@ function harness(options = {}) {
       assert.ok(args.micPath.endsWith('-mic.pcm'));
       assert.equal(args.innerOffsetUs, -11000);
       assert.ok(Number.isFinite(args.micShiftUs));
-      assert.equal(args.processedMicPath, `${args.micPath}.clean-v2.f32`);
+      assert.equal(args.processedMicPath, `${args.micPath}.clean-v3.f32`);
+      assert.ok(args.autoMicShiftKnown === 0 || args.autoMicShiftKnown === 1);
       calls.mixes.push(args);
       if (options.mixFailures > 0) { options.mixFailures--; throw new Error('encode failed'); }
       files.add(args.outputPath);
+      return args.autoMicShiftKnown === 1 ? {
+        autoMicShiftUs: args.autoMicShiftUs,
+        autoMicShiftConfidence: args.autoMicShiftConfidence,
+        autoMicShiftReliable: args.autoMicShiftReliable === 1
+      } : args.speakerBleedCancel > 0 ? {
+        autoMicShiftUs: -1000, autoMicShiftConfidence: .8, autoMicShiftReliable: true
+      } : {
+        autoMicShiftUs: 0, autoMicShiftConfidence: 0, autoMicShiftReliable: false
+      };
     }
   };
   const input = { id: 3, deviceType: options.headsetMic ? 7 : 15 };
@@ -162,8 +173,10 @@ function harness(options = {}) {
   assert.equal(clip.width, 1080);
   assert.equal(clip.height, 2340);
   assert.equal(clip.renderedGain, 1);
-  assert.equal(clip.renderedMixVersion, 5);
+  assert.equal(clip.renderedMixVersion, 6);
   assert.equal(clip.renderedMicShiftUs, 0);
+  assert.equal(clip.autoMicShiftUs, 0);
+  assert.equal(clip.autoMicShiftReliable, false);
   assert.equal(clip.micOffsetUs, 17000);
   assert.equal(clip.innerOffsetUs, -11000);
   assert.equal(clip.captureSyncValid, true);
@@ -186,8 +199,13 @@ function harness(options = {}) {
   assert.equal(normal.calls.mixes.at(-1).gain, 2);
   assert.equal(normal.calls.mixes.at(-1).micShiftUs, -60000);
   assert.equal(normal.calls.mixes.at(-1).speakerBleedCancel, 0);
-  await normal.mixer.exportMixed({ ...clip, builtInSpeakerCapture: true }, 1,
+  const automaticMix = await normal.mixer.exportMixed({
+    ...clip, autoMicShiftUs: undefined, autoMicShiftConfidence: undefined,
+    autoMicShiftReliable: undefined, builtInSpeakerCapture: true
+  }, 1,
     '/recordings/preview-speaker.mp4');
+  assert.equal(automaticMix.autoMicShiftUs, -1000);
+  assert.equal(automaticMix.autoMicShiftReliable, true);
   assert.equal(normal.calls.mixes.at(-1).speakerBleedCancel, 4,
     'Built-in speaker mix passes only a ceiling; native code estimates the actual bleed level');
   await assert.rejects(normal.mixer.exportMixed(clip, 2.01, '/recordings/bad.mp4'), /200%/);

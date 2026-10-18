@@ -149,6 +149,9 @@ export class RecordingRepository {
       audioSampleRate: clip.audioSampleRate, audioChannels: clip.audioChannels,
       renderedGain: clip.renderedGain ?? 1, renderedAt: clip.renderedAt ?? clip.createdAt,
       renderedMicShiftUs: clip.renderedMicShiftUs ?? 0,
+      autoMicShiftUs: clip.autoMicShiftUs,
+      autoMicShiftConfidence: clip.autoMicShiftConfidence,
+      autoMicShiftReliable: clip.autoMicShiftReliable,
       renderedMixVersion: clip.renderedMixVersion,
       captureSyncValid: clip.captureSyncValid, captureMappingVersion: clip.captureMappingVersion,
       videoTimestampDivisor: clip.videoTimestampDivisor, builtInSpeakerCapture: clip.builtInSpeakerCapture
@@ -247,9 +250,12 @@ export class RecordingRepository {
       }
       const desired = Math.round(gain * 100) / 100;
       const desiredShiftUs = Math.round(micShiftUs / 1000) * 1000;
+      const autoAlignmentKnown = stored.autoMicShiftUs !== undefined &&
+        stored.autoMicShiftConfidence !== undefined && stored.autoMicShiftReliable !== undefined;
       if (Math.abs((stored.renderedGain ?? 1) - desired) < 0.001 &&
         (stored.renderedMicShiftUs ?? 0) === desiredShiftUs &&
-        ((stored.renderedMixVersion ?? 0) >= RECORDING_MIX_VERSION || stored.sourcePath === undefined ||
+        (((stored.renderedMixVersion ?? 0) >= RECORDING_MIX_VERSION && autoAlignmentKnown) ||
+          stored.sourcePath === undefined ||
           stored.innerPath === undefined || stored.micPath === undefined)) { return stored; }
       if (stored.sourcePath === undefined || stored.micPath === undefined || stored.innerPath === undefined) {
         throw new Error('这段旧视频已合并声音，重新录制后可单独调整麦克风音量');
@@ -261,12 +267,15 @@ export class RecordingRepository {
       }
       const output = `${RecordingRepository.directory}/${stored.id}.mix-${util.generateRandomUUID(true)}.mp4`;
       try {
-        await RecordingMixer.exportMixed(stored, desired, output, desiredShiftUs);
+        const mixResult = await RecordingMixer.exportMixed(stored, desired, output, desiredShiftUs);
         if ((await fs.stat(output)).size <= 0) { throw new Error('声音处理未完成，请重试'); }
         const updated = RecordingRepository.copy(stored);
         updated.path = output;
         updated.renderedGain = desired;
         updated.renderedMicShiftUs = desiredShiftUs;
+        updated.autoMicShiftUs = mixResult.autoMicShiftUs;
+        updated.autoMicShiftConfidence = mixResult.autoMicShiftConfidence;
+        updated.autoMicShiftReliable = mixResult.autoMicShiftReliable;
         updated.renderedMixVersion = RECORDING_MIX_VERSION;
         updated.renderedAt = Math.max(Date.now(), (stored.renderedAt ?? stored.createdAt) + 1);
         const recoveryPath = await RecordingRepository.writeRecovery(updated);

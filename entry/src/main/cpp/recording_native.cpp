@@ -440,6 +440,10 @@ private:
 struct MixOptions {
     std::string sourcePath, innerPath, micPath, outputPath, processedMicPath;
     int64_t durationMs = 0, micOffsetUs = 0, innerOffsetUs = 0, micShiftUs = 0;
+    int64_t autoMicShiftUs = 0;
+    bool autoMicShiftKnown = false;
+    bool autoMicShiftReliable = false;
+    double autoMicShiftConfidence = 0;
     double gain = 1;
     double speakerBleedCancel = 0;
 };
@@ -513,6 +517,24 @@ struct EchoModelHistory {
     onebeat_recording::StereoEchoFirEstimate reliable{};
     std::array<int64_t, CHANNELS> anchor{{-1, -1}};
 };
+struct ProcessedMicInfo {
+    int64_t autoMicShiftUs = 0;
+    double confidence = 0;
+    bool known = false;
+    bool reliable = false;
+};
+void CollectAlignmentSamples(const onebeat_recording::StereoEchoFirEstimate &estimate,
+    std::vector<onebeat_recording::EchoAlignmentSample> &samples)
+{
+    for (const auto &channel : estimate.channels) {
+        if (!channel.enabled || channel.revalidated || channel.validationReduction < 0.12 ||
+            channel.validationCorrelation < 0.60 || std::abs(channel.delayFrames) > 1440) continue;
+        const double weight = channel.validationReduction *
+            channel.validationCorrelation * channel.validationCorrelation;
+        if (std::isfinite(weight) && weight > 0)
+            samples.push_back({channel.delayFrames, weight});
+    }
+}
 onebeat_recording::StereoEchoFirEstimate EstimateEchoAt(int innerFd, int micFd,
     int64_t innerOffsetUs, int64_t micOffsetUs, int64_t anchorFrame, int64_t totalFrames,
     double maximumGain, EchoModelHistory &history)
@@ -547,15 +569,20 @@ onebeat_recording::StereoEchoFirEstimate EstimateEchoAt(int innerFd, int micFd,
  * Persist its floating-point MIC residual once so gain/alignment edits avoid the
  * expensive per-second FIR solve while retaining final-mix-only clipping.
  */
-void EnsureProcessedMic(const MixOptions &options, int innerFd, int micFd, int64_t totalFrames)
+ProcessedMicInfo EnsureProcessedMic(const MixOptions &options, int innerFd, int micFd, int64_t totalFrames)
 {
     constexpr int PROCESSED_FRAME_BYTES = CHANNELS * sizeof(float);
     const int64_t expectedBytes = totalFrames * PROCESSED_FRAME_BYTES;
+    const ProcessedMicInfo retained{
+        options.autoMicShiftUs, options.autoMicShiftConfidence,
+        options.autoMicShiftKnown, options.autoMicShiftReliable
+    };
     struct stat existing{};
     if (stat(options.processedMicPath.c_str(), &existing) == 0 && S_ISREG(existing.st_mode) &&
-        existing.st_size == expectedBytes) return;
+        existing.st_size == expectedBytes && options.autoMicShiftKnown) return retained;
 
     const std::string temporaryPath = options.processedMicPath + ".tmp";
+    std::vector<onebeat_recording::EchoAlignmentSample> alignmentSamples;
     try {
         {
             Fd output(temporaryPath, true);
@@ -568,9 +595,11 @@ void EnsureProcessedMic(const MixOptions &options, int innerFd, int micFd, int64
             if (speakerMix) {
                 echoBefore = EstimateEchoAt(innerFd, micFd, options.innerOffsetUs,
                     options.micOffsetUs, 0, totalFrames, options.speakerBleedCancel, echoHistory);
+                CollectAlignmentSamples(echoBefore, alignmentSamples);
                 echoAfter = EstimateEchoAt(innerFd, micFd, options.innerOffsetUs,
                     options.micOffsetUs, ECHO_HOP_FRAMES, totalFrames,
                     options.speakerBleedCancel, echoHistory);
+                CollectAlignmentSamples(echoAfter, alignmentSamples);
             }
             std::vector<int16_t> inner, microphone;
             std::vector<float> residual;
@@ -592,6 +621,7 @@ void EnsureProcessedMic(const MixOptions &options, int innerFd, int micFd, int64
                             echoAfter = EstimateEchoAt(innerFd, micFd, options.innerOffsetUs,
                                 options.micOffsetUs, echoAnchor + ECHO_HOP_FRAMES, totalFrames,
                                 options.speakerBleedCancel, echoHistory);
+                            CollectAlignmentSamples(echoAfter, alignmentSamples);
                         }
                     }
                     const int count = static_cast<int>(std::min<int64_t>(frames - processed,
@@ -646,12 +676,25 @@ void EnsureProcessedMic(const MixOptions &options, int innerFd, int micFd, int64
         unlink(temporaryPath.c_str());
         throw;
     }
+    const auto alignment = onebeat_recording::EstimateAutoMicAlignment(alignmentSamples);
+    if (alignment.reliable) {
+        return {
+            static_cast<int64_t>(std::llround(
+                static_cast<double>(alignment.shiftFrames) * 1000000.0 / RATE)),
+            alignment.confidence, true, true
+        };
+    }
+    return options.autoMicShiftKnown ? retained : ProcessedMicInfo{0, 0, true};
 }
 
-void MixFile(const MixOptions &options)
+ProcessedMicInfo MixFile(const MixOptions &options)
 {
     Check(std::isfinite(options.gain) && options.gain >= 0 && options.gain <= 2, "麦克风音量无效");
     Check(std::abs(options.micShiftUs) <= 300000, "人声对齐范围无效");
+    Check(std::abs(options.autoMicShiftUs) <= 30000 &&
+        std::isfinite(options.autoMicShiftConfidence) &&
+        options.autoMicShiftConfidence >= 0 && options.autoMicShiftConfidence <= 1,
+        "自动人声对齐参数无效");
     Check(std::isfinite(options.speakerBleedCancel) && options.speakerBleedCancel >= 0 &&
         options.speakerBleedCancel <= 4, "外放泄漏补偿无效");
     Check(options.durationMs > 0 && options.durationMs < 24 * 3600000, "录制时长无效");
@@ -668,7 +711,10 @@ void MixFile(const MixOptions &options)
     Check(fstat(micFile.value, &micStat) == 0 && S_ISREG(micStat.st_mode) &&
         micStat.st_size % FRAME_BYTES == 0, "麦克风原轨格式无效");
     const int64_t totalFrames = options.durationMs * RATE / 1000;
-    EnsureProcessedMic(options, innerFile.value, micFile.value, totalFrames);
+    const ProcessedMicInfo processedInfo =
+        EnsureProcessedMic(options, innerFile.value, micFile.value, totalFrames);
+    const int64_t effectiveMicShiftUs = options.micShiftUs + processedInfo.autoMicShiftUs;
+    Check(std::abs(effectiveMicShiftUs) <= 330000, "自动与手工人声对齐范围无效");
     Fd processedMicFile(options.processedMicPath);
     struct stat processedStat{};
     constexpr int PROCESSED_FRAME_BYTES = CHANNELS * sizeof(float);
@@ -756,7 +802,7 @@ void MixFile(const MixOptions &options)
                 else {
                     ReadAligned(innerFile.value, framePosition, options.innerOffsetUs, frames, inner);
                     ReadAlignedProcessedMic(processedMicFile.value, framePosition,
-                        options.micShiftUs, frames, processedMic);
+                        effectiveMicShiftUs, frames, processedMic);
                     auto *samples = reinterpret_cast<int16_t *>(OH_AVBuffer_GetAddr(input.buffer));
                     Check(samples != nullptr, "混音缓冲区不可用");
                     for (int index = 0; index < frames * CHANNELS; ++index) {
@@ -790,6 +836,7 @@ void MixFile(const MixOptions &options)
         unlink(options.outputPath.c_str());
         throw;
     }
+    return processedInfo;
 }
 
 std::mutex globalMutex;
@@ -817,6 +864,7 @@ struct AsyncJob {
     napi_deferred deferred = nullptr;
     std::shared_ptr<CaptureSession> capture;
     MixOptions mix;
+    ProcessedMicInfo mixResult;
     int kind = 0;
     std::string error;
 };
@@ -826,7 +874,7 @@ void Execute(napi_env, void *data)
     try {
         if (job->kind == 0) job->capture->Start();
         else if (job->kind == 1) { if (job->capture != nullptr) job->capture->Stop(); }
-        else MixFile(job->mix);
+        else job->mixResult = MixFile(job->mix);
     } catch (const std::exception &err) {
         job->error = err.what();
         // The global session also owns this object, so a rejected Start job
@@ -866,6 +914,12 @@ void Complete(napi_env env, napi_status status, void *data)
             Set(env, value, "innerFirstPtsUs", Number(env, capture == nullptr ? -1 : capture->innerFirstPtsUs));
             napi_value valid; napi_get_boolean(env, capture == nullptr || capture->syncValid, &valid);
             Set(env, value, "syncValid", valid);
+        } else if (job->kind == 2) {
+            napi_create_object(env, &value);
+            Set(env, value, "autoMicShiftUs", Number(env, job->mixResult.autoMicShiftUs));
+            Set(env, value, "autoMicShiftConfidence", Number(env, job->mixResult.confidence));
+            napi_value reliable; napi_get_boolean(env, job->mixResult.reliable, &reliable);
+            Set(env, value, "autoMicShiftReliable", reliable);
         } else napi_get_undefined(env, &value);
         napi_resolve_deferred(env, job->deferred, value);
     }
@@ -918,6 +972,10 @@ napi_value Mix(napi_env env, napi_callback_info info)
     job->mix.micOffsetUs = GetNumber(env, args[0], "micOffsetUs");
     job->mix.innerOffsetUs = GetNumber(env, args[0], "innerOffsetUs");
     job->mix.micShiftUs = GetNumber(env, args[0], "micShiftUs");
+    job->mix.autoMicShiftUs = GetNumber(env, args[0], "autoMicShiftUs");
+    job->mix.autoMicShiftKnown = GetNumber(env, args[0], "autoMicShiftKnown") != 0;
+    job->mix.autoMicShiftReliable = GetNumber(env, args[0], "autoMicShiftReliable") != 0;
+    job->mix.autoMicShiftConfidence = GetNumber(env, args[0], "autoMicShiftConfidence");
     job->mix.gain = GetNumber(env, args[0], "gain");
     job->mix.speakerBleedCancel = GetNumber(env, args[0], "speakerBleedCancel");
     return Queue(env, job);

@@ -312,7 +312,7 @@ export class RecordingCoordinator {
       sourcePath: RecordingCoordinator.sourcePath(), innerPath: RecordingCoordinator.innerPath(),
       micPath: RecordingCoordinator.micPath(), micOffsetUs: result.micOffsetUs, innerOffsetUs: result.innerOffsetUs,
       audioSampleRate: 48000, audioChannels: 2, renderedGain: 1, renderedMicShiftUs: 0,
-      renderedMixVersion: RECORDING_MIX_VERSION, renderedAt: Date.now(),
+      renderedMixVersion: 0, renderedAt: Date.now(),
       captureSyncValid: result.syncValid && result.timestampMappingVersion === 2 &&
         (result.videoTimestampDivisor === 1 || result.videoTimestampDivisor === 1000),
       captureMappingVersion: result.timestampMappingVersion ?? 0,
@@ -349,11 +349,22 @@ export class RecordingCoordinator {
     let rendered: boolean = false;
     if (await fileIo.access(clip.path)) {
       const stat = await fileIo.stat(clip.path);
-      rendered = stat.isFile() && stat.size > 0;
+      rendered = stat.isFile() && stat.size > 0 &&
+        (clip.renderedMixVersion ?? 0) >= RECORDING_MIX_VERSION &&
+        clip.autoMicShiftUs !== undefined && clip.autoMicShiftConfidence !== undefined &&
+        clip.autoMicShiftReliable !== undefined;
     }
     if (!rendered) {
       try {
-        await RecordingMixer.exportMixed(clip, 1, clip.path);
+        const mixResult = await RecordingMixer.exportMixed(clip, 1, clip.path);
+        clip.autoMicShiftUs = mixResult.autoMicShiftUs;
+        clip.autoMicShiftConfidence = mixResult.autoMicShiftConfidence;
+        clip.autoMicShiftReliable = mixResult.autoMicShiftReliable;
+        clip.renderedMixVersion = RECORDING_MIX_VERSION;
+        clip.renderedAt = Date.now();
+        // A crash after export must restore the same automatic baseline instead
+        // of fitting again against an already-created sidecar without metadata.
+        await RecordingRepository.retainPendingCapture(clip);
       } catch (err) {
         RecordingCoordinator.noteSaveFailure('encode', err);
         RecordingCoordinator.setState('failed');

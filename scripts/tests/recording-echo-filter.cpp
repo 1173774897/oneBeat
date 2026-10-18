@@ -254,6 +254,27 @@ void TonalEnvelopeDelayIsStable()
     assert(std::abs(delays[0] - delays[1]) <= 48);
 }
 
+void AutomaticMicAlignmentConfidence()
+{
+    const std::vector<EchoAlignmentSample> stable = {
+        {48, .8}, {48, .7}, {0, .6}, {48, .9}, {96, .5}
+    };
+    const auto estimate = EstimateAutoMicAlignment(stable);
+    assert(estimate.reliable);
+    assert(estimate.shiftFrames == -48);
+    assert(estimate.sampleCount == 5);
+    assert(estimate.medianAbsoluteDeviationFrames == 0);
+    assert(estimate.confidence >= .9);
+    assert(!EstimateAutoMicAlignment({{0, 1}, {0, 1}, {0, 1}}).reliable);
+    const auto unstable = EstimateAutoMicAlignment({
+        {-480, .8}, {0, .8}, {480, .8}, {960, .8}
+    });
+    assert(!unstable.reliable && unstable.shiftFrames == 0);
+    assert(!EstimateAutoMicAlignment({
+        {0, .8}, {0, .8}, {0, .8}, {1441, .8}
+    }).reliable);
+}
+
 void InvertedBroadbandAndOppositePolarities()
 {
     constexpr int frames = 76800;
@@ -608,6 +629,7 @@ int main(int argc, char **argv)
     FrequencyResponseAndExternalSound();
     HeldOutGainCannotOverCancel();
     TonalEnvelopeDelayIsStable();
+    AutomaticMicAlignmentConfidence();
     InvertedBroadbandAndOppositePolarities();
     ProvenFilterDuringDoubleTalk();
     BoundariesAndChunkInvariance();

@@ -503,9 +503,19 @@ struct RecordingLibraryPage {
   }
 
   private micShiftLabel(): string {
-    if (this.micShiftMs < 0) { return `人声提前 ${Math.abs(this.micShiftMs)} 毫秒`; }
-    if (this.micShiftMs > 0) { return `人声延后 ${this.micShiftMs} 毫秒`; }
-    return '人声不提前或延后';
+    const clip = this.selectedClip();
+    const automatic = clip?.autoMicShiftUs ?? 0;
+    const reliable = clip?.autoMicShiftReliable === true;
+    if (this.micShiftMs < 0) {
+      return `${reliable ? '自动基准上' : '人声'}提前 ${Math.abs(this.micShiftMs)} 毫秒`;
+    }
+    if (this.micShiftMs > 0) {
+      return `${reliable ? '自动基准上' : '人声'}延后 ${this.micShiftMs} 毫秒`;
+    }
+    if (!reliable) { return '人声不提前或延后'; }
+    if (automatic < 0) { return `已自动提前 ${Math.round(Math.abs(automatic) / 1000)} 毫秒`; }
+    if (automatic > 0) { return `已自动延后 ${Math.round(automatic / 1000)} 毫秒`; }
+    return '已自动对齐，可继续微调';
   }
 
   private drawMicAlignmentRuler(): void {

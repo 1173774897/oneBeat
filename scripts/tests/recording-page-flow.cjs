@@ -32,7 +32,8 @@ async function flush() { for (let index = 0; index < 20; index++) await Promise.
 const clip = { id: 'clip-1', path: '/private/clip.mp4', createdAt: 1, durationMs: 2000,
   width: 720, height: 1280, interrupted: false, stopReason: 'user', scope: 'solo',
   sourcePath: '/private/source.mp4', micPath: '/private/mic.pcm', innerPath: '/private/inner.pcm', renderedGain: 1,
-  renderedMicShiftUs: 0, renderedMixVersion: 5 };
+  renderedMicShiftUs: 0, autoMicShiftUs: 0, autoMicShiftConfidence: 0,
+  autoMicShiftReliable: false, renderedMixVersion: 6 };
 
 function harness(options = {}) {
   const trace = [], routes = [], notices = [];
@@ -45,7 +46,7 @@ function harness(options = {}) {
   const session = { controller, async leaderPause() { trace.push('pause-practice'); controller.state = 'paused'; } };
   const storage = new Map();
   const context = {
-    exports: {}, Map, Date, RECORDING_MIX_VERSION: 5, MAX_MIC_SHIFT_US: 300000,
+    exports: {}, Map, Date, RECORDING_MIX_VERSION: 6, MAX_MIC_SHIFT_US: 300000,
     RenderingContextSettings: class {},
     CanvasRenderingContext2D: class {
       clearRect() {} beginPath() {} moveTo() {} lineTo() {} stroke() {}
@@ -103,7 +104,7 @@ function harness(options = {}) {
       },
       async render(source, gain, micShiftUs) { trace.push(`render:${gain}:${micShiftUs}`);
         const updated = { ...source, path: `/private/mix-${gain}-${micShiftUs}.mp4`,
-          renderedGain: gain, renderedMicShiftUs: micShiftUs, renderedMixVersion: 5 };
+          renderedGain: gain, renderedMicShiftUs: micShiftUs, renderedMixVersion: 6 };
         storedClips = storedClips.map(item => item.id === updated.id ? updated : item); return updated; },
       async saveToAlbum(source) { trace.push(`save:${source.renderedGain}`); }
     },
@@ -319,6 +320,12 @@ function harness(options = {}) {
   await mixLibrary.audioRenderTask;
   assert.equal(mixLibrary.selectedClip().renderedMicShiftUs, -60000);
   assert.equal(mixLibrary.micShiftLabel(), '人声提前 60 毫秒');
+  mixLibrary.clips = [{ ...mixLibrary.selectedClip(), autoMicShiftUs: -1000,
+    autoMicShiftConfidence: .8, autoMicShiftReliable: true, renderedMicShiftUs: 0 }];
+  mixLibrary.micShiftMs = 0;
+  assert.equal(mixLibrary.micShiftLabel(), '已自动提前 1 毫秒');
+  mixLibrary.micShiftMs = -60;
+  assert.equal(mixLibrary.micShiftLabel(), '自动基准上提前 60 毫秒');
   mixLibrary.micGain = 0.3;
   await mixLibrary.saveSelected();
   assert.ok(mixing.trace.indexOf('render:0.3:-60000') < mixing.trace.indexOf('save:0.3'),
@@ -344,13 +351,13 @@ function harness(options = {}) {
   assert.equal(renderRequests.length, 1, 'A running export accepts edits without starting parallel work');
   let request = renderRequests[0];
   queuedClips = [{ ...request.source, path: '/private/queued-1.mp4',
-    renderedGain: request.gain, renderedMicShiftUs: request.micShiftUs, renderedMixVersion: 5 }];
+    renderedGain: request.gain, renderedMicShiftUs: request.micShiftUs, renderedMixVersion: 6 }];
   request.resolve(queuedClips[0]); await flush();
   assert.equal(renderRequests.length, 2, 'Completed work immediately drains the latest committed edit');
   request = renderRequests[1];
   assert.equal(request.gain, 1.4, 'Moving values are skipped and only the last released value is rendered');
   queuedClips = [{ ...request.source, path: '/private/queued-2.mp4',
-    renderedGain: request.gain, renderedMicShiftUs: request.micShiftUs, renderedMixVersion: 5 }];
+    renderedGain: request.gain, renderedMicShiftUs: request.micShiftUs, renderedMixVersion: 6 }];
   request.resolve(queuedClips[0]); await queuedTask;
   assert.equal(queuedLibrary.selectedClip().renderedGain, 1.4);
 

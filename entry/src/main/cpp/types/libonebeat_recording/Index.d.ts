@@ -30,16 +30,26 @@ export interface NativeMixOptions {
   durationMs: number;
   micOffsetUs: number;
   innerOffsetUs: number;
-  /** Manual post-cleaning shift; positive values delay MIC against the video. */
+  /** Manual post-cleaning shift relative to the automatic baseline. */
   micShiftUs: number;
+  /** Previously measured automatic baseline, reused with the versioned MIC cache. */
+  autoMicShiftUs: number;
+  autoMicShiftKnown: number;
+  autoMicShiftReliable: number;
+  autoMicShiftConfidence: number;
   gain: number;
   /** Deterministic float32 residual cache reused by later gain/shift edits. */
   processedMicPath: string;
   /** 0–4: ceiling for estimated speaker-to-mic gain; zero bypasses echo fitting. */
   speakerBleedCancel: number;
 }
+export interface NativeMixResult {
+  autoMicShiftUs: number;
+  autoMicShiftConfidence: number;
+  autoMicShiftReliable: boolean;
+}
 export const start: (options: NativeCaptureOptions) => Promise<void>;
 export const stop: () => Promise<NativeCaptureResult>;
 export const cancel: () => void;
 export const getStatus: () => NativeCaptureStatus;
-export const mix: (options: NativeMixOptions) => Promise<void>;
+export const mix: (options: NativeMixOptions) => Promise<NativeMixResult>;

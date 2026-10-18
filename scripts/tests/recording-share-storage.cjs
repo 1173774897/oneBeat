@@ -162,13 +162,18 @@ function services(environment = durableEnvironment()) {
       coverCalls.push({ videoPath, coverPath, width, height });
       environment.files.set(coverPath, Buffer.from(`cover-of=${videoPath}`));
     } } },
-    './RecordingMixer': { RECORDING_MIX_VERSION: 5, MAX_MIC_SHIFT_US: 300000,
+    './RecordingMixer': { RECORDING_MIX_VERSION: 6, MAX_MIC_SHIFT_US: 300000,
       RecordingMixer: {
-      processedMicPath: micPath => `${micPath}.clean-v2.f32`,
+      processedMicPath: micPath => `${micPath}.clean-v3.f32`,
       async exportMixed(clip, gain, output, micShiftUs) {
       mixCalls.push({ clip: plain(clip), gain, output, micShiftUs });
       environment.files.set(output, Buffer.from(
         `rendered-gain=${gain};shift=${micShiftUs};source=${clip.sourcePath}`));
+      return {
+        autoMicShiftUs: clip.autoMicShiftUs ?? -1000,
+        autoMicShiftConfidence: clip.autoMicShiftConfidence ?? .8,
+        autoMicShiftReliable: clip.autoMicShiftReliable ?? true
+      };
     } } },
     '@kit.MediaLibraryKit': { photoAccessHelper: { PhotoType: { VIDEO: 'video' },
       getPhotoAccessHelper: () => ({ showAssetsCreationDialog: async () => ['content://album/video'], release() {} }) } }
@@ -354,13 +359,15 @@ async function testWorkScopeAndNonDestructiveGain() {
   const oldMix = await addStemClip(migration);
   const refreshedMix = await migration.repository.render(oldMix, 1);
   assert.notEqual(refreshedMix.path, oldMix.path, 'Old separate-track works are regenerated even when MIC gain is unchanged');
-  assert.equal(refreshedMix.renderedMixVersion, 5);
+  assert.equal(refreshedMix.renderedMixVersion, 6);
+  assert.equal(refreshedMix.autoMicShiftUs, -1000);
+  assert.equal(refreshedMix.autoMicShiftReliable, true);
   await migration.repository.render(refreshedMix, 1);
   assert.equal(migration.mixCalls.length, 1, 'The current quality version does not re-encode an unchanged gain');
   const versionTwo = { ...await addStemClip(migration), renderedMixVersion: 2 };
   await migration.repository.add(versionTwo);
   const versionThree = await migration.repository.render(versionTwo, 1);
-  assert.equal(versionThree.renderedMixVersion, 5);
+  assert.equal(versionThree.renderedMixVersion, 6);
   assert.notEqual(versionThree.path, versionTwo.path, 'The previous echo version upgrades even at the same MIC gain');
   const h = services(); await h.initialize();
   const legacy = await h.clip();
@@ -399,7 +406,7 @@ async function testWorkScopeAndNonDestructiveGain() {
   assert.equal(h.mixCalls.length, 3, 'Pending publication freezes its exact shared render');
   await h.share.dismissPending(attempt.id);
   await assert.rejects(h.repository.render(team, NaN), /麦克风音量无效/);
-  const processedMic = `${team.micPath}.clean-v2.f32`;
+  const processedMic = `${team.micPath}.clean-v3.f32`;
   h.environment.files.set(processedMic, Buffer.from('cached-float-mic-residual'));
   h.environment.files.set(`${processedMic}.tmp`, Buffer.from('interrupted-cache-write'));
   await h.repository.remove(team.id);

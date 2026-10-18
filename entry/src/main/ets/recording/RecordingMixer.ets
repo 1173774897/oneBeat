@@ -2,10 +2,16 @@ import * as recordingNative from 'libonebeat_recording.so';
 import { RecordingClip } from './RecordingModels';
 
 // Retained stems let same-gain legacy exports adopt the current DSP once.
-export const RECORDING_MIX_VERSION: number = 5;
+export const RECORDING_MIX_VERSION: number = 6;
 export const MAX_MIC_SHIFT_US: number = 300000;
-const PROCESSED_MIC_VERSION: number = 2;
+const PROCESSED_MIC_VERSION: number = 3;
 const BUILT_IN_SPEAKER_BLEED_LIMIT: number = 4;
+
+export interface RecordingMixResult {
+  autoMicShiftUs: number;
+  autoMicShiftConfidence: number;
+  autoMicShiftReliable: boolean;
+}
 
 /** Source tracks are immutable; app audio stays at unity and gain applies only to cleaned MIC. */
 export class RecordingMixer {
@@ -30,7 +36,7 @@ export class RecordingMixer {
   }
 
   static async exportMixed(clip: RecordingClip, gain: number, outputPath: string,
-    micShiftUs: number = clip.renderedMicShiftUs ?? 0): Promise<void> {
+    micShiftUs: number = clip.renderedMicShiftUs ?? 0): Promise<RecordingMixResult> {
     if (!Number.isFinite(gain) || gain < 0 || gain > 2) {
       throw new Error('麦克风音量需在 0% 到 200% 之间');
     }
@@ -54,11 +60,22 @@ export class RecordingMixer {
     if (speakerLikeCapture) {
       console.info(`[RecordingMix] speaker residual innerLeadUs=${innerLeadUs} maxEchoGain=${speakerBleedCancel}`);
     }
-    await recordingNative.mix({
+    const autoKnown = clip.autoMicShiftUs !== undefined &&
+      clip.autoMicShiftConfidence !== undefined && clip.autoMicShiftReliable !== undefined;
+    const result = await recordingNative.mix({
       sourcePath: clip.sourcePath, innerPath: clip.innerPath, micPath: clip.micPath, outputPath: outputPath,
       durationMs: clip.durationMs, innerOffsetUs: clip.innerOffsetUs ?? 0, micOffsetUs: clip.micOffsetUs ?? 0,
       micShiftUs: micShiftUs, gain: gain, speakerBleedCancel: speakerBleedCancel,
+      autoMicShiftUs: clip.autoMicShiftUs ?? 0, autoMicShiftKnown: autoKnown ? 1 : 0,
+      autoMicShiftReliable: clip.autoMicShiftReliable === true ? 1 : 0,
+      autoMicShiftConfidence: clip.autoMicShiftConfidence ?? 0,
       processedMicPath: RecordingMixer.processedMicPath(clip.micPath)
     });
+    if (!Number.isFinite(result.autoMicShiftUs) || Math.abs(result.autoMicShiftUs) > 30000 ||
+      !Number.isFinite(result.autoMicShiftConfidence) ||
+      result.autoMicShiftConfidence < 0 || result.autoMicShiftConfidence > 1) {
+      throw new Error('自动人声对齐结果无效');
+    }
+    return result;
   }
 }

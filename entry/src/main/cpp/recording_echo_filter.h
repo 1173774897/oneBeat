@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <utility>
 #include <vector>
 
 namespace onebeat_recording {
@@ -270,6 +271,71 @@ struct EchoFirChannelEstimate {
 struct StereoEchoFirEstimate {
     std::array<EchoFirChannelEstimate, 2> channels{};
 };
+
+struct EchoAlignmentSample {
+    int delayFrames = 0;
+    double weight = 0;
+};
+
+struct AutoMicAlignmentEstimate {
+    bool reliable = false;
+    int shiftFrames = 0;
+    double confidence = 0;
+    int sampleCount = 0;
+    int medianAbsoluteDeviationFrames = 0;
+};
+
+inline int WeightedMedianFrames(std::vector<EchoAlignmentSample> samples)
+{
+    if (samples.empty()) return 0;
+    std::sort(samples.begin(), samples.end(), [](const auto &left, const auto &right) {
+        return left.delayFrames < right.delayFrames;
+    });
+    double total = 0;
+    for (const auto &sample : samples) total += sample.weight;
+    double cumulative = 0;
+    for (const auto &sample : samples) {
+        cumulative += sample.weight;
+        if (cumulative * 2 >= total) return sample.delayFrames;
+    }
+    return samples.back().delayFrames;
+}
+
+/**
+ * Convert accepted local echo delays into a small post-cleaning MIC baseline.
+ * Large or unstable delays are acoustic-path observations, not clock errors.
+ */
+inline AutoMicAlignmentEstimate EstimateAutoMicAlignment(
+    const std::vector<EchoAlignmentSample> &accepted)
+{
+    constexpr int MINIMUM_WINDOWS = 4;
+    constexpr int MAXIMUM_SHIFT_FRAMES = 1440; // 30 ms at 48 kHz.
+    constexpr int MAXIMUM_MAD_FRAMES = 144; // 3 ms stability gate.
+    AutoMicAlignmentEstimate result;
+    result.sampleCount = static_cast<int>(accepted.size());
+    if (result.sampleCount < MINIMUM_WINDOWS) return result;
+    double totalWeight = 0;
+    for (const auto &sample : accepted) {
+        if (!std::isfinite(sample.weight) || !(sample.weight > 0) ||
+            std::abs(sample.delayFrames) > MAXIMUM_SHIFT_FRAMES) return result;
+        totalWeight += sample.weight;
+    }
+    if (!(totalWeight > 0)) return result;
+    const int delay = WeightedMedianFrames(accepted);
+    std::vector<EchoAlignmentSample> deviations;
+    deviations.reserve(accepted.size());
+    for (const auto &sample : accepted)
+        deviations.push_back({std::abs(sample.delayFrames - delay), sample.weight});
+    const int mad = WeightedMedianFrames(std::move(deviations));
+    result.medianAbsoluteDeviationFrames = mad;
+    if (std::abs(delay) > MAXIMUM_SHIFT_FRAMES || mad > MAXIMUM_MAD_FRAMES) return result;
+    result.shiftFrames = -delay;
+    result.confidence = std::clamp(std::min(1.0, totalWeight / 2.0) *
+        (1.0 - static_cast<double>(mad) / (MAXIMUM_MAD_FRAMES + 1)), 0.0, 1.0);
+    result.reliable = result.confidence >= 0.35;
+    if (!result.reliable) result.shiftFrames = 0;
+    return result;
+}
 
 namespace echo_detail {
 inline bool SolveRegularizedCovariance(std::vector<double> &covariance,
