@@ -483,7 +483,8 @@ struct MainPage {
     this.showRecordingSaved = false;
   }
 
-  private async viewSavedRecording(): Promise<void> {
+  private async exitAndViewSavedRecording(): Promise<void> {
+    if (this.exiting || this.returningToLobby) { return; }
     const clipId = this.savedRecordingClipId;
     const scope = this.savedRecordingScope;
     if (clipId.length === 0) {
@@ -491,16 +492,31 @@ struct MainPage {
       return;
     }
     this.showRecordingSaved = false;
+    this.exiting = true;
+    const request = this.beginAction('recording-open-saved', false);
     try {
-      await router.pushUrl({
+      await AppSession.reset();
+    } catch (error) {
+      // Match the normal exit path: the active session is already detached,
+      // so navigation may continue while retained cleanup remains retryable.
+      logUserFailure('recording-open-saved-cleanup', error);
+    }
+    if (!this.isCurrentAction('recording-open-saved', request)) {
+      this.exiting = false;
+      return;
+    }
+    router.clear();
+    try {
+      await router.replaceUrl({
         url: 'pages/RecordingLibraryPage',
         params: { scope: scope, clipId: clipId }
       });
     } catch (error) {
       logUserFailure('recording-open-saved', error);
+      this.exiting = false;
       if (this.pageActive) {
         this.presentRecordingFailureOrRecovery(
-          '作品已保存，但暂时无法打开作品页，请从首页进入',
+          '已退出练习，作品仍保存在本机；暂时无法打开作品页，请稍后从首页进入',
           '暂时无法打开作品'
         );
       }
@@ -755,10 +771,10 @@ struct MainPage {
             .fontSize(14).fontWeight(900).fontColor(INK).backgroundColor(PAPER)
             .border({ width: 1.5, color: INK }).borderRadius(6).shadow(CONTROL_SHADOW)
             .onClick(() => this.continueWalkingAfterRecording())
-          Button('去查看', { type: ButtonType.Normal }).layoutWeight(1).height(46)
+          Button('退出去查看', { type: ButtonType.Normal }).layoutWeight(1).height(46)
             .fontSize(14).fontWeight(900).fontColor(INK).backgroundColor(CORAL)
             .border({ width: 1.5, color: INK }).borderRadius(6).shadow(CONTROL_SHADOW)
-            .onClick(() => { void this.viewSavedRecording(); })
+            .enabled(!this.exiting).onClick(() => { void this.exitAndViewSavedRecording(); })
         }.width('100%')
       }.width(RECORD_RESULT_WIDTH).padding(20).backgroundColor(PAPER).border({ width: 2, color: INK })
         .borderRadius(9).shadow(CARD_SHADOW).translate({ y: RECORD_RESULT_Y_OFFSET })

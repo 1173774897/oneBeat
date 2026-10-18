@@ -87,7 +87,7 @@ struct TrackWriter {
         // Copied AVScreenCapture payloads are already ordered PCM chunks. Their
         // hardware timestamps can quantize or jitter at callback boundaries;
         // using that jitter to edit every chunk creates periodic zero/skip seams.
-        Check(timeline.Append(chunk.timestampNs, chunkFrames), "采集时间戳出现跳变，录制已结束");
+        Check(timeline.Append(chunk.timestampNs, chunkFrames), "采集时间戳无效，录制已结束");
         WriteAll(fd, chunk.bytes.data(), chunk.bytes.size());
         firstTimestampNs = timeline.FirstTimestampNs();
     }

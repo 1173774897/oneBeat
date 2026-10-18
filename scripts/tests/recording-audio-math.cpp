@@ -46,15 +46,20 @@ int main()
     assert(pcm.FirstTimestampNs() == pcmStartNs);
     assert(pcm.FramesWritten() == 2880);
     assert(pcm.LastDriftFrames() == -10);
+    ContiguousPcmTimeline batchedHardwareClock;
+    assert(batchedHardwareClock.Append(pcmStartNs, 960));
+    assert(batchedHardwareClock.Append(pcmStartNs + 120000000, 960));
+    assert(batchedHardwareClock.Append(pcmStartNs + 140000000, 960));
+    assert(batchedHardwareClock.FramesWritten() == 2880);
     ContiguousPcmTimeline discontinuous;
     assert(discontinuous.Append(pcmStartNs, 960));
-    assert(!discontinuous.Append(pcmStartNs + 40000000, 960));
+    assert(discontinuous.Append(pcmStartNs + 800000000, 960));
+    assert(discontinuous.FramesWritten() == 1920);
     ContiguousPcmTimeline gradualClockSlope;
     for (int chunk = 0; chunk < 10000; chunk++) {
         assert(gradualClockSlope.Append(pcmStartNs + chunk * 20001000LL, 960));
     }
-    assert(std::abs(gradualClockSlope.LastDriftFrames()) >
-        PCM_TIMESTAMP_DRIFT_STEP_TOLERANCE_FRAMES);
+    assert(std::abs(gradualClockSlope.LastDriftFrames()) > SAMPLE_RATE * 5 / 1000);
 
     // Estimate both acoustic delay and level. A fixed full-scale subtraction
     // would inject an inverted app track; a per-encoder-block delay would reset at 1024.

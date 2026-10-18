@@ -20,21 +20,31 @@ assert.match(home, /vegetation\/plant_06\.png/);
 assert.match(home, /vegetation\/plant_08\.png/);
 assert.match(home, /scenes\/sunset\/entities\/sign\.png/);
 const homeCard = home.slice(home.indexOf('  private practiceEntryPanel('), home.indexOf('  @Builder\n  private storeEntryPanel'));
-const cardFaceStart = homeCard.indexOf('      Column()');
+const cardFaceStart = homeCard.indexOf('      Button({ type: ButtonType.Normal })');
 assert.ok(cardFaceStart > 0);
 const homeBacking = homeCard.slice(0, cardFaceStart);
 assert.match(homeBacking, /backgroundColor\(INK\)\.borderRadius\(HOME_ENTRY_RADIUS\)/);
 assert.match(homeBacking, /translate\(\{ x: HOME_ENTRY_SHADOW_X, y: HOME_ENTRY_SHADOW_Y \}\)/);
 assert.match(homeBacking, /hitTestBehavior\(HitTestMode\.None\)\.accessibilityLevel\('no'\)/);
 assert.doesNotMatch(homeBacking, /\.onClick/);
-assert.doesNotMatch(home, /recording_share_hero|worksEntry\(|HOME_WORKS_|stopPropagation|badgeLabel: '(?:TEAM|SOLO)'/);
+assert.doesNotMatch(home,
+  /recording_share_hero|worksEntry\(|HOME_WORKS_(?:ROW|GROUP|ART)|stopPropagation|badgeLabel: '(?:TEAM|SOLO)'/);
 assert.equal((homeCard.match(/Button\(\{ type: ButtonType\.Normal \}\)/g) || []).length, 2,
   'Practice and works use sibling controls rather than nested buttons');
 assert.equal((homeCard.match(/onClick\(\(\) => this\.goPrimary\(kind\)\)/g) || []).length, 1);
 assert.equal((homeCard.match(/onClick\(\(\) => this\.goSecondary\(kind\)\)/g) || []).length, 1);
+assert.match(homeCard,
+  /layoutWeight\(kind === 'team' \? HOME_TEAM_ENTRY_WEIGHT : HOME_SOLO_ENTRY_WEIGHT\)/,
+  'The selected C layout must retain the 58/42 asymmetric practice cards');
+assert.match(home, /const HOME_TEAM_ENTRY_WEIGHT: number = 58/);
+assert.match(home, /const HOME_SOLO_ENTRY_WEIGHT: number = 42/);
+assert.match(homeCard, /backgroundColor\(PAPER\)[\s\S]*borderRadius\(HOME_WORKS_PILL_HEIGHT \/ 2\)/,
+  'Works actions use the selected cream pill treatment');
 const storeCard = home.slice(home.indexOf('  private storeEntryPanel('), home.indexOf('  build()'));
 assert.doesNotMatch(storeCard, /Image\(/, 'The selected store panel intentionally has no illustration');
 assert.match(storeCard, /backgroundColor\(LILAC\)/);
+assert.match(storeCard, /backgroundColor\(PAPER\)[\s\S]*borderRadius\(HOME_WORKS_PILL_HEIGHT \/ 2\)/,
+  'The shop action matches the works pill color');
 assert.match(storeCard, /onClick\(\(\) => this\.goPrimary\('store'\)\)/);
 assert.match(home, /onebeat_wordmark\.png[\s\S]*entry_burst\.png[\s\S]*height\(245\)\.clip\(true\)/,
   'The existing title and hero remain unchanged above the redesigned entries');

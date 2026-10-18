@@ -57,13 +57,10 @@ inline int64_t FramesForNanoseconds(int64_t ns)
 inline int64_t FramesForMicroseconds(int64_t us)
 { return std::llround(static_cast<double>(us) * SAMPLE_RATE / 1000000.0); }
 
-constexpr int PCM_TIMESTAMP_DRIFT_STEP_TOLERANCE_FRAMES = SAMPLE_RATE * 5 / 1000;
-
 /**
  * Capture timestamps are hardware-clock observations, not editing commands.
- * Small callback jitter must never insert silence or discard otherwise
- * contiguous PCM. A larger gap fails closed instead of squeezing lost audio
- * out of the timeline and silently desynchronizing all following samples.
+ * Callback PCM is already ordered; timestamp batching must neither edit samples
+ * nor terminate capture. Only malformed timestamp/frame inputs are rejected.
  */
 class ContiguousPcmTimeline {
 public:
@@ -73,12 +70,6 @@ public:
         if (firstTimestampNs_ < 0) firstTimestampNs_ = timestampNs;
         const int64_t observedFrame = FramesForNanoseconds(timestampNs - firstTimestampNs_);
         const int64_t driftFrames = observedFrame - framesWritten_;
-        // Clock-rate error accumulates gradually on long recordings. Reject a
-        // sudden step (a missing/duplicated callback), not that harmless slope.
-        if (framesWritten_ > 0 &&
-            std::abs(driftFrames - lastDriftFrames_) > PCM_TIMESTAMP_DRIFT_STEP_TOLERANCE_FRAMES) {
-            return false;
-        }
         lastDriftFrames_ = driftFrames;
         framesWritten_ += frameCount;
         return true;

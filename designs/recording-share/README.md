@@ -15,7 +15,7 @@
 
 ## 当前实现与验证边界
 
-- 行进页的“人”按钮与抽屉已删除，没有迁至上面板。录制按钮保留原底栏位置，录制中切为停止；舞台另有安全区外的停止按钮。点击舞台可重新展开/收起控制面板并继续操作，展开的面板也会入镜。录完不再弹 toast，而是显示保存位置弹窗；“去查看”进入对应单人/多人作品并选中刚录视频，“继续行进”只关闭弹窗，不暂停练习。录制开始、停止或系统采集失败也改用错误详情弹窗；若原始音轨已保留，则显示可重试/放弃的保存恢复弹窗，不再叠加失败 toast。
+- 行进页的“人”按钮与抽屉已删除，没有迁至上面板。录制按钮保留原底栏位置，录制中切为停止；舞台另有安全区外的停止按钮。点击舞台可重新展开/收起控制面板并继续操作，展开的面板也会入镜。录完不再弹 toast，而是显示保存位置弹窗；“退出去查看”先完整退出当前单人/多人练习并清空行进路由栈，再进入对应作品页选中刚录视频；“继续行进”只关闭弹窗，不暂停练习。录制开始、停止或系统采集失败也改用错误详情弹窗；若原始音轨已保留，则显示可重试/放弃的保存恢复弹窗，不再叠加失败 toast。
 - 波形用Canvas绘制MIC真实峰值的上下双向包络；真实声波与停止控件是场景叠加层，系统录屏会将两者保留在成品中。生产播放 renderer、时钟同步、耳机校准与 WalkScene 坐标均未改动。
 - 大厅锁定入口没有常驻活动内容；点击有回弹并打开交互提示，内部切换记录和玩法。试用/月卡状态小字也能查看同一提示。
 - 分享采用系统本地视频分享面板；请选择小红书发布，返回后明确确认。没有接入需要 AppKey/公网视频的第三方 SDK，没有自动把拉起面板算作发布成功。
@@ -47,7 +47,7 @@
 
 图片素材路径：`entry/src/main/resources/rawfile/comic/decor/recording_share_hero.png`。运行时优先调整 Main 的 `RECORD_INTRO_HERO_HEIGHT` 与 Library 的 `LIBRARY_HERO_HEIGHT`，均为 Contain；Library 分享面板另有108vp插画高度、作品卡片48vp高度。原鼓机锁链素材 `comic/decor/pro-chain-locked.png` / `pro-chain-anchored.png` 的位置与缩放未改。
 
-首页入口由 `pages/Index.ets` 的 `HOME_PRACTICE_HEIGHT=214`（增大双面板更高）、`HOME_PRACTICE_GAP=12`（增大两卡间距并压缩单卡宽度）、`HOME_PRACTICE_FOOTER_HEIGHT=46`（增大作品入口更高，同时压缩上方练习区）和 `HOME_STORE_HEIGHT=98`（增大紫色小铺入口高度）控制。多人插图素材为 `scenes/sunset/entities/tree.png`、`vegetation/plant_06.png`、`vegetation/plant_08.png`，首选分别调整 `HOME_TEAM_TREE_HEIGHT=84`、`HOME_TEAM_PLANT_06_WIDTH=78`、`HOME_TEAM_PLANT_08_WIDTH=48`；增大即放大对应素材。单人插图为 `scenes/sunset/entities/sign.png`，由 `HOME_SOLO_SIGN_HEIGHT=78` 控制，增大会放大路牌。
+首页入口由 `pages/Index.ets` 的 `HOME_TEAM_ENTRY_WEIGHT=58` / `HOME_SOLO_ENTRY_WEIGHT=42` 控制左右宽度比例；增大其中一项会让对应卡片变宽。`HOME_PRACTICE_HEIGHT=176`（增大双面板更高）、`HOME_PRACTICE_GAP=10`（增大两卡间距并压缩卡片可用宽度）、`HOME_WORKS_PILL_WIDTH=78` / `HOME_WORKS_PILL_HEIGHT=34`（增大作品与小铺胶囊）和 `HOME_STORE_HEIGHT=86`（增大紫色小铺入口高度）控制整体尺寸。多人插图素材为 `scenes/sunset/entities/tree.png`、`vegetation/plant_06.png`、`vegetation/plant_08.png`，首选分别调整 `HOME_TEAM_TREE_HEIGHT=64`、`HOME_TEAM_PLANT_06_WIDTH=62`、`HOME_TEAM_PLANT_08_WIDTH=36`；增大即放大对应素材。单人插图为 `scenes/sunset/entities/sign.png`，由 `HOME_SOLO_SIGN_HEIGHT=44` 控制，增大会放大路牌。
 
 分享日历由 `components/ShareCalendarSheet.ets` 的 `SHARE_CALENDAR_SIDE_INSET=18`（增大变窄）、`SHARE_CALENDAR_BOTTOM=28`加安全区（增大上移）、`SHARE_CALENDAR_MAX_HEIGHT=88%`（增大更高）、`SHARE_CALENDAR_CELL_HEIGHT=37` / `SHARE_CALENDAR_CELL_GAP=3`（增大单元高度/间距）控制。
 
@@ -73,4 +73,4 @@
 
 修复前的失败作品只有已归零的视频和无头PCM，没有持久化原始绝对时间映射；虽然文件仍被保留，不能据此保证事后重建两条音轨的首帧偏移。新版在合成之前保存带版本和同步校验结果的采集恢复元数据，支持启动后继续处理。单位归一化回归与构建通过仍不等于硬件链路相位已通过声学验收。
 
-同日音质修复：AVScreenCapture 已按顺序交付连续 S16 PCM，块级硬件时间戳只用于校验和首帧对齐，不再按每次回调抖动插零或裁掉样本；相邻回调的漂移突变超过 5 ms 会直接判定采集异常，不把真实丢块静默压紧，同时允许长录制中缓慢累积的硬件时钟斜率。内置扬声器场景不再固定减去一整份内音，也不再在每个 1024 帧 AAC 输入块重置延迟；导出会在高能量窗口估计声学延迟、相关度和实际泄漏系数，低相关时不做破坏性相减，并按绝对帧读取跨块参考。MIC 在内录轨出现前保持原声，不因消泄漏而整段静音。纯 C++ 回归覆盖时间戳抖动、延迟/系数估计、无相关信号拒绝、257/1024/4096 帧分块不变性及大于单块的 1536 帧延迟；源码契约另锁定回调容量逐字节追加。最终仍需用外放真机分别验收纯内音、纯人声及两者同时存在的成片。
+同日音质修复：AVScreenCapture 已按顺序交付连续 S16 PCM，块级硬件时间戳只保留首帧用于跨轨对齐，不再按每次回调抖动插零、裁样本或主动结束录制；真机 AudioCapturer 的硬件时间戳可能按较粗批次推进，后续跳变仅作观测。真正的缓冲格式错误、队列过载和文件写入失败仍会结束采集。内置扬声器场景不再固定减去一整份内音，也不再在每个 1024 帧 AAC 输入块重置延迟；导出会在高能量窗口估计声学延迟、相关度和实际泄漏系数，低相关时不做破坏性相减，并按绝对帧读取跨块参考。MIC 在内录轨出现前保持原声，不因消泄漏而整段静音。纯 C++ 回归覆盖时间戳抖动、延迟/系数估计、无相关信号拒绝、257/1024/4096 帧分块不变性及大于单块的 1536 帧延迟；源码契约另锁定回调容量逐字节追加。最终仍需用外放真机分别验收纯内音、纯人声及两者同时存在的成片。

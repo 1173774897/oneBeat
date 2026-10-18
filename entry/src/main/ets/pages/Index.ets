@@ -9,15 +9,20 @@ type HomeEntryKind = RecordingScope | 'store';
 const HOME_ENTRY_RADIUS: number = 9;
 const HOME_ENTRY_SHADOW_X: number = 3;
 const HOME_ENTRY_SHADOW_Y: number = 4;
-const HOME_PRACTICE_GAP: number = 12;
-const HOME_PRACTICE_HEIGHT: number = 214;
-const HOME_PRACTICE_FOOTER_HEIGHT: number = 46;
-const HOME_PRACTICE_ART_HEIGHT: number = 88;
-const HOME_STORE_HEIGHT: number = 98;
-const HOME_TEAM_TREE_HEIGHT: number = 84;
-const HOME_TEAM_PLANT_06_WIDTH: number = 78;
-const HOME_TEAM_PLANT_08_WIDTH: number = 48;
-const HOME_SOLO_SIGN_HEIGHT: number = 78;
+const HOME_PRACTICE_GAP: number = 10;
+const HOME_TEAM_ENTRY_WEIGHT: number = 58;
+const HOME_SOLO_ENTRY_WEIGHT: number = 42;
+const HOME_PRACTICE_HEIGHT: number = 176;
+const HOME_WORKS_PILL_WIDTH: number = 78;
+const HOME_WORKS_PILL_HEIGHT: number = 34;
+const HOME_STORE_HEIGHT: number = 86;
+const HOME_TEAM_ART_WIDTH: number = 86;
+const HOME_TEAM_ART_HEIGHT: number = 70;
+const HOME_TEAM_TREE_HEIGHT: number = 64;
+const HOME_TEAM_PLANT_06_WIDTH: number = 62;
+const HOME_TEAM_PLANT_08_WIDTH: number = 36;
+const HOME_SOLO_ART_WIDTH: number = 42;
+const HOME_SOLO_SIGN_HEIGHT: number = 44;
 
 @Entry
 @Component
@@ -82,12 +87,14 @@ struct Index {
       Image($rawfile('scenes/sunset/entities/tree.png'))
         .height(HOME_TEAM_TREE_HEIGHT).objectFit(ImageFit.Contain).align(Alignment.Bottom)
       Image($rawfile('vegetation/plant_06.png'))
-        .width(HOME_TEAM_PLANT_06_WIDTH).height(38).objectFit(ImageFit.Contain)
-        .align(Alignment.BottomStart).translate({ x: -2, y: 3 })
+        .width(HOME_TEAM_PLANT_06_WIDTH).height(31).objectFit(ImageFit.Contain)
+        .align(Alignment.BottomStart).translate({ x: -1, y: 2 })
       Image($rawfile('vegetation/plant_08.png'))
-        .width(HOME_TEAM_PLANT_08_WIDTH).height(43).objectFit(ImageFit.Contain)
-        .align(Alignment.BottomEnd).translate({ x: -1, y: 3 })
-    }.width('100%').height(HOME_PRACTICE_ART_HEIGHT).hitTestBehavior(HitTestMode.None)
+        .width(HOME_TEAM_PLANT_08_WIDTH).height(34).objectFit(ImageFit.Contain)
+        .align(Alignment.BottomEnd).translate({ y: 2 })
+    }.width(HOME_TEAM_ART_WIDTH).height(HOME_TEAM_ART_HEIGHT)
+      .align(Alignment.BottomEnd).margin({ right: 7, bottom: 7 })
+      .hitTestBehavior(HitTestMode.None)
   }
 
   @Builder
@@ -95,7 +102,9 @@ struct Index {
     Stack({ alignContent: Alignment.Bottom }) {
       Image($rawfile('scenes/sunset/entities/sign.png'))
         .height(HOME_SOLO_SIGN_HEIGHT).objectFit(ImageFit.Contain).align(Alignment.Bottom)
-    }.width('100%').height(HOME_PRACTICE_ART_HEIGHT).hitTestBehavior(HitTestMode.None)
+    }.width(HOME_SOLO_ART_WIDTH).height(50)
+      .align(Alignment.BottomEnd).margin({ right: 5, bottom: 8 })
+      .hitTestBehavior(HitTestMode.None)
   }
 
   @Builder
@@ -105,36 +114,36 @@ struct Index {
         .translate({ x: HOME_ENTRY_SHADOW_X, y: HOME_ENTRY_SHADOW_Y })
         .hitTestBehavior(HitTestMode.None).accessibilityLevel('no')
       // Practice and works remain sibling controls so a works tap cannot start a session.
-      Column() {
-        Button({ type: ButtonType.Normal }) {
+      Button({ type: ButtonType.Normal }) {
+        Stack({ alignContent: Alignment.TopStart }) {
           Column({ space: 3 }) {
-            Text(title).fontSize(21).fontWeight(900).fontColor(INK).width('100%')
+            Text(title).fontSize(20).fontWeight(900).fontColor(INK).width('100%')
             Text(subtitle).fontSize(10).fontWeight(FontWeight.Bold).fontColor(INK)
               .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).width('100%')
-            if (kind === 'team') {
-              this.teamEntryArtwork()
-            } else {
-              this.soloEntryArtwork()
-            }
           }.width('100%').alignItems(HorizontalAlign.Start)
-        }.width('100%').height(HOME_PRACTICE_HEIGHT - HOME_PRACTICE_FOOTER_HEIGHT)
-          .padding({ left: 12, right: 12, top: 13, bottom: 5 })
-          .backgroundColor(Color.Transparent).borderRadius(HOME_ENTRY_RADIUS)
-          .onClick(() => this.goPrimary(kind))
-          .accessibilityText(this.practiceAccessibility(kind, title))
-        Button({ type: ButtonType.Normal }) {
-          Row() {
-            Text(`作品 ${this.worksCount(kind)}`).fontSize(15).fontWeight(900).fontColor(INK)
-            Blank()
-            Text('›').fontSize(22).fontWeight(900).fontColor(INK)
-          }.width('100%')
-        }.width('100%').height(HOME_PRACTICE_FOOTER_HEIGHT)
-          .padding({ left: 14, right: 14 }).backgroundColor(Color.Transparent).borderRadius(0)
-          .border({ width: { top: 1.2 }, color: INK })
-          .onClick(() => this.goSecondary(kind)).accessibilityText(this.worksAccessibility(kind))
-      }.width('100%').height(HOME_PRACTICE_HEIGHT).backgroundColor(fill)
+          if (kind === 'team') {
+            this.teamEntryArtwork()
+          } else {
+            this.soloEntryArtwork()
+          }
+        }.width('100%').height('100%')
+      }.width('100%').height(HOME_PRACTICE_HEIGHT)
+        .padding({ left: 12, right: 12, top: 12, bottom: 8 }).backgroundColor(fill)
         .border({ width: 1.2, color: INK }).borderRadius(HOME_ENTRY_RADIUS)
-    }.layoutWeight(1).height(HOME_PRACTICE_HEIGHT).clip(false)
+        .onClick(() => this.goPrimary(kind)).accessibilityText(this.practiceAccessibility(kind, title))
+      Button({ type: ButtonType.Normal }) {
+        Row({ space: 3 }) {
+          Text(`作品 ${this.worksCount(kind)}`).fontSize(12).fontWeight(900).fontColor(INK)
+          Blank()
+          Text('›').fontSize(18).fontWeight(900).fontColor(INK)
+        }.width('100%')
+      }.width(HOME_WORKS_PILL_WIDTH).height(HOME_WORKS_PILL_HEIGHT)
+        .padding({ left: 10, right: 8 }).backgroundColor(PAPER)
+        .border({ width: 1.2, color: INK }).borderRadius(HOME_WORKS_PILL_HEIGHT / 2)
+        .align(Alignment.BottomStart).margin({ left: 10, bottom: 10 })
+        .onClick(() => this.goSecondary(kind)).accessibilityText(this.worksAccessibility(kind))
+    }.layoutWeight(kind === 'team' ? HOME_TEAM_ENTRY_WEIGHT : HOME_SOLO_ENTRY_WEIGHT)
+      .height(HOME_PRACTICE_HEIGHT).clip(false)
   }
 
   @Builder
@@ -146,11 +155,15 @@ struct Index {
       Button({ type: ButtonType.Normal }) {
         Row({ space: 10 }) {
           Column({ space: 5 }) {
-            Text('收藏小铺').fontSize(22).fontWeight(900).fontColor(INK).width('100%')
-            Text('角色 · 场景 · 鼓机').fontSize(12).fontWeight(FontWeight.Bold).fontColor(INK).width('100%')
+            Text('收藏小铺').fontSize(20).fontWeight(900).fontColor(INK).width('100%')
+            Text('角色 · 场景 · 鼓机').fontSize(11).fontWeight(FontWeight.Bold).fontColor(INK).width('100%')
           }.layoutWeight(1).alignItems(HorizontalAlign.Start)
-          Text('去逛逛').fontSize(15).fontWeight(900).fontColor(INK)
-          Text('›').fontSize(24).fontWeight(900).fontColor(INK)
+          Row({ space: 4 }) {
+            Text('去逛逛').fontSize(13).fontWeight(900).fontColor(INK)
+            Text('›').fontSize(18).fontWeight(900).fontColor(INK)
+          }.height(HOME_WORKS_PILL_HEIGHT).padding({ left: 12, right: 8 })
+            .backgroundColor(PAPER).border({ width: 1.2, color: INK })
+            .borderRadius(HOME_WORKS_PILL_HEIGHT / 2)
         }.width('100%')
       }.width('100%').height(HOME_STORE_HEIGHT)
         .padding({ left: 16, right: 14 }).backgroundColor(LILAC)

@@ -4,8 +4,8 @@ const vm = require('node:vm');
 const ts = require(process.argv[2] || '/Applications/DevEco-Studio.app/Contents/tools/hvigor/hvigor/node_modules/typescript/lib/typescript.js');
 const mainPageSource = fs.readFileSync('entry/src/main/ets/pages/MainPage.ets', 'utf8');
 assert.match(mainPageSource,
-  /private recordingSavedOverlay\(\)[\s\S]*Button\('继续行进'[\s\S]*Button\('去查看'/,
-  'Recording success must offer continue and view actions');
+  /private recordingSavedOverlay\(\)[\s\S]*Button\('继续行进'[\s\S]*Button\('退出去查看'/,
+  'Recording success must offer continue and exit-to-view actions');
 assert.match(mainPageSource,
   /private recordingErrorOverlay\(\)[\s\S]*Text\(this\.recordingErrorMessage\)[\s\S]*Button\('知道了，继续行进'/,
   'Recording failures must show their error detail in a dialog');
@@ -44,12 +44,19 @@ function harness(options = {}) {
     exports: {}, Map, Date, VideoController: class { pause() { trace.push('pause-preview'); } },
     SliderChangeMode: { Begin: 0, Moving: 1, End: 2, Click: 3 },
     Curve: { EaseInOut: 'ease' },
-    AppSession: { get: () => session },
+    AppSession: {
+      get: () => session,
+      async reset() { trace.push('reset-session'); }
+    },
     AppStorage: { get: key => storage.get(key), setOrCreate: (key, value) => storage.set(key, value) },
     defaultBeatPointStates: () => [], logUserFailure() {},
     userErrorMessage: (_error, fallback) => fallback.trim().length > 0 ? fallback : '操作未完成，请重试',
     showUserNotice: message => notices.push(message),
-    router: { async pushUrl(args) { routes.push(args); } },
+    router: {
+      async pushUrl(args) { routes.push(args); },
+      async replaceUrl(args) { routes.push(args); },
+      clear() { trace.push('clear-router'); }
+    },
     setInterval: () => 1, clearInterval() {},
     animateTo: (_options, action) => { trace.push('animate'); action(); },
     RecordingCoordinator: {
@@ -137,13 +144,14 @@ function harness(options = {}) {
   viewing.setSnapshot({ state: 'idle', lastClip: teamClip });
   viewingPage.refreshRecordingState();
   assert.equal(viewingPage.savedRecordingLabel, '多人练习作品');
-  await viewingPage.viewSavedRecording();
+  await viewingPage.exitAndViewSavedRecording();
   assert.equal(viewing.routes.length, 1);
   assert.equal(viewing.routes[0].url, 'pages/RecordingLibraryPage');
   assert.equal(viewing.routes[0].params.scope, 'team');
   assert.equal(viewing.routes[0].params.clipId, teamClip.id,
-    'View opens the matching library and selects the newly saved clip');
-  assert.equal(viewing.trace.includes('pause-practice'), false, 'Viewing works does not pause practice implicitly');
+    'Exit-to-view opens the matching library and selects the newly saved clip');
+  assert.deepEqual(viewing.trace, ['reset-session', 'clear-router'],
+    'Exit-to-view releases the session and clears the walking stack before navigation');
 
   const startFailure = harness({ startFailure: true });
   const startFailurePage = loadPage('MainPage', startFailure.context);
@@ -288,5 +296,5 @@ function harness(options = {}) {
   await delayedMix;
   assert.equal(staleLibrary.selectedId, 'another-clip', 'A late render must not restore the previously selected clip');
   assert.equal(staleLibrary.clips[0].path, clip.path, 'A hidden page must not apply a stale preview source');
-  console.log('PASS: capture consent, saved/error dialogs, reopenable controls, preview focus gate, explicit check-in and independent MIC render ordering');
+  console.log('PASS: capture consent, saved/error dialogs, exit-to-view cleanup, preview focus gate, explicit check-in and independent MIC render ordering');
 })().catch(error => { console.error(error); process.exitCode = 1; });
