@@ -14,7 +14,7 @@ assert.ok(hardStart >= 0 && fallbackStart > hardStart, 'Keep hard shadows opt-in
 const hard = button.slice(hardStart, fallbackStart);
 assert.match(home, /this\.practiceEntryPanel\('team', '多人练习', '组队同行 · 同拍出发', CORAL\)/);
 assert.match(home, /this\.practiceEntryPanel\('solo', '单人练习', '跟着节奏 · 找到步调', WHITE\)/);
-assert.match(home, /Row\(\{ space: HOME_PRACTICE_GAP \}\)[\s\S]*this\.storeEntryPanel\(\)/);
+assert.match(home, /Row\(\{ space: HOME_ENTRANCE_GAP \}\)[\s\S]*this\.storeEntryPanel\(\)/);
 assert.match(home, /scenes\/sunset\/entities\/tree\.png/);
 assert.match(home, /vegetation\/plant_06\.png/);
 assert.match(home, /vegetation\/plant_08\.png/);
@@ -33,18 +33,22 @@ assert.equal((homeCard.match(/Button\(\{ type: ButtonType\.Normal \}\)/g) || [])
   'Practice and works use sibling controls rather than nested buttons');
 assert.equal((homeCard.match(/onClick\(\(\) => this\.goPrimary\(kind\)\)/g) || []).length, 1);
 assert.equal((homeCard.match(/onClick\(\(\) => this\.goSecondary\(kind\)\)/g) || []).length, 1);
+assert.match(homeCard, /\.position\(\{[\s\S]*HOME_WORKS_PILL_INSET_LEFT/,
+  'Works pill uses explicit coordinates so it cannot stack over the title');
 assert.match(homeCard,
   /layoutWeight\(kind === 'team' \? HOME_TEAM_ENTRY_WEIGHT : HOME_SOLO_ENTRY_WEIGHT\)/,
-  'The selected C layout must retain the 58/42 asymmetric practice cards');
-assert.match(home, /const HOME_TEAM_ENTRY_WEIGHT: number = 58/);
-assert.match(home, /const HOME_SOLO_ENTRY_WEIGHT: number = 42/);
-assert.match(homeCard, /backgroundColor\(PAPER\)[\s\S]*borderRadius\(HOME_WORKS_PILL_HEIGHT \/ 2\)/,
-  'Works actions use the selected cream pill treatment');
+  'The selected C layout must retain asymmetric practice cards');
+assert.match(home, /const HOME_TEAM_ENTRY_WEIGHT: number = 56/);
+assert.match(home, /const HOME_SOLO_ENTRY_WEIGHT: number = 44/);
+assert.match(homeCard, /backgroundColor\(WHITE\)/,
+  'Works pills use the white capsule from the reference layout');
 const storeCard = home.slice(home.indexOf('  private storeEntryPanel('), home.indexOf('  build()'));
 assert.doesNotMatch(storeCard, /Image\(/, 'The selected store panel intentionally has no illustration');
 assert.match(storeCard, /backgroundColor\(LILAC\)/);
-assert.match(storeCard, /backgroundColor\(PAPER\)[\s\S]*borderRadius\(HOME_WORKS_PILL_HEIGHT \/ 2\)/,
-  'The shop action matches the works pill color');
+assert.match(storeCard, /backgroundColor\(CORAL\)[\s\S]*borderRadius\(HOME_WORKS_PILL_HEIGHT \/ 2\)/,
+  'The shop action uses the coral pill from the reference layout');
+assert.match(storeCard, /角色 \/ 场景 \/ 鼓机/);
+assert.match(home, /SAME BEAT!/);
 assert.match(storeCard, /onClick\(\(\) => this\.goPrimary\('store'\)\)/);
 assert.match(home, /onebeat_wordmark\.png[\s\S]*entry_burst\.png[\s\S]*height\(245\)\.clip\(true\)/,
   'The existing title and hero remain unchanged above the redesigned entries');

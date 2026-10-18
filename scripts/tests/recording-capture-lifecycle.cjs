@@ -14,7 +14,7 @@ assert.match(nativeSource,
   /const int size = capacity;[\s\S]*chunk\.bytes\.assign\(address,\s*address \+ size\)/,
   'Screen-capture audio uses its exact callback capacity, not optional codec attrs');
 assert.match(nativeSource,
-  /SpeakerReferenceOutputFrame\(\s*framePosition,\s*speakerBleed\.delayFrames\)/,
+  /EchoFirReferenceFirstFrame\(\s*absoluteFrame,\s*model\.delayFrames\)/,
   'Speaker reference delay must use the absolute output frame across AAC input blocks');
 assert.doesNotMatch(nativeSource, /frame\s*>=\s*speakerBleedDelayFrames/,
   'Speaker cancellation must not reset its delay at each encoder block');
@@ -148,6 +148,7 @@ function harness(options = {}) {
   assert.equal(clip.width, 720);
   assert.equal(clip.height, 1560);
   assert.equal(clip.renderedGain, 1);
+  assert.equal(clip.renderedMixVersion, 3);
   assert.equal(clip.micOffsetUs, 17000);
   assert.equal(clip.innerOffsetUs, -11000);
   assert.equal(clip.captureSyncValid, true);
@@ -170,7 +171,7 @@ function harness(options = {}) {
   assert.equal(normal.calls.mixes.at(-1).speakerBleedCancel, 0);
   await normal.mixer.exportMixed({ ...clip, builtInSpeakerCapture: true }, 1,
     '/recordings/preview-speaker.mp4');
-  assert.equal(normal.calls.mixes.at(-1).speakerBleedCancel, .9,
+  assert.equal(normal.calls.mixes.at(-1).speakerBleedCancel, 4,
     'Built-in speaker mix passes only a ceiling; native code estimates the actual bleed level');
   await assert.rejects(normal.mixer.exportMixed(clip, 2.01, '/recordings/bad.mp4'), /200%/);
   const legacy = { ...clip, captureSyncValid: undefined, captureMappingVersion: undefined, videoTimestampDivisor: undefined };

@@ -8,7 +8,7 @@ import { MonotonicClock } from '../common/MonotonicClock';
 import { SessionBackgroundKeeper } from '../session/SessionBackgroundKeeper';
 import { RecordingClip, RecordingListener, RecordingScope, RecordingSnapshot, RecordingState } from './RecordingModels';
 import { RecordingRepository, RecordingTarget } from './RecordingRepository';
-import { RecordingMixer } from './RecordingMixer';
+import { RecordingMixer, RECORDING_MIX_VERSION } from './RecordingMixer';
 
 const INPUT_PEAK_INTERVAL_MS: number = 80;
 const CONSENT_FOREGROUND_GRACE_MS: number = 500;
@@ -309,7 +309,8 @@ export class RecordingCoordinator {
       interrupted: reason !== 'user', stopReason: reason, scope: RecordingCoordinator.scope,
       sourcePath: RecordingCoordinator.sourcePath(), innerPath: RecordingCoordinator.innerPath(),
       micPath: RecordingCoordinator.micPath(), micOffsetUs: result.micOffsetUs, innerOffsetUs: result.innerOffsetUs,
-      audioSampleRate: 48000, audioChannels: 2, renderedGain: 1, renderedAt: Date.now(),
+      audioSampleRate: 48000, audioChannels: 2, renderedGain: 1,
+      renderedMixVersion: RECORDING_MIX_VERSION, renderedAt: Date.now(),
       captureSyncValid: result.syncValid && result.timestampMappingVersion === 2 &&
         (result.videoTimestampDivisor === 1 || result.videoTimestampDivisor === 1000),
       captureMappingVersion: result.timestampMappingVersion ?? 0,

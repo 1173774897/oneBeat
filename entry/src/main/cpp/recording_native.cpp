@@ -26,6 +26,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include "recording_audio_math.h"
+#include "recording_echo_filter.h"
 
 namespace {
 constexpr int RATE = 48000;
@@ -483,59 +484,44 @@ void ReadAligned(int fd, int64_t outputFrame, int64_t offsetUs, int count, std::
         std::max<int64_t>(0, sourceFrame) * FRAME_BYTES);
     Check(size >= 0, "读取原始声音失败");
 }
-onebeat_recording::SpeakerBleedEstimate EstimateSpeakerBleedFromFiles(int innerFd, int micFd,
-    int64_t innerOffsetUs, int64_t micOffsetUs, int64_t innerActiveFrame, int64_t totalFrames,
-    double maximumCoefficient)
+struct EchoModelHistory {
+    onebeat_recording::StereoEchoFirEstimate reliable{};
+    std::array<int64_t, CHANNELS> anchor{{-1, -1}};
+};
+onebeat_recording::StereoEchoFirEstimate EstimateEchoAt(int innerFd, int micFd,
+    int64_t innerOffsetUs, int64_t micOffsetUs, int64_t anchorFrame, int64_t totalFrames,
+    double maximumGain, EchoModelHistory &history)
 {
-    constexpr int MIN_WINDOW = 480;
-    constexpr int WINDOW = 9600;
-    constexpr int64_t SEARCH_FRAMES = RATE * 5;
-    onebeat_recording::SpeakerBleedEstimate none;
-    const int64_t searchStart = std::max<int64_t>(0, innerActiveFrame);
-    const int64_t searchEnd = std::min(totalFrames, searchStart + SEARCH_FRAMES);
-    if (searchStart + MIN_WINDOW > searchEnd) {
-        return none;
-    }
-
-    // Correlate the loudest early app-audio window, rather than an arbitrary
-    // 200 ms slice that may contain only silence between two beats.
-    int64_t bestAnchor = searchStart;
-    double bestEnergy = 0;
-    std::vector<int16_t> inner;
-    for (int64_t anchor = searchStart; anchor + MIN_WINDOW <= searchEnd; anchor += WINDOW) {
-        const int frames = static_cast<int>(std::min<int64_t>(WINDOW, searchEnd - anchor));
-        ReadAligned(innerFd, anchor, innerOffsetUs, frames, inner);
-        double energy = 0;
-        for (int frame = 0; frame < frames; frame++) {
-            const int32_t mono = onebeat_recording::StereoMono(inner[frame * CHANNELS],
-                inner[frame * CHANNELS + 1]);
-            energy += static_cast<double>(mono) * mono;
-        }
-        if (energy > bestEnergy) {
-            bestEnergy = energy;
-            bestAnchor = anchor;
+    constexpr int PROBE_FRAMES = RATE * 8 / 5;
+    const int64_t lastStart = std::max<int64_t>(0, totalFrames - PROBE_FRAMES);
+    const int64_t start = std::clamp<int64_t>(anchorFrame - PROBE_FRAMES / 2, 0, lastStart);
+    const int count = static_cast<int>(std::min<int64_t>(PROBE_FRAMES, totalFrames - start));
+    if (count < 2400) return {};
+    std::vector<int16_t> inner, microphone;
+    ReadAligned(innerFd, start, innerOffsetUs, count, inner);
+    ReadAligned(micFd, start, micOffsetUs, count, microphone);
+    auto estimate = onebeat_recording::EstimateStereoEchoFir(inner.data(), microphone.data(), count,
+        14400, maximumGain);
+    for (int channel = 0; channel < CHANNELS; ++channel) {
+        if (estimate.channels[channel].enabled) {
+            history.reliable.channels[channel] = estimate.channels[channel];
+            history.anchor[channel] = anchorFrame;
+        } else if (history.anchor[channel] >= 0 && anchorFrame - history.anchor[channel] <= RATE * 8) {
+            // Loud near-end audio can hide an unchanged echo path from a new
+            // 256-dimensional fit. Revalidate only the last reliable shape's
+            // scalar gain on this window; a fallback never renews its 8 s life.
+            estimate.channels[channel] = onebeat_recording::RevalidateEchoFir(history.reliable.channels[channel],
+                inner.data(), microphone.data(), count, channel);
         }
     }
-    if (!(bestEnergy > 0)) {
-        return none;
-    }
-
-    const int probeFrames = static_cast<int>(std::min<int64_t>(
-        WINDOW + onebeat_recording::SPEAKER_BLEED_LAG_SEARCH_MAX_FRAMES, totalFrames - bestAnchor));
-    if (probeFrames < MIN_WINDOW) {
-        return none;
-    }
-    std::vector<int16_t> mic;
-    ReadAligned(innerFd, bestAnchor, innerOffsetUs, probeFrames, inner);
-    ReadAligned(micFd, bestAnchor, micOffsetUs, probeFrames, mic);
-    return onebeat_recording::EstimateSpeakerBleed(inner.data(), mic.data(), probeFrames,
-        onebeat_recording::SPEAKER_BLEED_LAG_SEARCH_MAX_FRAMES, maximumCoefficient);
+    return estimate;
 }
+
 void MixFile(const MixOptions &options)
 {
     Check(std::isfinite(options.gain) && options.gain >= 0 && options.gain <= 2, "麦克风音量无效");
     Check(std::isfinite(options.speakerBleedCancel) && options.speakerBleedCancel >= 0 &&
-        options.speakerBleedCancel <= 1, "外放泄漏补偿无效");
+        options.speakerBleedCancel <= 4, "外放泄漏补偿无效");
     Check(options.durationMs > 0 && options.durationMs < 24 * 3600000, "录制时长无效");
     Check(options.outputPath != options.sourcePath && options.outputPath != options.innerPath &&
         options.outputPath != options.micPath, "导出文件不可覆盖原始音轨");
@@ -596,15 +582,19 @@ void MixFile(const MixOptions &options)
         int64_t framePosition = 0;
         int64_t totalFrames = options.durationMs * RATE / 1000;
         const bool speakerMix = options.speakerBleedCancel > 0 && options.gain > 0;
-        const int64_t innerActiveFrame = speakerMix ? onebeat_recording::FramesForMicroseconds(
-            std::max<int64_t>(0, options.innerOffsetUs)) : 0;
-        const onebeat_recording::SpeakerBleedEstimate speakerBleed = speakerMix ?
-            EstimateSpeakerBleedFromFiles(innerFile.value, micFile.value, options.innerOffsetUs,
-                options.micOffsetUs, innerActiveFrame, totalFrames, options.speakerBleedCancel) :
-            onebeat_recording::SpeakerBleedEstimate{};
-        const bool cancelSpeakerBleed = speakerBleed.coefficient > 0;
+        constexpr int64_t ECHO_HOP_FRAMES = RATE;
+        int64_t echoAnchor = 0;
+        EchoModelHistory echoHistory;
+        onebeat_recording::StereoEchoFirEstimate echoBefore{}, echoAfter{};
+        if (speakerMix) {
+            echoBefore = EstimateEchoAt(innerFile.value, micFile.value, options.innerOffsetUs,
+                options.micOffsetUs, 0, totalFrames, options.speakerBleedCancel, echoHistory);
+            echoAfter = EstimateEchoAt(innerFile.value, micFile.value, options.innerOffsetUs,
+                options.micOffsetUs, ECHO_HOP_FRAMES, totalFrames, options.speakerBleedCancel, echoHistory);
+        }
         bool sentEos = false, receivedEos = false;
-        std::vector<int16_t> inner, mic, innerReference;
+        std::vector<int16_t> inner, mic;
+        std::array<std::vector<int16_t>, CHANNELS> referenceBefore, referenceAfter;
         while (!receivedEos) {
             CodecBuffer input{}, output{};
             bool hasInput = false, hasOutput = false;
@@ -635,30 +625,57 @@ void MixFile(const MixOptions &options)
                 else {
                     ReadAligned(innerFile.value, framePosition, options.innerOffsetUs, frames, inner);
                     ReadAligned(micFile.value, framePosition, options.micOffsetUs, frames, mic);
-                    if (cancelSpeakerBleed) {
-                        // Read by absolute output frame so the delay line stays
-                        // continuous across every 1024-frame AAC input buffer.
-                        ReadAligned(innerFile.value, onebeat_recording::SpeakerReferenceOutputFrame(
-                            framePosition, speakerBleed.delayFrames), options.innerOffsetUs, frames,
-                            innerReference);
-                    }
                     auto *samples = reinterpret_cast<int16_t *>(OH_AVBuffer_GetAddr(input.buffer));
                     Check(samples != nullptr, "混音缓冲区不可用");
-                    for (int frame = 0; frame < frames; frame++) {
-                        int32_t innerMonoRef = 0;
-                        if (cancelSpeakerBleed) {
-                            innerMonoRef = onebeat_recording::StereoMono(
-                                innerReference[frame * CHANNELS], innerReference[frame * CHANNELS + 1]);
+                    int processed = 0;
+                    while (processed < frames) {
+                        const int64_t absoluteFrame = framePosition + processed;
+                        if (speakerMix) {
+                            while (absoluteFrame >= echoAnchor + ECHO_HOP_FRAMES) {
+                                echoAnchor += ECHO_HOP_FRAMES;
+                                echoBefore = echoAfter;
+                                echoAfter = EstimateEchoAt(innerFile.value, micFile.value, options.innerOffsetUs,
+                                    options.micOffsetUs, echoAnchor + ECHO_HOP_FRAMES, totalFrames,
+                                    options.speakerBleedCancel, echoHistory);
+                            }
                         }
-                        for (int channel = 0; channel < CHANNELS; channel++) {
-                            const int index = frame * CHANNELS + channel;
-                            const int16_t micSample = cancelSpeakerBleed ?
-                                onebeat_recording::MicAfterSpeakerBleedCancelMono(innerMonoRef, mic[index],
-                                    speakerBleed.coefficient) : mic[index];
-                            // The app track always has coefficient 1. No normalization
-                            // or whole-mix compressor may change its volume with MIC gain.
-                            samples[index] = onebeat_recording::MixSample(inner[index], micSample, options.gain);
+                        const int count = static_cast<int>(std::min<int64_t>(frames - processed,
+                            ECHO_HOP_FRAMES - absoluteFrame % ECHO_HOP_FRAMES));
+                        if (speakerMix) {
+                            for (int channel = 0; channel < CHANNELS; ++channel) {
+                                for (int side = 0; side < 2; ++side) {
+                                    const auto &model = side == 0 ? echoBefore.channels[channel] : echoAfter.channels[channel];
+                                    auto &reference = side == 0 ? referenceBefore[channel] : referenceAfter[channel];
+                                    if (!model.enabled) continue;
+                                    ReadAligned(innerFile.value, onebeat_recording::EchoFirReferenceFirstFrame(
+                                        absoluteFrame, model.delayFrames), options.innerOffsetUs,
+                                        count + onebeat_recording::ECHO_FIR_TAPS - 1, reference);
+                                }
+                            }
                         }
+                        for (int frame = 0; frame < count; ++frame) {
+                            const double blend = static_cast<double>(absoluteFrame + frame - echoAnchor) / ECHO_HOP_FRAMES;
+                            for (int channel = 0; channel < CHANNELS; ++channel) {
+                                double echo = 0;
+                                if (speakerMix) {
+                                    const auto &before = echoBefore.channels[channel];
+                                    const auto &after = echoAfter.channels[channel];
+                                    const double oldEcho = before.enabled ? onebeat_recording::PredictEchoFirSample(
+                                        referenceBefore[channel].data() + frame * CHANNELS, channel, before) : 0;
+                                    const double newEcho = after.enabled ? onebeat_recording::PredictEchoFirSample(
+                                        referenceAfter[channel].data() + frame * CHANNELS, channel, after) : 0;
+                                    // Smooth the predicted echo, never the app track. Splitting
+                                    // exactly at each hop keeps AAC block boundaries inaudible.
+                                    echo = oldEcho * (1 - blend) + newEcho * blend;
+                                }
+                                const int index = (processed + frame) * CHANNELS + channel;
+                                // Do not clip or normalize the MIC residual separately: the
+                                // app coefficient stays one and only the final sample is limited.
+                                samples[index] = onebeat_recording::MixEchoFirSample(
+                                    inner[index], mic[index], options.gain, echo);
+                            }
+                        }
+                        processed += count;
                     }
                     attr.size = frames * FRAME_BYTES;
                     framePosition += frames;

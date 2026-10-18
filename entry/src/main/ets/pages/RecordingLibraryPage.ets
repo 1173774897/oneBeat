@@ -4,6 +4,7 @@ import { fileUri } from '@kit.CoreFileKit';
 import { AppSession } from '../app/AppSession';
 import { RecordingClip, RecordingScope } from '../recording/RecordingModels';
 import { RecordingRepository } from '../recording/RecordingRepository';
+import { RECORDING_MIX_VERSION } from '../recording/RecordingMixer';
 import { PendingVideoShare, RecordingShareService } from '../sharing/RecordingShareService';
 import { ShareCheckInResult } from '../store/ShareCheckInStore';
 import { formatTrialExpiry } from '../store/EntitlementStore';
@@ -17,10 +18,19 @@ const VIDEO_PREVIEW_HEIGHT: number = 242;
 const SHARE_SHEET_WIDTH: string = '90%';
 const SHARE_SHEET_MAX_HEIGHT: string = '88%';
 const CALENDAR_ENTRY_HEIGHT: number = 42;
+const PREVIEW_LOAD_TIMEOUT_MS: number = 8000;
 
 interface RecordingLibraryParams {
   clipId?: string;
   scope?: RecordingScope;
+}
+
+interface PreviewContinuation {
+  clipId: string;
+  path: string;
+  timeSeconds: number;
+  playing: boolean;
+  prepared: boolean;
 }
 
 @Entry
@@ -37,6 +47,7 @@ struct RecordingLibraryPage {
   @State scope: RecordingScope = 'solo';
   @State micGain: number = 1;
   @State renderingAudio: boolean = false;
+  @State previewLoading: boolean = false;
   @State calendarVisible: boolean = false;
   @State busy: boolean = false;
   @State pauseConfirmVisible: boolean = false;
@@ -54,6 +65,10 @@ struct RecordingLibraryPage {
   private active: boolean = true;
   private audioRenderSequence: number = 0;
   private audioRenderTask: Promise<RecordingClip | undefined> | undefined = undefined;
+  private previewTimeSeconds: number = 0;
+  private previewPlaying: boolean = false;
+  private previewContinuation: PreviewContinuation | undefined = undefined;
+  private previewLoadTimer: number = -1;
 
   aboutToAppear(): void {
     this.active = true;
@@ -100,6 +115,9 @@ struct RecordingLibraryPage {
   }
 
   refresh(): void {
+    // A render commits the repository before its promise resolves. Delay this
+    // projection so the live player can bookmark its latest position first.
+    if (this.renderingAudio) { return; }
     this.clips = RecordingRepository.list(this.scope);
     if (!this.clips.some((clip: RecordingClip) => clip.id === this.selectedId)) {
       this.selectedId = this.clips.length > 0 ? this.clips[0].id : '';
@@ -145,6 +163,7 @@ struct RecordingLibraryPage {
     const playing = this.practicePlaying();
     if (playing) { this.stopPreview(); }
     this.practiceActive = playing;
+    if (!playing) { this.prepareSelectedPreview(); }
   }
 
   private requestPreview(): void {
@@ -159,16 +178,112 @@ struct RecordingLibraryPage {
   }
 
   private stopPreview(): void {
+    this.previewPlaying = false;
+    this.cancelPreviewContinuation();
     try { this.videoController.pause(); } catch (_error) {}
+  }
+
+  private cancelPreviewContinuation(): void {
+    if (this.previewLoadTimer >= 0) { clearTimeout(this.previewLoadTimer); }
+    this.previewLoadTimer = -1;
+    this.previewContinuation = undefined;
+    this.previewLoading = false;
+  }
+
+  private watchPreviewLoad(id: string, path: string): void {
+    this.previewLoadTimer = setTimeout(() => {
+      this.previewLoadTimer = -1;
+      if (!this.previewSourceMatches(id, path) || this.previewContinuation?.path !== path) { return; }
+      // A missing native prepare/seek event must not disable MIC editing forever.
+      this.cancelPreviewContinuation();
+      showUserNotice('新音量已生成，预览加载较慢，可点播放或重新打开作品', 'recording-preview-load');
+    }, PREVIEW_LOAD_TIMEOUT_MS);
+  }
+
+  private previewSourceMatches(id: string, path: string): boolean {
+    return this.active && this.selectedId === id && this.selectedClip()?.path === path;
+  }
+
+  private previewProgress(id: string, path: string, time: number): void {
+    if (!this.previewSourceMatches(id, path) || !Number.isFinite(time)) { return; }
+    const resume = this.previewContinuation;
+    if (resume !== undefined) {
+      // Programmatic VideoController seeks report completion through onUpdate;
+      // onSeeked is emitted by the built-in progress slider on some devices.
+      if (resume.prepared && resume.path === path && Math.floor(time) === resume.timeSeconds) {
+        this.finishPreviewContinuation(id, path);
+      }
+      return;
+    }
+    this.previewTimeSeconds = Math.max(0, time);
+  }
+
+  private previewStarted(id: string, path: string): void {
+    if (this.previewSourceMatches(id, path)) { this.previewPlaying = true; }
+  }
+
+  private previewPaused(id: string, path: string): void {
+    if (this.previewSourceMatches(id, path)) { this.previewPlaying = false; }
+  }
+
+  private previewFinished(id: string, path: string): void {
+    if (!this.previewSourceMatches(id, path)) { return; }
+    this.previewPlaying = false;
+    this.previewTimeSeconds = 0;
+    this.cancelPreviewContinuation();
+  }
+
+  private previewPrepared(id: string, path: string): void {
+    const resume = this.previewContinuation;
+    if (resume === undefined || resume.clipId !== id || resume.path !== path ||
+      !this.previewSourceMatches(id, path) || this.practicePlaying()) { return; }
+    resume.prepared = true;
+    if (resume.timeSeconds > 0) {
+      // Wait for the seek update before starting audio; starting immediately
+      // after prepare can briefly replay the opening beat on slower players.
+      this.videoController.setCurrentTime(resume.timeSeconds, SeekMode.Accurate);
+    } else {
+      this.finishPreviewContinuation(id, path);
+    }
+  }
+
+  private previewSeeked(id: string, path: string, time: number): void {
+    const resume = this.previewContinuation;
+    if (resume !== undefined && resume.prepared && resume.clipId === id && resume.path === path &&
+      Math.floor(time) === resume.timeSeconds) {
+      this.finishPreviewContinuation(id, path);
+    } else {
+      this.previewProgress(id, path, time);
+    }
+  }
+
+  private finishPreviewContinuation(id: string, path: string): void {
+    const resume = this.previewContinuation;
+    if (resume === undefined || resume.clipId !== id || resume.path !== path ||
+      !this.previewSourceMatches(id, path)) { return; }
+    this.cancelPreviewContinuation();
+    this.previewTimeSeconds = resume.timeSeconds;
+    if (resume.playing && !this.practicePlaying()) { this.videoController.start(); }
   }
 
   private selectClip(clip: RecordingClip): void {
     if (this.busy || this.renderingAudio || this.selectedId === clip.id) { return; }
     this.stopPreview();
+    this.videoController = new VideoController();
     this.audioRenderSequence++;
     this.selectedId = clip.id;
+    this.previewTimeSeconds = 0;
     this.micGain = clip.renderedGain ?? 1;
     this.previewMuted = false;
+    this.prepareSelectedPreview();
+  }
+
+  private prepareSelectedPreview(): void {
+    const clip = this.selectedClip();
+    if (clip === undefined || !this.active || this.busy || this.renderingAudio || this.practicePlaying() ||
+      this.pendingClipId === clip.id || !this.hasSeparateAudio() ||
+      (clip.renderedMixVersion ?? 0) >= RECORDING_MIX_VERSION) { return; }
+    void this.renderSelectedAudio();
   }
 
   private togglePreviewSound(): void {
@@ -185,7 +300,7 @@ struct RecordingLibraryPage {
   }
 
   private canAdjustMic(): boolean {
-    return this.hasSeparateAudio() && !this.busy && !this.renderingAudio && !this.practiceActive &&
+    return this.hasSeparateAudio() && !this.busy && !this.renderingAudio && !this.previewLoading && !this.practiceActive &&
       this.pendingClipId !== this.selectedId;
   }
 
@@ -194,12 +309,14 @@ struct RecordingLibraryPage {
     const clip = this.selectedClip();
     if (clip === undefined) { return Promise.resolve(undefined); }
     const gain = Math.max(0, Math.min(2, Math.round(this.micGain * 100) / 100));
-    if (Math.abs((clip.renderedGain ?? 1) - gain) < 0.001) { return Promise.resolve(clip); }
+    if (Math.abs((clip.renderedGain ?? 1) - gain) < 0.001 &&
+      ((clip.renderedMixVersion ?? 0) >= RECORDING_MIX_VERSION || !this.hasSeparateAudio())) {
+      return Promise.resolve(clip);
+    }
     if (this.practicePlaying()) {
       showUserNotice('请先暂停练习，再调整视频中的麦克风声音', 'recording-mix-playing');
       return Promise.resolve(undefined);
     }
-    this.stopPreview();
     this.renderingAudio = true;
     const sequence = ++this.audioRenderSequence;
     const selectedId = this.selectedId;
@@ -208,9 +325,22 @@ struct RecordingLibraryPage {
     const task: Promise<RecordingClip | undefined> = RecordingRepository.render(clip, gain)
       .then((updated: RecordingClip): RecordingClip => {
         if (this.active && this.audioRenderSequence === sequence && this.selectedId === selectedId) {
+          if (updated.path !== clip.path) {
+            this.previewContinuation = {
+              clipId: updated.id, path: updated.path,
+              // ArkUI reports native video progress as whole seconds. Seeking
+              // to a fractional zero may produce no update and cannot be awaited.
+              timeSeconds: Math.floor(Math.min(this.previewTimeSeconds, Math.max(0, updated.durationMs / 1000 - 0.05))),
+              playing: this.previewPlaying && !this.practicePlaying(), prepared: false
+            };
+            // Keep another gain change from replacing a source whose seek is
+            // still pending; its native loading pause is not a user pause.
+            this.previewLoading = true;
+            this.videoController = new VideoController();
+            this.watchPreviewLoad(updated.id, updated.path);
+          }
           this.clips = RecordingRepository.list(this.scope);
           this.micGain = updated.renderedGain ?? gain;
-          this.previewMuted = false;
         }
         return updated;
       }).catch((error: Object): undefined => {
@@ -232,7 +362,6 @@ struct RecordingLibraryPage {
   private changeMicGain(value: number, mode: SliderChangeMode): void {
     if (!this.canAdjustMic()) { return; }
     this.micGain = Math.max(0, Math.min(2, value));
-    if (mode === SliderChangeMode.Begin) { this.stopPreview(); }
     if (mode === SliderChangeMode.End || mode === SliderChangeMode.Click) { void this.renderSelectedAudio(); }
   }
 
@@ -275,6 +404,7 @@ struct RecordingLibraryPage {
     }
     if (this.pauseAction === 'share') { await this.shareSelected(); }
     if (this.pauseAction === 'confirm') { await this.confirmPublished(); }
+    if (this.pauseAction === 'preview') { this.prepareSelectedPreview(); }
   }
 
   private async shareSelected(): Promise<void> {
@@ -387,6 +517,29 @@ struct RecordingLibraryPage {
       logUserFailure('recording-delete', error);
       showUserNotice('删除未完成，请稍后重试', 'recording-delete');
     } finally { this.busy = false; }
+  }
+
+  @Builder
+  private previewVideo() {
+    // A two-value @Builder captures its initial parameters. Key the real Video
+    // node by the immutable export path so a new mix gets a new player and callbacks.
+    ForEach(this.clips.filter((clip: RecordingClip) => clip.id === this.selectedId), (clip: RecordingClip) => {
+      Video({ src: fileUri.getUriFromPath(clip.path), controller: this.videoController })
+      .width('100%').height(VIDEO_PREVIEW_HEIGHT).autoPlay(false).controls(true)
+      .muted(this.previewMuted).loop(false).objectFit(ImageFit.Contain)
+      .onStart(() => this.previewStarted(clip.id, clip.path))
+      .onPause(() => this.previewPaused(clip.id, clip.path))
+      .onFinish(() => this.previewFinished(clip.id, clip.path))
+      .onUpdate((event) => this.previewProgress(clip.id, clip.path, event.time))
+      .onPrepared(() => this.previewPrepared(clip.id, clip.path))
+      .onSeeked((event) => this.previewSeeked(clip.id, clip.path, event.time))
+      .onError(() => {
+        if (!this.previewSourceMatches(clip.id, clip.path)) { return; }
+        this.cancelPreviewContinuation();
+        this.previewPlaying = false;
+        showUserNotice('这段视频暂时无法预览，可尝试保存相册后查看', 'recording-video-preview');
+      })
+    }, (clip: RecordingClip) => `${clip.id}:${clip.path}`)
   }
 
   @Builder
@@ -534,13 +687,13 @@ struct RecordingLibraryPage {
           } else {
             Column({ space: 10 }) {
               Stack() {
-                if (this.practiceActive || this.renderingAudio) {
+                if (this.practiceActive) {
                   // A muted Video can still request system audio focus. Do not
                   // create its player while the shared practice is running.
                   Column({ space: 13 }) {
                     Image($rawfile('comic/decor/recording_share_hero.png'))
                       .width('86%').height(112).objectFit(ImageFit.Contain)
-                    Text(this.renderingAudio ? '正在处理声音，应用内节奏音量保持不变…' : '练习仍在进行，先收好这一拍')
+                    Text('练习仍在进行，先收好这一拍')
                       .fontSize(12).fontWeight(900).fontColor(PAPER)
                     if (!this.renderingAudio) {
                       Button('暂停练习后预览', { type: ButtonType.Normal })
@@ -550,10 +703,7 @@ struct RecordingLibraryPage {
                     }
                   }.width('100%')
                 } else {
-                  Video({ src: this.videoSource(), controller: this.videoController })
-                    .width('100%').height(VIDEO_PREVIEW_HEIGHT).autoPlay(false).controls(true)
-                    .muted(this.previewMuted).loop(false).objectFit(ImageFit.Contain)
-                    .onError(() => showUserNotice('这段视频暂时无法预览，可尝试保存相册后查看', 'recording-video-preview'))
+                  this.previewVideo()
                 }
               }.width('100%').height(VIDEO_PREVIEW_HEIGHT).backgroundColor(INK)
                 .border({ width: 2, color: INK }).borderRadius(8).clip(true)
@@ -591,7 +741,7 @@ struct RecordingLibraryPage {
                   Text('请先确认或取消本次分享，再调整这段作品的 MIC。')
                     .fontSize(10).fontColor('#777065').lineHeight(17).width('100%')
                 } else {
-                  Text(this.renderingAudio ? '声音处理中…' : '松开滑块后生成预览，保存与分享都会使用当前 MIC 音量。')
+                  Text(this.renderingAudio ? '正在处理新音量，完成后从当前位置续播…' : '松开滑块后应用新音量，播放位置会保留。保存与分享使用当前音量。')
                     .fontSize(10).fontColor('#625C54').lineHeight(17).width('100%')
                 }
               }.width('100%').padding(12).backgroundColor('#E8F2EB').border({ width: 1, color: INK }).borderRadius(7)

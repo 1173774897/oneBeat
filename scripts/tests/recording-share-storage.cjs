@@ -111,7 +111,7 @@ function services(environment = durableEnvironment()) {
     '@kit.ArkData': environment.arkData, '@kit.CoreFileKit': environment.coreFile,
     '../common/AtomicTextFile': atomic,
     '@kit.ArkTS': environment.arkTs,
-    './RecordingMixer': { RecordingMixer: { async exportMixed(clip, gain, output) {
+    './RecordingMixer': { RECORDING_MIX_VERSION: 3, RecordingMixer: { async exportMixed(clip, gain, output) {
       mixCalls.push({ clip: plain(clip), gain, output });
       environment.files.set(output, Buffer.from(`rendered-gain=${gain};source=${clip.sourcePath}`));
     } } },
@@ -283,6 +283,18 @@ async function addStemClip(h, scope = 'team') {
 }
 
 async function testWorkScopeAndNonDestructiveGain() {
+  const migration = services(); await migration.initialize();
+  const oldMix = await addStemClip(migration);
+  const refreshedMix = await migration.repository.render(oldMix, 1);
+  assert.notEqual(refreshedMix.path, oldMix.path, 'Old separate-track works are regenerated even when MIC gain is unchanged');
+  assert.equal(refreshedMix.renderedMixVersion, 3);
+  await migration.repository.render(refreshedMix, 1);
+  assert.equal(migration.mixCalls.length, 1, 'The current quality version does not re-encode an unchanged gain');
+  const versionTwo = { ...await addStemClip(migration), renderedMixVersion: 2 };
+  await migration.repository.add(versionTwo);
+  const versionThree = await migration.repository.render(versionTwo, 1);
+  assert.equal(versionThree.renderedMixVersion, 3);
+  assert.notEqual(versionThree.path, versionTwo.path, 'The previous echo version upgrades even at the same MIC gain');
   const h = services(); await h.initialize();
   const legacy = await h.clip();
   const team = await addStemClip(h);

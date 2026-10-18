@@ -5,7 +5,7 @@ import { photoAccessHelper } from '@kit.MediaLibraryKit';
 import { util } from '@kit.ArkTS';
 import { readOptional, writeAtomic } from '../common/AtomicTextFile';
 import { PendingRecordingCapture, RecordingClip, RecordingScope } from './RecordingModels';
-import { RecordingMixer } from './RecordingMixer';
+import { RecordingMixer, RECORDING_MIX_VERSION } from './RecordingMixer';
 
 const LIBRARY_PREFERENCES: string = 'onebeat_recording_library';
 const LIBRARY_KEY: string = 'recordingLibraryV1';
@@ -139,6 +139,7 @@ export class RecordingRepository {
       micOffsetUs: clip.micOffsetUs, innerOffsetUs: clip.innerOffsetUs,
       audioSampleRate: clip.audioSampleRate, audioChannels: clip.audioChannels,
       renderedGain: clip.renderedGain ?? 1, renderedAt: clip.renderedAt ?? clip.createdAt,
+      renderedMixVersion: clip.renderedMixVersion,
       captureSyncValid: clip.captureSyncValid, captureMappingVersion: clip.captureMappingVersion,
       videoTimestampDivisor: clip.videoTimestampDivisor, builtInSpeakerCapture: clip.builtInSpeakerCapture
     };
@@ -208,7 +209,9 @@ export class RecordingRepository {
         throw new Error('请先完成或取消这次分享，再调整声音');
       }
       const desired = Math.round(gain * 100) / 100;
-      if (Math.abs((stored.renderedGain ?? 1) - desired) < 0.001) { return stored; }
+      if (Math.abs((stored.renderedGain ?? 1) - desired) < 0.001 &&
+        ((stored.renderedMixVersion ?? 0) >= RECORDING_MIX_VERSION || stored.sourcePath === undefined ||
+          stored.innerPath === undefined || stored.micPath === undefined)) { return stored; }
       if (stored.sourcePath === undefined || stored.micPath === undefined || stored.innerPath === undefined) {
         throw new Error('这段旧视频已合并声音，重新录制后可单独调整麦克风音量');
       }
@@ -224,6 +227,7 @@ export class RecordingRepository {
         const updated = RecordingRepository.copy(stored);
         updated.path = output;
         updated.renderedGain = desired;
+        updated.renderedMixVersion = RECORDING_MIX_VERSION;
         updated.renderedAt = Math.max(Date.now(), (stored.renderedAt ?? stored.createdAt) + 1);
         const recoveryPath = await RecordingRepository.writeRecovery(updated);
         const next = RecordingRepository.clips.map((entry: RecordingClip) => entry.id === updated.id ? updated : entry);

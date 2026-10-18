@@ -20,6 +20,8 @@ export interface RecordingClip {
   audioSampleRate?: number;
   audioChannels?: number;
   renderedGain?: number;
+  /** Export DSP revision; older renders with retained stems are rebuilt without changing the gain. */
+  renderedMixVersion?: number;
   renderedAt?: number;
   /** Explicit capture validation survives save retries; absent only for already saved legacy works. */
   captureSyncValid?: boolean;

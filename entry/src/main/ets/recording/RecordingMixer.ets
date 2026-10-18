@@ -1,9 +1,11 @@
 import * as recordingNative from 'libonebeat_recording.so';
 import { RecordingClip } from './RecordingModels';
 
-const BUILT_IN_SPEAKER_BLEED_LIMIT: number = 0.9;
+// Retained stems let same-gain legacy exports adopt the current DSP once.
+export const RECORDING_MIX_VERSION: number = 3;
+const BUILT_IN_SPEAKER_BLEED_LIMIT: number = 4;
 
-/** Source tracks are immutable; rendering changes only the microphone coefficient. */
+/** Source tracks are immutable; app audio stays at unity and gain applies only to cleaned MIC. */
 export class RecordingMixer {
   static validateCaptureTiming(clip: RecordingClip): void {
     if (clip.captureSyncValid === false || (clip.captureSyncValid === true &&
@@ -34,11 +36,11 @@ export class RecordingMixer {
     // Built-in speaker captures beat bleed on mic before OH_APP_PLAYBACK inner starts.
     const speakerLikeCapture = clip.builtInSpeakerCapture === true ||
       (clip.builtInSpeakerCapture === undefined && innerLeadUs > 80000);
-    // Native mix estimates the actual acoustic coefficient and cancels only a
-    // correlated delayed reference; this value is a safety ceiling, not a fixed subtraction.
+    // Native fits each microphone channel's room response in local windows.
+    // This is a fit ceiling, never a fixed subtraction from both channels.
     const speakerBleedCancel = speakerLikeCapture ? BUILT_IN_SPEAKER_BLEED_LIMIT : 0;
     if (speakerLikeCapture) {
-      console.info(`[RecordingMix] speaker residual innerLeadUs=${innerLeadUs} bleedCancel=${speakerBleedCancel}`);
+      console.info(`[RecordingMix] speaker residual innerLeadUs=${innerLeadUs} maxEchoGain=${speakerBleedCancel}`);
     }
     await recordingNative.mix({
       sourcePath: clip.sourcePath, innerPath: clip.innerPath, micPath: clip.micPath, outputPath: outputPath,
