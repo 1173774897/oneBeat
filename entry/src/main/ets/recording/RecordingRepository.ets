@@ -4,11 +4,13 @@ import { fileIo as fs, fileUri } from '@kit.CoreFileKit';
 import { photoAccessHelper } from '@kit.MediaLibraryKit';
 import { util } from '@kit.ArkTS';
 import { readOptional, writeAtomic } from '../common/AtomicTextFile';
+import { RecordingCoverService } from './RecordingCoverService';
 import { PendingRecordingCapture, RecordingClip, RecordingScope } from './RecordingModels';
-import { RecordingMixer, RECORDING_MIX_VERSION } from './RecordingMixer';
+import { MAX_MIC_SHIFT_US, RecordingMixer, RECORDING_MIX_VERSION } from './RecordingMixer';
 
 const LIBRARY_PREFERENCES: string = 'onebeat_recording_library';
 const LIBRARY_KEY: string = 'recordingLibraryV1';
+const RECORDING_COVER_VERSION: number = 1;
 
 export interface RecordingTarget {
   id: string;
@@ -53,6 +55,7 @@ export class RecordingRepository {
       raw = await pref.get(LIBRARY_KEY, '') as string;
     }
     const clips: RecordingClip[] = [];
+    let coverMetadataChanged = false;
     if (raw.length > 0) {
       try {
         const snapshot = JSON.parse(raw) as LibrarySnapshot;
@@ -60,7 +63,9 @@ export class RecordingRepository {
           for (const clip of snapshot.clips) {
             if (RecordingRepository.isOwnedPath(clip.path) && clip.id.length > 0 &&
               Number.isFinite(clip.durationMs) && clip.durationMs > 0 && await fs.access(clip.path)) {
-              clips.push(clip);
+              const restored = await RecordingRepository.copyWithValidCover(clip);
+              coverMetadataChanged = coverMetadataChanged || restored.coverPath !== clip.coverPath;
+              clips.push(restored);
             }
           }
         }
@@ -79,10 +84,13 @@ export class RecordingRepository {
         if (RecordingRepository.isOwnedPath(clip.path) && clip.id.length > 0 &&
           Number.isFinite(clip.durationMs) && clip.durationMs > 0 && await fs.access(clip.path) &&
           (await fs.stat(clip.path)).size > 0) {
+          const restored = await RecordingRepository.copyWithValidCover(clip);
+          coverMetadataChanged = coverMetadataChanged || restored.coverPath !== clip.coverPath;
           const existing = clips.findIndex((entry: RecordingClip) => entry.id === clip.id);
-          if (existing < 0) { clips.push(clip); }
-          else if ((clip.renderedAt ?? clip.createdAt) > (clips[existing].renderedAt ?? clips[existing].createdAt)) {
-            clips[existing] = clip;
+          if (existing < 0) { clips.push(restored); }
+          else if ((restored.renderedAt ?? restored.createdAt) >
+            (clips[existing].renderedAt ?? clips[existing].createdAt)) {
+            clips[existing] = restored;
           }
           recoveryPaths.push(path);
         }
@@ -90,7 +98,7 @@ export class RecordingRepository {
         // An interrupted metadata write is not a finished work; keep it for diagnosis.
       }
     }
-    if (recoveryPaths.length > 0 || migratePreferences) {
+    if (recoveryPaths.length > 0 || migratePreferences || coverMetadataChanged) {
       const snapshot: LibrarySnapshot = { version: 1, clips: clips };
       await writeAtomic(RecordingRepository.indexPath, JSON.stringify(snapshot));
       for (const path of recoveryPaths) {
@@ -133,16 +141,41 @@ export class RecordingRepository {
 
   private static copy(clip: RecordingClip): RecordingClip {
     return {
-      id: clip.id, path: clip.path, createdAt: clip.createdAt, durationMs: clip.durationMs,
+      id: clip.id, path: clip.path, coverPath: clip.coverPath,
+      createdAt: clip.createdAt, durationMs: clip.durationMs,
       width: clip.width, height: clip.height, interrupted: clip.interrupted, stopReason: clip.stopReason,
       scope: clip.scope ?? 'solo', sourcePath: clip.sourcePath, micPath: clip.micPath, innerPath: clip.innerPath,
       micOffsetUs: clip.micOffsetUs, innerOffsetUs: clip.innerOffsetUs,
       audioSampleRate: clip.audioSampleRate, audioChannels: clip.audioChannels,
       renderedGain: clip.renderedGain ?? 1, renderedAt: clip.renderedAt ?? clip.createdAt,
+      renderedMicShiftUs: clip.renderedMicShiftUs ?? 0,
       renderedMixVersion: clip.renderedMixVersion,
       captureSyncValid: clip.captureSyncValid, captureMappingVersion: clip.captureMappingVersion,
       videoTimestampDivisor: clip.videoTimestampDivisor, builtInSpeakerCapture: clip.builtInSpeakerCapture
     };
+  }
+
+  private static coverPath(id: string): string {
+    return `${RecordingRepository.directory}/${id}.cover-v${RECORDING_COVER_VERSION}.jpg`;
+  }
+
+  private static isOwnedCoverPath(clip: RecordingClip, path: string): boolean {
+    return RecordingRepository.directory.length > 0 && path === RecordingRepository.coverPath(clip.id);
+  }
+
+  private static async copyWithValidCover(clip: RecordingClip): Promise<RecordingClip> {
+    const restored = RecordingRepository.copy(clip);
+    if (restored.coverPath !== undefined) {
+      try {
+        if (!RecordingRepository.isOwnedCoverPath(restored, restored.coverPath) ||
+          !await fs.access(restored.coverPath) || (await fs.stat(restored.coverPath)).size <= 0) {
+          restored.coverPath = undefined;
+        }
+      } catch (_error) {
+        restored.coverPath = undefined;
+      }
+    }
+    return restored;
   }
 
   private static pendingPath(clip: RecordingClip): string {
@@ -197,11 +230,15 @@ export class RecordingRepository {
     return undefined;
   }
 
-  /** Each gain render reads immutable stems, so repeated edits never compound gain or touch app audio. */
-  static render(clip: RecordingClip, gain: number): Promise<RecordingClip> {
+  /** Each render reads immutable stems; the cached MIC residual makes later gain/shift edits cheap. */
+  static render(clip: RecordingClip, gain: number,
+    micShiftUs: number = clip.renderedMicShiftUs ?? 0): Promise<RecordingClip> {
     const task = RecordingRepository.operation.then(async (): Promise<RecordingClip> => {
       if (!Number.isFinite(gain) || gain < 0 || gain > 2) {
         throw new Error('麦克风音量无效，请重新调整');
+      }
+      if (!Number.isFinite(micShiftUs) || Math.abs(micShiftUs) > MAX_MIC_SHIFT_US) {
+        throw new Error('人声对齐需在提前或延后 300 毫秒以内');
       }
       const stored = RecordingRepository.get(clip.id);
       if (stored === undefined) { throw new Error('视频文件不存在，请重新录制'); }
@@ -209,7 +246,9 @@ export class RecordingRepository {
         throw new Error('请先完成或取消这次分享，再调整声音');
       }
       const desired = Math.round(gain * 100) / 100;
+      const desiredShiftUs = Math.round(micShiftUs / 1000) * 1000;
       if (Math.abs((stored.renderedGain ?? 1) - desired) < 0.001 &&
+        (stored.renderedMicShiftUs ?? 0) === desiredShiftUs &&
         ((stored.renderedMixVersion ?? 0) >= RECORDING_MIX_VERSION || stored.sourcePath === undefined ||
           stored.innerPath === undefined || stored.micPath === undefined)) { return stored; }
       if (stored.sourcePath === undefined || stored.micPath === undefined || stored.innerPath === undefined) {
@@ -222,11 +261,12 @@ export class RecordingRepository {
       }
       const output = `${RecordingRepository.directory}/${stored.id}.mix-${util.generateRandomUUID(true)}.mp4`;
       try {
-        await RecordingMixer.exportMixed(stored, desired, output);
+        await RecordingMixer.exportMixed(stored, desired, output, desiredShiftUs);
         if ((await fs.stat(output)).size <= 0) { throw new Error('声音处理未完成，请重试'); }
         const updated = RecordingRepository.copy(stored);
         updated.path = output;
         updated.renderedGain = desired;
+        updated.renderedMicShiftUs = desiredShiftUs;
         updated.renderedMixVersion = RECORDING_MIX_VERSION;
         updated.renderedAt = Math.max(Date.now(), (stored.renderedAt ?? stored.createdAt) + 1);
         const recoveryPath = await RecordingRepository.writeRecovery(updated);
@@ -250,7 +290,43 @@ export class RecordingRepository {
 
   private static isOwnedMediaPath(path: string): boolean {
     return RecordingRepository.directory.length > 0 && path.startsWith(`${RecordingRepository.directory}/`) &&
-      path.indexOf('/../') < 0 && (path.endsWith('.mp4') || path.endsWith('.pcm') || path.endsWith('.wav'));
+      path.indexOf('/../') < 0 &&
+      (path.endsWith('.mp4') || path.endsWith('.pcm') || path.endsWith('.wav') ||
+        path.endsWith('.f32') || path.endsWith('.f32.tmp'));
+  }
+
+  private static async withGeneratedCover(clip: RecordingClip): Promise<RecordingClip> {
+    const updated = RecordingRepository.copy(clip);
+    const coverPath = RecordingRepository.coverPath(updated.id);
+    try {
+      await RecordingCoverService.generate(updated.path, coverPath, updated.width, updated.height);
+      if (await fs.access(coverPath) && (await fs.stat(coverPath)).size > 0) {
+        updated.coverPath = coverPath;
+      }
+    } catch (_error) {
+      // Covers are derived and retryable; a decoder failure must not hide or lose the playable work.
+      console.warn('Recording cover generation deferred');
+    }
+    return updated;
+  }
+
+  static ensureCover(id: string): Promise<RecordingClip | undefined> {
+    const task = RecordingRepository.operation.then(async (): Promise<RecordingClip | undefined> => {
+      const stored = RecordingRepository.get(id);
+      if (stored === undefined) { return undefined; }
+      if (stored.coverPath !== undefined && RecordingRepository.isOwnedCoverPath(stored, stored.coverPath) &&
+        await fs.access(stored.coverPath) && (await fs.stat(stored.coverPath)).size > 0) {
+        return stored;
+      }
+      const updated = await RecordingRepository.withGeneratedCover(stored);
+      if (updated.coverPath === undefined) { return stored; }
+      const next = RecordingRepository.clips.map((entry: RecordingClip) =>
+        entry.id === updated.id ? updated : entry);
+      await RecordingRepository.commit(next);
+      return RecordingRepository.copy(updated);
+    });
+    RecordingRepository.operation = task.then(() => {}, () => {});
+    return task;
   }
 
   static add(clip: RecordingClip): Promise<void> {
@@ -262,11 +338,12 @@ export class RecordingRepository {
       if (!stat.isFile() || stat.size <= 0) {
         throw new Error('录制视频生成失败，请重新录制');
       }
+      const stored = await RecordingRepository.withGeneratedCover(clip);
       // A completed MP4 gets a durable recovery note before the index transaction.
       // If indexing fails or the process dies, next launch can recover this work.
-      const recoveryPath = await RecordingRepository.writeRecovery(clip);
-      const next = RecordingRepository.clips.filter((entry: RecordingClip) => entry.id !== clip.id);
-      next.push(RecordingRepository.copy(clip));
+      const recoveryPath = await RecordingRepository.writeRecovery(stored);
+      const next = RecordingRepository.clips.filter((entry: RecordingClip) => entry.id !== stored.id);
+      next.push(RecordingRepository.copy(stored));
       await RecordingRepository.commit(next);
       try { await fs.unlink(recoveryPath); } catch (_error) {}
     });
@@ -290,7 +367,14 @@ export class RecordingRepository {
       }
       // Remove the index first. A failed file cleanup leaves an orphan, never a broken visible work.
       await RecordingRepository.commit(RecordingRepository.clips.filter((entry: RecordingClip) => entry.id !== id));
-      const paths: string[] = [`${RecordingRepository.directory}/${clip.id}.mp4`, clip.path, clip.sourcePath ?? '', clip.micPath ?? '', clip.innerPath ?? ''];
+      const coverPath = RecordingRepository.coverPath(clip.id);
+      for (const path of [coverPath, `${coverPath}.tmp`]) {
+        if (await fs.access(path)) { await fs.unlink(path); }
+      }
+      const processedMic = clip.micPath === undefined ? '' : RecordingMixer.processedMicPath(clip.micPath);
+      const paths: string[] = [`${RecordingRepository.directory}/${clip.id}.mp4`, clip.path,
+        clip.sourcePath ?? '', clip.micPath ?? '', clip.innerPath ?? '', processedMic,
+        processedMic.length === 0 ? '' : `${processedMic}.tmp`];
       for (const name of await fs.listFile(RecordingRepository.directory)) {
         if (name.startsWith(`${clip.id}.mix-`) && name.endsWith('.mp4')) {
           paths.push(`${RecordingRepository.directory}/${name}`);

@@ -30,7 +30,11 @@ export interface NativeMixOptions {
   durationMs: number;
   micOffsetUs: number;
   innerOffsetUs: number;
+  /** Manual post-cleaning shift; positive values delay MIC against the video. */
+  micShiftUs: number;
   gain: number;
+  /** Deterministic float32 residual cache reused by later gain/shift edits. */
+  processedMicPath: string;
   /** 0–4: ceiling for estimated speaker-to-mic gain; zero bypasses echo fitting. */
   speakerBleedCancel: number;
 }

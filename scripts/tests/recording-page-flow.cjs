@@ -27,11 +27,12 @@ function loadPage(name, context) {
   vm.runInNewContext(result.outputText, context);
   return new context.exports[name]();
 }
+async function flush() { for (let index = 0; index < 20; index++) await Promise.resolve(); }
 
 const clip = { id: 'clip-1', path: '/private/clip.mp4', createdAt: 1, durationMs: 2000,
   width: 720, height: 1280, interrupted: false, stopReason: 'user', scope: 'solo',
   sourcePath: '/private/source.mp4', micPath: '/private/mic.pcm', innerPath: '/private/inner.pcm', renderedGain: 1,
-  renderedMixVersion: 3 };
+  renderedMicShiftUs: 0, renderedMixVersion: 5 };
 
 function harness(options = {}) {
   const trace = [], routes = [], notices = [];
@@ -44,7 +45,12 @@ function harness(options = {}) {
   const session = { controller, async leaderPause() { trace.push('pause-practice'); controller.state = 'paused'; } };
   const storage = new Map();
   const context = {
-    exports: {}, Map, Date, RECORDING_MIX_VERSION: 3, VideoController: class {
+    exports: {}, Map, Date, RECORDING_MIX_VERSION: 5, MAX_MIC_SHIFT_US: 300000,
+    RenderingContextSettings: class {},
+    CanvasRenderingContext2D: class {
+      clearRect() {} beginPath() {} moveTo() {} lineTo() {} stroke() {}
+    },
+    VideoController: class {
       pause() { trace.push('pause-preview'); }
       start() { trace.push('start-preview'); }
       setCurrentTime(time, mode) { trace.push(`seek-preview:${time}:${mode}`); }
@@ -86,8 +92,18 @@ function harness(options = {}) {
     },
     RecordingRepository: {
       list: scope => storedClips.filter(item => scope === undefined || item.scope === scope),
-      async render(source, gain) { trace.push(`render:${gain}`);
-        const updated = { ...source, path: `/private/mix-${gain}.mp4`, renderedGain: gain, renderedMixVersion: 3 };
+      get: id => storedClips.find(item => item.id === id),
+      async ensureCover(id) {
+        trace.push(`cover:${id}`);
+        const current = storedClips.find(item => item.id === id);
+        if (!current) return undefined;
+        const updated = { ...current, coverPath: `/private/${id}.cover-v1.jpg` };
+        storedClips = storedClips.map(item => item.id === id ? updated : item);
+        return updated;
+      },
+      async render(source, gain, micShiftUs) { trace.push(`render:${gain}:${micShiftUs}`);
+        const updated = { ...source, path: `/private/mix-${gain}-${micShiftUs}.mp4`,
+          renderedGain: gain, renderedMicShiftUs: micShiftUs, renderedMixVersion: 5 };
         storedClips = storedClips.map(item => item.id === updated.id ? updated : item); return updated; },
       async saveToAlbum(source) { trace.push(`save:${source.renderedGain}`); }
     },
@@ -231,6 +247,24 @@ function harness(options = {}) {
   assert.equal(playback.trace.filter(item => item === 'pause-practice').length, 1);
   assert.equal(playback.trace.includes('system-share'), false, 'Pausing for preview must not launch a share');
 
+  const covered = harness(); covered.controller.state = 'paused';
+  const coveredLibrary = loadPage('RecordingLibraryPage', covered.context);
+  coveredLibrary.clips = [{ ...clip, coverPath: '/private/clip.cover-v1.jpg' }];
+  coveredLibrary.selectedId = clip.id;
+  assert.equal(coveredLibrary.selectedCoverSource(), '/private/clip.cover-v1.jpg');
+  assert.equal(coveredLibrary.previewCoverVisible, true);
+  coveredLibrary.startPreviewFromCover();
+  assert.equal(covered.trace.includes('start-preview'), false, 'Cover taps wait for the native player to prepare');
+  coveredLibrary.previewPrepared(clip.id, clip.path);
+  assert.equal(covered.trace.includes('start-preview'), true,
+    'The idle cover remains a functional play surface for the underlying preview');
+  coveredLibrary.previewStarted(clip.id, clip.path);
+  coveredLibrary.previewPaused(clip.id, clip.path);
+  assert.equal(coveredLibrary.previewCoverVisible, false,
+    'Pausing after playback keeps the native player visible at its current frame');
+  coveredLibrary.previewFinished(clip.id, clip.path);
+  assert.equal(coveredLibrary.previewCoverVisible, true, 'A finished preview returns to its cover');
+
   const member = harness();
   member.controller.isLeader = false;
   const memberLibrary = loadPage('RecordingLibraryPage', member.context);
@@ -281,14 +315,44 @@ function harness(options = {}) {
   await mixLibrary.audioRenderTask;
   assert.equal(mixLibrary.selectedClip().renderedGain, 1.6);
   assert.equal(mixLibrary.previewMuted, false);
+  mixLibrary.changeMicShift(-60, mixing.context.SliderChangeMode.End);
+  await mixLibrary.audioRenderTask;
+  assert.equal(mixLibrary.selectedClip().renderedMicShiftUs, -60000);
+  assert.equal(mixLibrary.micShiftLabel(), '人声提前 60 毫秒');
   mixLibrary.micGain = 0.3;
   await mixLibrary.saveSelected();
-  assert.ok(mixing.trace.indexOf('render:0.3') < mixing.trace.indexOf('save:0.3'),
+  assert.ok(mixing.trace.indexOf('render:0.3:-60000') < mixing.trace.indexOf('save:0.3'),
     'Saving must await the current independent MIC render');
   mixLibrary.micGain = 0.5;
   await mixLibrary.shareSelected();
-  assert.ok(mixing.trace.indexOf('render:0.5') < mixing.trace.indexOf('system-share'),
+  assert.ok(mixing.trace.indexOf('render:0.5:-60000') < mixing.trace.indexOf('system-share'),
     'Sharing must await the current independent MIC render');
+
+  const queued = harness(); queued.controller.state = 'paused';
+  let queuedClips = [clip];
+  const renderRequests = [];
+  queued.context.RecordingRepository.list = () => queuedClips;
+  queued.context.RecordingRepository.get = id => queuedClips.find(item => item.id === id);
+  queued.context.RecordingRepository.render = (source, gain, micShiftUs) =>
+    new Promise(resolve => renderRequests.push({ source, gain, micShiftUs, resolve }));
+  const queuedLibrary = loadPage('RecordingLibraryPage', queued.context);
+  queuedLibrary.clips = queuedClips; queuedLibrary.selectedId = clip.id;
+  queuedLibrary.changeMicGain(1.2, queued.context.SliderChangeMode.End);
+  const queuedTask = queuedLibrary.audioRenderTask;
+  queuedLibrary.changeMicGain(1.3, queued.context.SliderChangeMode.Moving);
+  queuedLibrary.changeMicGain(1.4, queued.context.SliderChangeMode.End);
+  assert.equal(renderRequests.length, 1, 'A running export accepts edits without starting parallel work');
+  let request = renderRequests[0];
+  queuedClips = [{ ...request.source, path: '/private/queued-1.mp4',
+    renderedGain: request.gain, renderedMicShiftUs: request.micShiftUs, renderedMixVersion: 5 }];
+  request.resolve(queuedClips[0]); await flush();
+  assert.equal(renderRequests.length, 2, 'Completed work immediately drains the latest committed edit');
+  request = renderRequests[1];
+  assert.equal(request.gain, 1.4, 'Moving values are skipped and only the last released value is rendered');
+  queuedClips = [{ ...request.source, path: '/private/queued-2.mp4',
+    renderedGain: request.gain, renderedMicShiftUs: request.micShiftUs, renderedMixVersion: 5 }];
+  request.resolve(queuedClips[0]); await queuedTask;
+  assert.equal(queuedLibrary.selectedClip().renderedGain, 1.4);
 
   const legacy = { ...clip, id: 'legacy', sourcePath: undefined, micPath: undefined, innerPath: undefined };
   mixLibrary.clips = [legacy]; mixLibrary.selectedId = legacy.id;
@@ -307,17 +371,19 @@ function harness(options = {}) {
   continuingLibrary.changeMicGain(1.25, continuing.context.SliderChangeMode.End);
   const continuingTask = continuingLibrary.audioRenderTask;
   assert.equal(continuing.trace.includes('pause-preview'), false, 'Dragging and exporting keep the current video playing');
+  assert.equal(continuingLibrary.canAdjustMic(), true,
+    'A slow export must not freeze subsequent MIC edits');
   continuingLibrary.previewProgress(clip.id, clip.path, 6.75);
   continuationClips = [{ ...clip, durationMs: 20000, path: '/private/resume.mp4', renderedGain: 1.25 }];
   continuingLibrary.refresh();
   assert.equal(continuingLibrary.clips[0].path, clip.path, 'Repository epoch cannot swap the source before its bookmark');
   completeRender(continuationClips[0]); await continuingTask;
-  assert.equal(continuingLibrary.canAdjustMic(), false, 'A second gain change waits for the pending source seek');
+  assert.equal(continuingLibrary.canAdjustMic(), true, 'A pending source seek does not freeze the edit controls');
   continuingLibrary.previewPrepared(clip.id, '/private/resume.mp4');
   assert.ok(continuing.trace.includes('seek-preview:6:accurate'), 'Loading the new mix seeks to the latest whole-second native position, not render-start time');
   assert.equal(continuing.trace.includes('start-preview'), false, 'Playback waits for seek completion to avoid repeating the opening beat');
   continuingLibrary.previewProgress(clip.id, '/private/resume.mp4', 0);
-  assert.equal(continuingLibrary.canAdjustMic(), false, 'An initial zero update cannot confirm a later seek target');
+  assert.equal(continuingLibrary.previewLoading, true, 'An initial zero update cannot confirm a later seek target');
   continuingLibrary.previewProgress(clip.id, '/private/resume.mp4', 6);
   assert.equal(continuing.trace.filter(item => item === 'start-preview').length, 1);
   assert.equal(continuingLibrary.canAdjustMic(), true);
@@ -367,10 +433,11 @@ function harness(options = {}) {
 
   repeatedLibrary.changeMicGain(1, repeated.context.SliderChangeMode.End);
   await repeatedLibrary.audioRenderTask;
-  assert.equal(repeatedLibrary.canAdjustMic(), false);
+  assert.equal(repeatedLibrary.canAdjustMic(), true);
+  assert.equal(repeatedLibrary.previewLoading, true);
   const pendingLoad = [...repeated.timeouts.values()][0];
   pendingLoad();
-  assert.equal(repeatedLibrary.canAdjustMic(), true, 'A missing native prepare event cannot permanently lock the slider');
+  assert.equal(repeatedLibrary.previewLoading, false, 'A missing native prepare event cannot leave preview loading stuck');
   assert.equal(repeatedLibrary.previewContinuation, undefined);
 
   const staleMix = harness(); staleMix.controller.state = 'paused';

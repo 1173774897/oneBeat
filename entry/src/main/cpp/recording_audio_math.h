@@ -56,6 +56,9 @@ inline int64_t FramesForNanoseconds(int64_t ns)
 { return std::llround(static_cast<double>(ns) * SAMPLE_RATE / 1000000000.0); }
 inline int64_t FramesForMicroseconds(int64_t us)
 { return std::llround(static_cast<double>(us) * SAMPLE_RATE / 1000000.0); }
+/** A positive timeline offset delays a source; a negative offset advances it. */
+inline int64_t AlignedSourceFrame(int64_t outputFrame, int64_t offsetUs)
+{ return outputFrame - FramesForMicroseconds(offsetUs); }
 
 /**
  * Capture timestamps are hardware-clock observations, not editing commands.
@@ -185,6 +188,14 @@ inline int16_t MixSample(int16_t app, int16_t microphone, double microphoneGain)
     // always exactly one, including when the microphone is muted at gain zero.
     int mixed = static_cast<int>(std::lround(app + microphone * microphoneGain));
     return static_cast<int16_t>(std::clamp(mixed, -32768, 32767));
+}
+
+/** A cached echo-cleaned MIC stays floating point so only the final mix is limited. */
+inline int16_t MixProcessedMicSample(int16_t app, float microphone, double microphoneGain)
+{
+    if (microphoneGain == 0) return app;
+    const double mixed = app + microphoneGain * static_cast<double>(microphone);
+    return static_cast<int16_t>(std::lround(std::clamp(mixed, -32768.0, 32767.0)));
 }
 
 inline int16_t MixSample(int16_t app, int16_t microphone, double microphoneGain, double speakerBleedCancel)

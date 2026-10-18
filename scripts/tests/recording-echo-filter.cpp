@@ -178,6 +178,82 @@ void FrequencyResponseAndExternalSound()
     assert(MixEchoFirSample(10000, 30000, .5, 20000) == 15000);
 }
 
+void HeldOutGainCannotOverCancel()
+{
+    constexpr int frames = 76800;
+    constexpr int delay = 1200;
+    std::mt19937 generator(507211);
+    std::uniform_int_distribution<int> referenceNoise(-5000, 5000), outsideNoise(-120, 120);
+    std::vector<int16_t> app(frames * 2), mic(frames * 2);
+    for (auto &sample : app) sample = static_cast<int16_t>(referenceNoise(generator));
+    for (int frame = 0; frame < frames; ++frame) {
+        const int source = frame - delay;
+        const double pathGain = ((frame / 480) & 1) == 0 ? 1.0 : 0.65;
+        for (int channel = 0; channel < 2; ++channel) {
+            const double echo = source >= 0 ? app[source * 2 + channel] * pathGain : 0;
+            mic[frame * 2 + channel] = Limit(echo + outsideNoise(generator));
+        }
+    }
+    const auto fit = EstimateStereoEchoFir(app.data(), mic.data(), frames);
+    for (int channel = 0; channel < 2; ++channel) {
+        const auto &model = fit.channels[channel];
+        assert(model.enabled);
+        assert(std::abs(model.delayFrames - delay) <= 48);
+        assert(model.appliedScale > 0.55 && model.appliedScale < 0.70);
+        double predictionEnergy = 0, residualProduct = 0;
+        for (int frame = 15000; frame < frames - 15000; ++frame) {
+            if (((frame / 480) & 1) == 0) continue;
+            const auto first = EchoFirReferenceFirstFrame(frame, model.delayFrames);
+            const double prediction = PredictEchoFirSample(app.data() + first * 2, channel, model);
+            const double residual = mic[frame * 2 + channel] - prediction;
+            predictionEnergy += prediction * prediction;
+            residualProduct += residual * prediction;
+        }
+        // A non-negative projection means validation retains a small real echo;
+        // it never crosses through zero into the audible inverse tail.
+        assert(predictionEnergy > 0 && residualProduct / predictionEnergy >= -0.01);
+    }
+    for (int frame = 0; frame < frames; ++frame) {
+        const int source = frame - delay;
+        const double pathGain = ((frame / 480) & 1) == 0 ? 1.0 : 0.01;
+        for (int channel = 0; channel < 2; ++channel) {
+            const double echo = source >= 0 ? app[source * 2 + channel] * pathGain : 0;
+            mic[frame * 2 + channel] = Limit(echo);
+        }
+    }
+    const auto unsafeMinimum = EstimateStereoEchoFir(app.data(), mic.data(), frames);
+    assert(!unsafeMinimum.channels[0].enabled && !unsafeMinimum.channels[1].enabled);
+}
+
+void TonalEnvelopeDelayIsStable()
+{
+    constexpr int frames = 76800;
+    constexpr int delay = 2400;
+    std::array<int, 2> delays{};
+    for (int tone = 0; tone < 2; ++tone) {
+        const double frequency = tone == 0 ? 660.0 : 880.0;
+        std::vector<int16_t> app(frames * 2), mic(frames * 2);
+        for (int onset = 4800; onset < frames - 6000; onset += 24000) {
+            for (int sample = 0; sample < 5760; ++sample) {
+                const double time = sample / 48000.0;
+                const double envelope = (std::exp(-80 * time) + .35 * std::exp(-16 * time)) / 1.35;
+                const int16_t value = Limit(std::sin(2 * M_PI * frequency * time) * 12000 * envelope);
+                app[(onset + sample) * 2] = value;
+                app[(onset + sample) * 2 + 1] = value;
+            }
+        }
+        for (int frame = delay; frame < frames; ++frame) {
+            mic[frame * 2] = Limit(app[(frame - delay) * 2] * .45);
+            mic[frame * 2 + 1] = Limit(app[(frame - delay) * 2 + 1] * .30);
+        }
+        const auto fit = EstimateStereoEchoFir(app.data(), mic.data(), frames);
+        assert(fit.channels[0].enabled && fit.channels[1].enabled);
+        delays[tone] = fit.channels[0].delayFrames;
+        assert(std::abs(delays[tone] - delay) <= 48);
+    }
+    assert(std::abs(delays[0] - delays[1]) <= 48);
+}
+
 void InvertedBroadbandAndOppositePolarities()
 {
     constexpr int frames = 76800;
@@ -530,6 +606,8 @@ int main(int argc, char **argv)
     UnrelatedMicAndQuietRightChannel();
     DoubleTalkAndLimits();
     FrequencyResponseAndExternalSound();
+    HeldOutGainCannotOverCancel();
+    TonalEnvelopeDelayIsStable();
     InvertedBroadbandAndOppositePolarities();
     ProvenFilterDuringDoubleTalk();
     BoundariesAndChunkInvariance();

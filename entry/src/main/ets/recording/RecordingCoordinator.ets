@@ -12,7 +12,7 @@ import { RecordingMixer, RECORDING_MIX_VERSION } from './RecordingMixer';
 
 const INPUT_PEAK_INTERVAL_MS: number = 80;
 const CONSENT_FOREGROUND_GRACE_MS: number = 500;
-const MAX_FRAME_WIDTH_PX: number = 720;
+const MAX_FRAME_WIDTH_PX: number = 1080;
 const MICROPHONE_PERMISSION: Permissions = 'ohos.permission.MICROPHONE';
 const MIC_CAPTURE_INFO: audio.AudioCapturerInfo = { source: audio.SourceType.SOURCE_TYPE_MIC, capturerFlags: 0 };
 
@@ -190,8 +190,10 @@ export class RecordingCoordinator {
     }
     if (target === undefined || target.id !== clip.id) { throw new Error('无法确认待清理的录制文件'); }
     RecordingCoordinator.setState('stopping');
+    const processedMicPath = RecordingMixer.processedMicPath(RecordingCoordinator.micPath());
     const paths: string[] = [target.path, RecordingCoordinator.sourcePath(), RecordingCoordinator.innerPath(),
-      RecordingCoordinator.micPath(), target.path.replace('.mp4', '.recovery.json')];
+      RecordingCoordinator.micPath(), processedMicPath, `${processedMicPath}.tmp`,
+      target.path.replace('.mp4', '.recovery.json')];
     try {
       for (const path of paths) { if (await fileIo.access(path)) { await fileIo.unlink(path); } }
       await RecordingRepository.clearPendingCapture(clip);
@@ -309,7 +311,7 @@ export class RecordingCoordinator {
       interrupted: reason !== 'user', stopReason: reason, scope: RecordingCoordinator.scope,
       sourcePath: RecordingCoordinator.sourcePath(), innerPath: RecordingCoordinator.innerPath(),
       micPath: RecordingCoordinator.micPath(), micOffsetUs: result.micOffsetUs, innerOffsetUs: result.innerOffsetUs,
-      audioSampleRate: 48000, audioChannels: 2, renderedGain: 1,
+      audioSampleRate: 48000, audioChannels: 2, renderedGain: 1, renderedMicShiftUs: 0,
       renderedMixVersion: RECORDING_MIX_VERSION, renderedAt: Date.now(),
       captureSyncValid: result.syncValid && result.timestampMappingVersion === 2 &&
         (result.videoTimestampDivisor === 1 || result.videoTimestampDivisor === 1000),

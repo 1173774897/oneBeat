@@ -5,6 +5,7 @@ const vm = require('node:vm');
 const ts = require(process.argv[2]);
 const nativeSource = fs.readFileSync('entry/src/main/cpp/recording_native.cpp', 'utf8');
 const trackWriterSource = nativeSource.match(/struct TrackWriter \{[\s\S]*?\n\};/)?.[0] ?? '';
+const mixFileSource = nativeSource.slice(nativeSource.indexOf('void MixFile('), nativeSource.indexOf('std::mutex globalMutex'));
 assert.match(trackWriterSource,
   /WriteAll\(fd,\s*chunk\.bytes\.data\(\),\s*chunk\.bytes\.size\(\)\)/,
   'Every accepted screen-capture PCM payload must be appended byte-for-byte');
@@ -18,6 +19,17 @@ assert.match(nativeSource,
   'Speaker reference delay must use the absolute output frame across AAC input blocks');
 assert.doesNotMatch(nativeSource, /frame\s*>=\s*speakerBleedDelayFrames/,
   'Speaker cancellation must not reset its delay at each encoder block');
+assert.match(nativeSource,
+  /void EnsureProcessedMic[\s\S]*existing\.st_size == expectedBytes[\s\S]*std::vector<float> residual/,
+  'Echo-cleaned MIC must be cached once as an unclipped floating-point residual');
+assert.match(nativeSource,
+  /constexpr int64_t VIDEO_BITRATE = 8000000;[\s\S]*OH_MD_KEY_BITRATE, VIDEO_BITRATE/,
+  '1080-wide screen capture must raise its H.264 bitrate with the pixel count');
+assert.doesNotMatch(mixFileSource, /EstimateEchoAt\(/,
+  'A gain or manual alignment remux must not repeat the expensive FIR fit');
+assert.match(mixFileSource,
+  /ReadAlignedProcessedMic\([^;]*options\.micShiftUs[\s\S]*MixProcessedMicSample/,
+  'Manual alignment must shift only the cached MIC residual before the final mix');
 function compile(path) {
   const compiled = ts.transpileModule(fs.readFileSync(path, 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021 }, reportDiagnostics: true
@@ -70,6 +82,8 @@ function harness(options = {}) {
       assert.ok(args.innerPath.endsWith('-inner.pcm'));
       assert.ok(args.micPath.endsWith('-mic.pcm'));
       assert.equal(args.innerOffsetUs, -11000);
+      assert.ok(Number.isFinite(args.micShiftUs));
+      assert.equal(args.processedMicPath, `${args.micPath}.clean-v2.f32`);
       calls.mixes.push(args);
       if (options.mixFailures > 0) { options.mixFailures--; throw new Error('encode failed'); }
       files.add(args.outputPath);
@@ -145,10 +159,11 @@ function harness(options = {}) {
   assert.equal(clip, duplicate);
   assert.equal(clip.durationMs, 720);
   assert.equal(clip.scope, 'team');
-  assert.equal(clip.width, 720);
-  assert.equal(clip.height, 1560);
+  assert.equal(clip.width, 1080);
+  assert.equal(clip.height, 2340);
   assert.equal(clip.renderedGain, 1);
-  assert.equal(clip.renderedMixVersion, 3);
+  assert.equal(clip.renderedMixVersion, 5);
+  assert.equal(clip.renderedMicShiftUs, 0);
   assert.equal(clip.micOffsetUs, 17000);
   assert.equal(clip.innerOffsetUs, -11000);
   assert.equal(clip.captureSyncValid, true);
@@ -161,13 +176,15 @@ function harness(options = {}) {
   assert.equal(normal.calls.stops, 1);
   assert.equal(normal.calls.mixes.length, 1);
   assert.equal(normal.calls.mixes[0].gain, 1);
+  assert.equal(normal.calls.mixes[0].micShiftUs, 0);
   assert.equal(normal.calls.added.length, 1);
   assert.deepEqual(normal.calls.tasks, [true, false]);
   assert.equal(normal.timers.size, 0);
   await normal.mixer.exportMixed(clip, 0, '/recordings/preview-zero.mp4');
-  await normal.mixer.exportMixed(clip, 2, '/recordings/preview-two.mp4');
+  await normal.mixer.exportMixed(clip, 2, '/recordings/preview-two.mp4', -60000);
   assert.equal(normal.calls.mixes.at(-2).gain, 0);
   assert.equal(normal.calls.mixes.at(-1).gain, 2);
+  assert.equal(normal.calls.mixes.at(-1).micShiftUs, -60000);
   assert.equal(normal.calls.mixes.at(-1).speakerBleedCancel, 0);
   await normal.mixer.exportMixed({ ...clip, builtInSpeakerCapture: true }, 1,
     '/recordings/preview-speaker.mp4');

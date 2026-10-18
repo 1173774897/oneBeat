@@ -14,6 +14,9 @@ int main()
     assert(MixSample(6000, 4000, 2) == 14000);
     assert(MixSample(-30000, -5000, 2) == -32768);
     assert(MixSample(30000, 5000, 2) == 32767);
+    assert(MixProcessedMicSample(6000, 4000.5f, 1) == 10001);
+    assert(MixProcessedMicSample(32760, -4.5f, 0) == 32760);
+    assert(MixProcessedMicSample(30000, 5000.25f, 2) == 32767);
     assert(MicAfterSpeakerBleedCancel(1000, 1800, 0.72) == 1080);
     assert(MixSample(1000, 1800, 1, 0.72) == 2080);
     assert(MixSample(1000, 1800, 1, 0) == MixSample(1000, 1800, 1));
@@ -33,6 +36,8 @@ int main()
     // A 17ms late MIC starts after 816 frames; an 11ms pre-roll is trimmed by 528.
     assert(FramesForMicroseconds(17000) == 816);
     assert(FramesForMicroseconds(-11000) == -528);
+    assert(AlignedSourceFrame(2880, 60000) == 0); // +60ms delays MIC.
+    assert(AlignedSourceFrame(0, -60000) == 2880); // -60ms advances MIC.
     assert(FramesForNanoseconds(20000000) == 960);
     assert(FramesForNanoseconds(3600000000000LL) == 172800000);
 

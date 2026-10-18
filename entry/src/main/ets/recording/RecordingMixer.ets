@@ -2,11 +2,19 @@ import * as recordingNative from 'libonebeat_recording.so';
 import { RecordingClip } from './RecordingModels';
 
 // Retained stems let same-gain legacy exports adopt the current DSP once.
-export const RECORDING_MIX_VERSION: number = 3;
+export const RECORDING_MIX_VERSION: number = 5;
+export const MAX_MIC_SHIFT_US: number = 300000;
+const PROCESSED_MIC_VERSION: number = 2;
 const BUILT_IN_SPEAKER_BLEED_LIMIT: number = 4;
 
 /** Source tracks are immutable; app audio stays at unity and gain applies only to cleaned MIC. */
 export class RecordingMixer {
+  /** A DSP-versioned sidecar is reusable only with its immutable raw MIC stem. */
+  static processedMicPath(micPath: string): string {
+    if (micPath.length === 0) { throw new Error('麦克风原轨路径无效'); }
+    return `${micPath}.clean-v${PROCESSED_MIC_VERSION}.f32`;
+  }
+
   static validateCaptureTiming(clip: RecordingClip): void {
     if (clip.captureSyncValid === false || (clip.captureSyncValid === true &&
       (clip.captureMappingVersion !== 2 ||
@@ -21,9 +29,13 @@ export class RecordingMixer {
     }
   }
 
-  static async exportMixed(clip: RecordingClip, gain: number, outputPath: string): Promise<void> {
+  static async exportMixed(clip: RecordingClip, gain: number, outputPath: string,
+    micShiftUs: number = clip.renderedMicShiftUs ?? 0): Promise<void> {
     if (!Number.isFinite(gain) || gain < 0 || gain > 2) {
       throw new Error('麦克风音量需在 0% 到 200% 之间');
+    }
+    if (!Number.isFinite(micShiftUs) || Math.abs(micShiftUs) > MAX_MIC_SHIFT_US) {
+      throw new Error('人声对齐需在提前或延后 300 毫秒以内');
     }
     if (clip.sourcePath === undefined || clip.innerPath === undefined || clip.micPath === undefined) {
       throw new Error('这段旧视频没有独立麦克风音轨，无法单独调整');
@@ -45,7 +57,8 @@ export class RecordingMixer {
     await recordingNative.mix({
       sourcePath: clip.sourcePath, innerPath: clip.innerPath, micPath: clip.micPath, outputPath: outputPath,
       durationMs: clip.durationMs, innerOffsetUs: clip.innerOffsetUs ?? 0, micOffsetUs: clip.micOffsetUs ?? 0,
-      gain: gain, speakerBleedCancel: speakerBleedCancel
+      micShiftUs: micShiftUs, gain: gain, speakerBleedCancel: speakerBleedCancel,
+      processedMicPath: RecordingMixer.processedMicPath(clip.micPath)
     });
   }
 }

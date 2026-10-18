@@ -33,7 +33,7 @@ function durableEnvironment() {
   let nextFd = 1, nextUuid = 1;
   let chunkSize = Number.MAX_SAFE_INTEGER;
   const fileIo = {
-    OpenMode: { WRITE_ONLY: 1, CREATE: 2, TRUNC: 4 },
+    OpenMode: { READ_ONLY: 0, WRITE_ONLY: 1, CREATE: 2, TRUNC: 4, READ_WRITE: 8 },
     async access(name) { return files.has(name) || directories.has(name); },
     async mkdir(name) { directories.add(name); },
     async listFile(name) { return [...files.keys()].filter(file => file.startsWith(`${name}/`) &&
@@ -91,8 +91,55 @@ function durableEnvironment() {
       TextEncoder: class { encodeInto(value) { return new TextEncoder().encode(value); } } } } };
 }
 
+async function testCoverExtraction() {
+  const environment = durableEnvironment();
+  const calls = [];
+  const pixelMap = { async release() { calls.push('release-pixel'); } };
+  const service = load('recording/RecordingCoverService.ets', {
+    '@kit.CoreFileKit': environment.coreFile,
+    '@kit.MediaKit': { media: {
+      AVImageQueryOptions: { AV_IMAGE_QUERY_NEXT_SYNC: 'next-sync' },
+      async createAVImageGenerator() {
+        return {
+          fdSrc: undefined,
+          async fetchFrameByTime(timeUs, option, params) {
+            calls.push({ action: 'fetch', timeUs, option, params: plain(params), source: plain(this.fdSrc) });
+            return pixelMap;
+          },
+          async release() { calls.push('release-generator'); }
+        };
+      }
+    } },
+    '@kit.ImageKit': { image: {
+      createImagePacker() {
+        return {
+          async packToFile(source, fd, options) {
+            assert.equal(source, pixelMap);
+            calls.push({ action: 'pack', options: plain(options) });
+            await environment.fileIo.write(fd, Buffer.from('jpeg-first-frame'));
+          },
+          async release() { calls.push('release-packer'); }
+        };
+      }
+    } }
+  }).RecordingCoverService;
+  const videoPath = '/app/files/recordings/cover-source.mp4';
+  const coverPath = '/app/files/recordings/cover-source.cover-v1.jpg';
+  environment.files.set(videoPath, Buffer.from('synthetic-h264-video'));
+  await service.generate(videoPath, coverPath, 1080, 2340);
+  const fetch = calls.find(item => item.action === 'fetch');
+  assert.deepEqual(fetch.params, { width: 442, height: 960 });
+  assert.equal(fetch.timeUs, 0); assert.equal(fetch.option, 'next-sync');
+  assert.equal(environment.files.get(coverPath).toString(), 'jpeg-first-frame');
+  assert.deepEqual(calls.filter(item => typeof item === 'string'),
+    ['release-packer', 'release-pixel', 'release-generator']);
+  await service.generate(videoPath, coverPath, 1080, 2340);
+  assert.equal(calls.filter(item => item.action === 'fetch').length, 1,
+    'An existing durable cover must not decode the video again');
+}
+
 function services(environment = durableEnvironment()) {
-  const storage = new Map(), ledgerCalls = [], controllers = [], mixCalls = [];
+  const storage = new Map(), ledgerCalls = [], controllers = [], mixCalls = [], coverCalls = [];
   const globals = { AppStorage: { get: key => storage.get(key), setOrCreate: (key, value) => storage.set(key, value) },
     setInterval: () => 1, console: { warn() {} } };
   const atomic = load('common/AtomicTextFile.ets', {
@@ -111,9 +158,17 @@ function services(environment = durableEnvironment()) {
     '@kit.ArkData': environment.arkData, '@kit.CoreFileKit': environment.coreFile,
     '../common/AtomicTextFile': atomic,
     '@kit.ArkTS': environment.arkTs,
-    './RecordingMixer': { RECORDING_MIX_VERSION: 3, RecordingMixer: { async exportMixed(clip, gain, output) {
-      mixCalls.push({ clip: plain(clip), gain, output });
-      environment.files.set(output, Buffer.from(`rendered-gain=${gain};source=${clip.sourcePath}`));
+    './RecordingCoverService': { RecordingCoverService: { async generate(videoPath, coverPath, width, height) {
+      coverCalls.push({ videoPath, coverPath, width, height });
+      environment.files.set(coverPath, Buffer.from(`cover-of=${videoPath}`));
+    } } },
+    './RecordingMixer': { RECORDING_MIX_VERSION: 5, MAX_MIC_SHIFT_US: 300000,
+      RecordingMixer: {
+      processedMicPath: micPath => `${micPath}.clean-v2.f32`,
+      async exportMixed(clip, gain, output, micShiftUs) {
+      mixCalls.push({ clip: plain(clip), gain, output, micShiftUs });
+      environment.files.set(output, Buffer.from(
+        `rendered-gain=${gain};shift=${micShiftUs};source=${clip.sourcePath}`));
     } } },
     '@kit.MediaLibraryKit': { photoAccessHelper: { PhotoType: { VIDEO: 'video' },
       getPhotoAccessHelper: () => ({ showAssetsCreationDialog: async () => ['content://album/video'], release() {} }) } }
@@ -142,7 +197,8 @@ function services(environment = durableEnvironment()) {
     await repository.add(entry);
     return repository.get(entry.id);
   }
-  return { environment, storage, ledger, repository, share, ledgerCalls, controllers, mixCalls, initialize, clip, atomic,
+  return { environment, storage, ledger, repository, share, ledgerCalls, controllers, mixCalls, coverCalls,
+    initialize, clip, atomic,
     gate(value) { showGate = value; }, failShow(value) { showFailure = value; } };
 }
 
@@ -178,8 +234,11 @@ async function testExplicitShareConfirmation() {
   assert.equal(h.share.getPending(), undefined, 'Rejected platform show clears its pending attempt');
   assert.equal(h.ledgerCalls.length, 2);
   assert.equal(h.environment.durable.get('onebeat_video_share:pendingVideoShareV1'), '');
+  const coverPath = clip.coverPath;
+  assert.ok(coverPath && h.environment.files.has(coverPath), 'A new recording owns a first-frame cover');
   await h.repository.remove(clip.id);
   assert.equal(h.environment.files.has(clip.path), false);
+  assert.equal(h.environment.files.has(coverPath), false, 'Deleting a recording removes its cover');
 }
 
 async function testShareCrashReplay() {
@@ -210,11 +269,15 @@ async function testLibraryRecovery() {
   await assert.rejects(h.repository.add(clip), /simulated atomic rename failure/);
   assert.equal(h.repository.list().length, 0, 'Failed index publication must not expose a saved work');
   assert.equal(h.environment.files.has(`${clip.path}.recovery.json`), true);
+  assert.equal(h.coverCalls.length, 1, 'Cover generation precedes the recoverable library publication');
   const recoveryFsync = h.environment.trace.findIndex(entry => entry.startsWith(`fsync:${clip.path}.recovery.json.tmp-`));
   assert.ok(recoveryFsync >= 0 && recoveryFsync < h.environment.trace.indexOf(`rename:${clip.path}.recovery.json`));
   h.environment.failRenames.delete('/app/files/recordings/library-v1.json');
   const restart = services(h.environment); await restart.initialize();
-  assert.deepEqual(plain(restart.repository.get(clip.id)), { ...clip, scope: 'solo', renderedGain: 1, renderedAt: clip.createdAt },
+  assert.deepEqual(plain(restart.repository.get(clip.id)), {
+    ...clip, coverPath: `/app/files/recordings/${clip.id}.cover-v1.jpg`,
+    scope: 'solo', renderedGain: 1, renderedMicShiftUs: 0, renderedAt: clip.createdAt
+  },
     'Restart recovers the completed MP4 after failed index flush');
   assert.equal(h.environment.files.has(`${clip.path}.recovery.json`), false);
   const again = services(h.environment); await again.initialize();
@@ -265,6 +328,10 @@ async function testLargeSnapshotsAndAtomicWrites() {
   const legacy = services(legacyEnvironment); await legacy.initialize();
   assert.equal(legacy.repository.list().length, 1);
   assert.ok(legacyEnvironment.files.has('/app/files/recordings/library-v1.json'), 'Legacy work Preferences migrate to an atomic file');
+  assert.equal(legacy.repository.get(clip.id).coverPath, undefined);
+  const coveredLegacy = await legacy.repository.ensureCover(clip.id);
+  assert.ok(coveredLegacy.coverPath.endsWith('.cover-v1.jpg'),
+    'Existing works backfill a durable first-frame cover');
 }
 
 async function addStemClip(h, scope = 'team') {
@@ -287,13 +354,13 @@ async function testWorkScopeAndNonDestructiveGain() {
   const oldMix = await addStemClip(migration);
   const refreshedMix = await migration.repository.render(oldMix, 1);
   assert.notEqual(refreshedMix.path, oldMix.path, 'Old separate-track works are regenerated even when MIC gain is unchanged');
-  assert.equal(refreshedMix.renderedMixVersion, 3);
+  assert.equal(refreshedMix.renderedMixVersion, 5);
   await migration.repository.render(refreshedMix, 1);
   assert.equal(migration.mixCalls.length, 1, 'The current quality version does not re-encode an unchanged gain');
   const versionTwo = { ...await addStemClip(migration), renderedMixVersion: 2 };
   await migration.repository.add(versionTwo);
   const versionThree = await migration.repository.render(versionTwo, 1);
-  assert.equal(versionThree.renderedMixVersion, 3);
+  assert.equal(versionThree.renderedMixVersion, 5);
   assert.notEqual(versionThree.path, versionTwo.path, 'The previous echo version upgrades even at the same MIC gain');
   const h = services(); await h.initialize();
   const legacy = await h.clip();
@@ -306,29 +373,41 @@ async function testWorkScopeAndNonDestructiveGain() {
   const immutable = new Map([team.sourcePath, team.micPath, team.innerPath].map(path => [path, Buffer.from(h.environment.files.get(path))]));
   const first = await h.repository.render(team, 1.234);
   assert.equal(first.renderedGain, 1.23);
+  assert.equal(first.renderedMicShiftUs, 0);
   assert.equal(h.mixCalls[0].gain, 1.23, 'The repository passes the desired mic gain once rather than compounding it with prior gain');
   assert.equal(h.mixCalls[0].clip.sourcePath, team.sourcePath);
   assert.equal(h.mixCalls[0].clip.micPath, team.micPath);
   assert.equal(h.mixCalls[0].clip.innerPath, team.innerPath);
   const unchanged = await h.repository.render(team, 1.234);
   assert.equal(unchanged.path, first.path); assert.equal(h.mixCalls.length, 1);
-  const muted = await h.repository.render(team, 0);
+  const shifted = await h.repository.render(team, 1.234, -60000);
+  assert.equal(shifted.renderedMicShiftUs, -60000);
+  assert.equal(h.mixCalls[1].micShiftUs, -60000,
+    'A negative manual shift advances only the cached MIC residual');
+  const muted = await h.repository.render(team, 0, -60000);
   assert.equal(muted.renderedGain, 0);
-  assert.equal(h.mixCalls[1].clip.sourcePath, team.sourcePath);
-  assert.equal(h.environment.files.has(first.path), false, 'A successful newer gain render removes the superseded derived MP4');
+  assert.equal(h.mixCalls[2].clip.sourcePath, team.sourcePath);
+  assert.equal(h.environment.files.has(shifted.path), false, 'A successful newer gain render removes the superseded derived MP4');
   for (const [path, bytes] of immutable) assert.deepEqual(h.environment.files.get(path), bytes, 'Gain renders must never overwrite source stems');
   await h.repository.saveToAlbum(team, {});
   assert.deepEqual(h.environment.files.get('content://album/video'), h.environment.files.get(muted.path),
     'Saving a stale UI clip reads the latest indexed render');
+  await assert.rejects(h.repository.render(team, 1, 300001), /300 毫秒/);
   const attempt = await h.share.share(team, {});
   assert.equal(h.controllers.at(-1).data.data.uri, `file://${muted.path}`, 'System share reads the latest render rather than a stale UI path');
   await assert.rejects(h.repository.render(team, 1), /请先完成或取消这次分享/);
-  assert.equal(h.mixCalls.length, 2, 'Pending publication freezes its exact shared render');
+  assert.equal(h.mixCalls.length, 3, 'Pending publication freezes its exact shared render');
   await h.share.dismissPending(attempt.id);
   await assert.rejects(h.repository.render(team, NaN), /麦克风音量无效/);
+  const processedMic = `${team.micPath}.clean-v2.f32`;
+  h.environment.files.set(processedMic, Buffer.from('cached-float-mic-residual'));
+  h.environment.files.set(`${processedMic}.tmp`, Buffer.from('interrupted-cache-write'));
   await h.repository.remove(team.id);
   assert.equal(h.repository.count('team'), 0);
   for (const path of [...immutable.keys(), muted.path, team.path]) assert.equal(h.environment.files.has(path), false);
+  assert.equal(h.environment.files.has(processedMic), false, 'Deleting a work also removes its fast MIC cache');
+  assert.equal(h.environment.files.has(`${processedMic}.tmp`), false,
+    'Deleting a work cleans an interrupted cache publication');
   assert.equal(h.environment.files.has(legacy.path), true, 'Deleting one work preserves unrelated works');
 }
 
@@ -526,7 +605,7 @@ function testSharedCalendar() {
 }
 
 (async () => {
-  await testExplicitShareConfirmation(); await testShareCrashReplay(); await testLibraryRecovery();
+  await testCoverExtraction(); await testExplicitShareConfirmation(); await testShareCrashReplay(); await testLibraryRecovery();
   await testLargeSnapshotsAndAtomicWrites(); await testWorkScopeAndNonDestructiveGain(); await testRenderedRecovery();
   await testBackgroundOwners(); testLobbyToast(); testSharedCalendar();
   console.log('PASS recording share/storage: explicit publication only, durable pending and crash replay, failed-index MP4 recovery, album copy and background owner union/optional media card failure');

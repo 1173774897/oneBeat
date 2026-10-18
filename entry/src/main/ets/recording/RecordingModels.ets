@@ -5,6 +5,8 @@ export type RecordingScope = 'solo' | 'team';
 export interface RecordingClip {
   id: string;
   path: string;
+  /** App-private JPEG extracted from the first video key frame. */
+  coverPath?: string;
   createdAt: number;
   durationMs: number;
   width: number;
@@ -20,6 +22,8 @@ export interface RecordingClip {
   audioSampleRate?: number;
   audioChannels?: number;
   renderedGain?: number;
+  /** Manual edit applied after capture alignment; positive values delay MIC. */
+  renderedMicShiftUs?: number;
   /** Export DSP revision; older renders with retained stems are rebuilt without changing the gain. */
   renderedMixVersion?: number;
   renderedAt?: number;

@@ -9,10 +9,12 @@
 #include <multimedia/player_framework/native_avbuffer.h>
 #include <native_window/external_window.h>
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cmath>
 #include <condition_variable>
+#include <cstdio>
 #include <cstring>
 #include <deque>
 #include <fcntl.h>
@@ -32,6 +34,8 @@ namespace {
 constexpr int RATE = 48000;
 constexpr int CHANNELS = 2;
 constexpr int FRAME_BYTES = CHANNELS * sizeof(int16_t);
+constexpr int VIDEO_FRAME_RATE = 30;
+constexpr int64_t VIDEO_BITRATE = 8000000;
 constexpr size_t MAX_PCM_QUEUE_BYTES = RATE * FRAME_BYTES * 2;
 constexpr size_t MAX_VIDEO_QUEUE = 32;
 using namespace std::chrono_literals;
@@ -141,8 +145,8 @@ public:
             OH_AVCodecCallback callbacks{CodecError, VideoFormat, NoInput, VideoOutput};
             AvCheck(OH_VideoEncoder_RegisterCallback(encoder, callbacks, this), "无法注册视频编码器");
             Format format(OH_AVFormat_CreateVideoFormat("video/avc", width, height));
-            OH_AVFormat_SetDoubleValue(format.value, OH_MD_KEY_FRAME_RATE, 30);
-            OH_AVFormat_SetLongValue(format.value, OH_MD_KEY_BITRATE, 4000000);
+            OH_AVFormat_SetDoubleValue(format.value, OH_MD_KEY_FRAME_RATE, VIDEO_FRAME_RATE);
+            OH_AVFormat_SetLongValue(format.value, OH_MD_KEY_BITRATE, VIDEO_BITRATE);
             OH_AVFormat_SetIntValue(format.value, OH_MD_KEY_PIXEL_FORMAT, AV_PIXEL_FORMAT_SURFACE_FORMAT);
             AvCheck(OH_VideoEncoder_Configure(encoder, format.value), "视频编码配置失败");
             AvCheck(OH_VideoEncoder_GetSurface(encoder, &window), "无法连接录屏画面");
@@ -434,8 +438,8 @@ private:
 };
 
 struct MixOptions {
-    std::string sourcePath, innerPath, micPath, outputPath;
-    int64_t durationMs = 0, micOffsetUs = 0, innerOffsetUs = 0;
+    std::string sourcePath, innerPath, micPath, outputPath, processedMicPath;
+    int64_t durationMs = 0, micOffsetUs = 0, innerOffsetUs = 0, micShiftUs = 0;
     double gain = 1;
     double speakerBleedCancel = 0;
 };
@@ -476,13 +480,34 @@ public:
 void ReadAligned(int fd, int64_t outputFrame, int64_t offsetUs, int count, std::vector<int16_t> &samples)
 {
     samples.assign(count * CHANNELS, 0);
-    int64_t sourceFrame = outputFrame - onebeat_recording::FramesForMicroseconds(offsetUs);
+    int64_t sourceFrame = onebeat_recording::AlignedSourceFrame(outputFrame, offsetUs);
     int leading = static_cast<int>(std::min<int64_t>(count, std::max<int64_t>(0, -sourceFrame)));
     int remaining = count - leading;
     if (remaining <= 0) return;
     ssize_t size = pread(fd, samples.data() + leading * CHANNELS, remaining * FRAME_BYTES,
         std::max<int64_t>(0, sourceFrame) * FRAME_BYTES);
     Check(size >= 0, "读取原始声音失败");
+}
+void ReadAlignedProcessedMic(int fd, int64_t outputFrame, int64_t offsetUs, int count,
+    std::vector<float> &samples)
+{
+    constexpr int PROCESSED_FRAME_BYTES = CHANNELS * sizeof(float);
+    samples.assign(count * CHANNELS, 0);
+    int64_t sourceFrame = onebeat_recording::AlignedSourceFrame(outputFrame, offsetUs);
+    int leading = static_cast<int>(std::min<int64_t>(count, std::max<int64_t>(0, -sourceFrame)));
+    int remaining = count - leading;
+    if (remaining <= 0) return;
+    uint8_t *target = reinterpret_cast<uint8_t *>(samples.data() + leading * CHANNELS);
+    size_t requested = static_cast<size_t>(remaining) * PROCESSED_FRAME_BYTES;
+    int64_t position = std::max<int64_t>(0, sourceFrame) * PROCESSED_FRAME_BYTES;
+    while (requested > 0) {
+        ssize_t size = pread(fd, target, requested, position);
+        Check(size >= 0, "读取净化麦克风音轨失败");
+        if (size == 0) break;
+        requested -= static_cast<size_t>(size);
+        target += size;
+        position += size;
+    }
 }
 struct EchoModelHistory {
     onebeat_recording::StereoEchoFirEstimate reliable{};
@@ -517,20 +542,138 @@ onebeat_recording::StereoEchoFirEstimate EstimateEchoAt(int innerFd, int micFd,
     return estimate;
 }
 
+/**
+ * Echo fitting depends only on immutable capture stems and their measured offsets.
+ * Persist its floating-point MIC residual once so gain/alignment edits avoid the
+ * expensive per-second FIR solve while retaining final-mix-only clipping.
+ */
+void EnsureProcessedMic(const MixOptions &options, int innerFd, int micFd, int64_t totalFrames)
+{
+    constexpr int PROCESSED_FRAME_BYTES = CHANNELS * sizeof(float);
+    const int64_t expectedBytes = totalFrames * PROCESSED_FRAME_BYTES;
+    struct stat existing{};
+    if (stat(options.processedMicPath.c_str(), &existing) == 0 && S_ISREG(existing.st_mode) &&
+        existing.st_size == expectedBytes) return;
+
+    const std::string temporaryPath = options.processedMicPath + ".tmp";
+    try {
+        {
+            Fd output(temporaryPath, true);
+            const bool speakerMix = options.speakerBleedCancel > 0;
+            constexpr int64_t ECHO_HOP_FRAMES = RATE;
+            constexpr int PROCESS_BLOCK_FRAMES = 4096;
+            int64_t echoAnchor = 0;
+            EchoModelHistory echoHistory;
+            onebeat_recording::StereoEchoFirEstimate echoBefore{}, echoAfter{};
+            if (speakerMix) {
+                echoBefore = EstimateEchoAt(innerFd, micFd, options.innerOffsetUs,
+                    options.micOffsetUs, 0, totalFrames, options.speakerBleedCancel, echoHistory);
+                echoAfter = EstimateEchoAt(innerFd, micFd, options.innerOffsetUs,
+                    options.micOffsetUs, ECHO_HOP_FRAMES, totalFrames,
+                    options.speakerBleedCancel, echoHistory);
+            }
+            std::vector<int16_t> inner, microphone;
+            std::vector<float> residual;
+            std::array<std::vector<int16_t>, CHANNELS> referenceBefore, referenceAfter;
+            for (int64_t framePosition = 0; framePosition < totalFrames;) {
+                const int frames = static_cast<int>(std::min<int64_t>(
+                    PROCESS_BLOCK_FRAMES, totalFrames - framePosition));
+                ReadAligned(micFd, framePosition, options.micOffsetUs, frames, microphone);
+                if (speakerMix)
+                    ReadAligned(innerFd, framePosition, options.innerOffsetUs, frames, inner);
+                residual.resize(frames * CHANNELS);
+                int processed = 0;
+                while (processed < frames) {
+                    const int64_t absoluteFrame = framePosition + processed;
+                    if (speakerMix) {
+                        while (absoluteFrame >= echoAnchor + ECHO_HOP_FRAMES) {
+                            echoAnchor += ECHO_HOP_FRAMES;
+                            echoBefore = echoAfter;
+                            echoAfter = EstimateEchoAt(innerFd, micFd, options.innerOffsetUs,
+                                options.micOffsetUs, echoAnchor + ECHO_HOP_FRAMES, totalFrames,
+                                options.speakerBleedCancel, echoHistory);
+                        }
+                    }
+                    const int count = static_cast<int>(std::min<int64_t>(frames - processed,
+                        ECHO_HOP_FRAMES - absoluteFrame % ECHO_HOP_FRAMES));
+                    if (speakerMix) {
+                        for (int channel = 0; channel < CHANNELS; ++channel) {
+                            for (int side = 0; side < 2; ++side) {
+                                const auto &model = side == 0 ?
+                                    echoBefore.channels[channel] : echoAfter.channels[channel];
+                                auto &reference = side == 0 ?
+                                    referenceBefore[channel] : referenceAfter[channel];
+                                if (!model.enabled) continue;
+                                ReadAligned(innerFd, onebeat_recording::EchoFirReferenceFirstFrame(
+                                    absoluteFrame, model.delayFrames), options.innerOffsetUs,
+                                    count + onebeat_recording::ECHO_FIR_TAPS - 1, reference);
+                            }
+                        }
+                    }
+                    for (int frame = 0; frame < count; ++frame) {
+                        const double blend =
+                            static_cast<double>(absoluteFrame + frame - echoAnchor) / ECHO_HOP_FRAMES;
+                        for (int channel = 0; channel < CHANNELS; ++channel) {
+                            double echo = 0;
+                            if (speakerMix) {
+                                const auto &before = echoBefore.channels[channel];
+                                const auto &after = echoAfter.channels[channel];
+                                const double oldEcho = before.enabled ?
+                                    onebeat_recording::PredictEchoFirSample(
+                                        referenceBefore[channel].data() + frame * CHANNELS,
+                                        channel, before) : 0;
+                                const double newEcho = after.enabled ?
+                                    onebeat_recording::PredictEchoFirSample(
+                                        referenceAfter[channel].data() + frame * CHANNELS,
+                                        channel, after) : 0;
+                                echo = oldEcho * (1 - blend) + newEcho * blend;
+                            }
+                            const int index = (processed + frame) * CHANNELS + channel;
+                            residual[index] = static_cast<float>(
+                                static_cast<double>(microphone[index]) - echo);
+                        }
+                    }
+                    processed += count;
+                }
+                WriteAll(output.value, residual.data(), residual.size() * sizeof(float));
+                framePosition += frames;
+            }
+            Check(fsync(output.value) == 0, "净化麦克风音轨保存失败");
+        }
+        Check(rename(temporaryPath.c_str(), options.processedMicPath.c_str()) == 0,
+            "净化麦克风音轨发布失败");
+    } catch (...) {
+        unlink(temporaryPath.c_str());
+        throw;
+    }
+}
+
 void MixFile(const MixOptions &options)
 {
     Check(std::isfinite(options.gain) && options.gain >= 0 && options.gain <= 2, "麦克风音量无效");
+    Check(std::abs(options.micShiftUs) <= 300000, "人声对齐范围无效");
     Check(std::isfinite(options.speakerBleedCancel) && options.speakerBleedCancel >= 0 &&
         options.speakerBleedCancel <= 4, "外放泄漏补偿无效");
     Check(options.durationMs > 0 && options.durationMs < 24 * 3600000, "录制时长无效");
     Check(options.outputPath != options.sourcePath && options.outputPath != options.innerPath &&
-        options.outputPath != options.micPath, "导出文件不可覆盖原始音轨");
+        options.outputPath != options.micPath && options.outputPath != options.processedMicPath,
+        "导出文件不可覆盖原始音轨");
+    Check(!options.processedMicPath.empty() && options.processedMicPath != options.sourcePath &&
+        options.processedMicPath != options.innerPath && options.processedMicPath != options.micPath,
+        "净化麦克风音轨路径无效");
     Fd sourceFile(options.sourcePath), innerFile(options.innerPath), micFile(options.micPath);
     struct stat innerStat{}, micStat{};
     Check(fstat(innerFile.value, &innerStat) == 0 && S_ISREG(innerStat.st_mode) &&
         innerStat.st_size % FRAME_BYTES == 0, "应用声音原轨格式无效");
     Check(fstat(micFile.value, &micStat) == 0 && S_ISREG(micStat.st_mode) &&
         micStat.st_size % FRAME_BYTES == 0, "麦克风原轨格式无效");
+    const int64_t totalFrames = options.durationMs * RATE / 1000;
+    EnsureProcessedMic(options, innerFile.value, micFile.value, totalFrames);
+    Fd processedMicFile(options.processedMicPath);
+    struct stat processedStat{};
+    constexpr int PROCESSED_FRAME_BYTES = CHANNELS * sizeof(float);
+    Check(fstat(processedMicFile.value, &processedStat) == 0 && S_ISREG(processedStat.st_mode) &&
+        processedStat.st_size == totalFrames * PROCESSED_FRAME_BYTES, "净化麦克风音轨格式无效");
     Fd destination(options.outputPath, true);
     struct stat stat{};
     Check(fstat(sourceFile.value, &stat) == 0 && S_ISREG(stat.st_mode) && stat.st_size > 0, "无法读取原视频");
@@ -580,21 +723,9 @@ void MixFile(const MixOptions &options)
         AvCheck(OH_AudioCodec_Prepare(encoder.codec), "音频编码准备失败");
         AvCheck(OH_AudioCodec_Start(encoder.codec), "音频编码启动失败");
         int64_t framePosition = 0;
-        int64_t totalFrames = options.durationMs * RATE / 1000;
-        const bool speakerMix = options.speakerBleedCancel > 0 && options.gain > 0;
-        constexpr int64_t ECHO_HOP_FRAMES = RATE;
-        int64_t echoAnchor = 0;
-        EchoModelHistory echoHistory;
-        onebeat_recording::StereoEchoFirEstimate echoBefore{}, echoAfter{};
-        if (speakerMix) {
-            echoBefore = EstimateEchoAt(innerFile.value, micFile.value, options.innerOffsetUs,
-                options.micOffsetUs, 0, totalFrames, options.speakerBleedCancel, echoHistory);
-            echoAfter = EstimateEchoAt(innerFile.value, micFile.value, options.innerOffsetUs,
-                options.micOffsetUs, ECHO_HOP_FRAMES, totalFrames, options.speakerBleedCancel, echoHistory);
-        }
         bool sentEos = false, receivedEos = false;
-        std::vector<int16_t> inner, mic;
-        std::array<std::vector<int16_t>, CHANNELS> referenceBefore, referenceAfter;
+        std::vector<int16_t> inner;
+        std::vector<float> processedMic;
         while (!receivedEos) {
             CodecBuffer input{}, output{};
             bool hasInput = false, hasOutput = false;
@@ -624,58 +755,13 @@ void MixFile(const MixOptions &options)
                 if (frames <= 0) { attr.flags = AVCODEC_BUFFER_FLAGS_EOS; sentEos = true; }
                 else {
                     ReadAligned(innerFile.value, framePosition, options.innerOffsetUs, frames, inner);
-                    ReadAligned(micFile.value, framePosition, options.micOffsetUs, frames, mic);
+                    ReadAlignedProcessedMic(processedMicFile.value, framePosition,
+                        options.micShiftUs, frames, processedMic);
                     auto *samples = reinterpret_cast<int16_t *>(OH_AVBuffer_GetAddr(input.buffer));
                     Check(samples != nullptr, "混音缓冲区不可用");
-                    int processed = 0;
-                    while (processed < frames) {
-                        const int64_t absoluteFrame = framePosition + processed;
-                        if (speakerMix) {
-                            while (absoluteFrame >= echoAnchor + ECHO_HOP_FRAMES) {
-                                echoAnchor += ECHO_HOP_FRAMES;
-                                echoBefore = echoAfter;
-                                echoAfter = EstimateEchoAt(innerFile.value, micFile.value, options.innerOffsetUs,
-                                    options.micOffsetUs, echoAnchor + ECHO_HOP_FRAMES, totalFrames,
-                                    options.speakerBleedCancel, echoHistory);
-                            }
-                        }
-                        const int count = static_cast<int>(std::min<int64_t>(frames - processed,
-                            ECHO_HOP_FRAMES - absoluteFrame % ECHO_HOP_FRAMES));
-                        if (speakerMix) {
-                            for (int channel = 0; channel < CHANNELS; ++channel) {
-                                for (int side = 0; side < 2; ++side) {
-                                    const auto &model = side == 0 ? echoBefore.channels[channel] : echoAfter.channels[channel];
-                                    auto &reference = side == 0 ? referenceBefore[channel] : referenceAfter[channel];
-                                    if (!model.enabled) continue;
-                                    ReadAligned(innerFile.value, onebeat_recording::EchoFirReferenceFirstFrame(
-                                        absoluteFrame, model.delayFrames), options.innerOffsetUs,
-                                        count + onebeat_recording::ECHO_FIR_TAPS - 1, reference);
-                                }
-                            }
-                        }
-                        for (int frame = 0; frame < count; ++frame) {
-                            const double blend = static_cast<double>(absoluteFrame + frame - echoAnchor) / ECHO_HOP_FRAMES;
-                            for (int channel = 0; channel < CHANNELS; ++channel) {
-                                double echo = 0;
-                                if (speakerMix) {
-                                    const auto &before = echoBefore.channels[channel];
-                                    const auto &after = echoAfter.channels[channel];
-                                    const double oldEcho = before.enabled ? onebeat_recording::PredictEchoFirSample(
-                                        referenceBefore[channel].data() + frame * CHANNELS, channel, before) : 0;
-                                    const double newEcho = after.enabled ? onebeat_recording::PredictEchoFirSample(
-                                        referenceAfter[channel].data() + frame * CHANNELS, channel, after) : 0;
-                                    // Smooth the predicted echo, never the app track. Splitting
-                                    // exactly at each hop keeps AAC block boundaries inaudible.
-                                    echo = oldEcho * (1 - blend) + newEcho * blend;
-                                }
-                                const int index = (processed + frame) * CHANNELS + channel;
-                                // Do not clip or normalize the MIC residual separately: the
-                                // app coefficient stays one and only the final sample is limited.
-                                samples[index] = onebeat_recording::MixEchoFirSample(
-                                    inner[index], mic[index], options.gain, echo);
-                            }
-                        }
-                        processed += count;
+                    for (int index = 0; index < frames * CHANNELS; ++index) {
+                        samples[index] = onebeat_recording::MixProcessedMicSample(
+                            inner[index], processedMic[index], options.gain);
                     }
                     attr.size = frames * FRAME_BYTES;
                     framePosition += frames;
@@ -750,7 +836,8 @@ void Execute(napi_env, void *data)
             try { job->capture->Stop(); } catch (...) {}
         }
         if (job->kind == 2 && job->mix.outputPath != job->mix.sourcePath &&
-            job->mix.outputPath != job->mix.innerPath && job->mix.outputPath != job->mix.micPath) {
+            job->mix.outputPath != job->mix.innerPath && job->mix.outputPath != job->mix.micPath &&
+            job->mix.outputPath != job->mix.processedMicPath) {
             // Parsing can fail before MixFile's muxer cleanup scope is entered.
             // Only discard the derived path; never unlink one of the inputs.
             unlink(job->mix.outputPath.c_str());
@@ -826,9 +913,11 @@ napi_value Mix(napi_env env, napi_callback_info info)
     job->mix.innerPath = GetString(env, args[0], "innerPath");
     job->mix.micPath = GetString(env, args[0], "micPath");
     job->mix.outputPath = GetString(env, args[0], "outputPath");
+    job->mix.processedMicPath = GetString(env, args[0], "processedMicPath");
     job->mix.durationMs = GetNumber(env, args[0], "durationMs");
     job->mix.micOffsetUs = GetNumber(env, args[0], "micOffsetUs");
     job->mix.innerOffsetUs = GetNumber(env, args[0], "innerOffsetUs");
+    job->mix.micShiftUs = GetNumber(env, args[0], "micShiftUs");
     job->mix.gain = GetNumber(env, args[0], "gain");
     job->mix.speakerBleedCancel = GetNumber(env, args[0], "speakerBleedCancel");
     return Queue(env, job);

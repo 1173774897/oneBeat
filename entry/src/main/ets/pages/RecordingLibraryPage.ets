@@ -4,7 +4,7 @@ import { fileUri } from '@kit.CoreFileKit';
 import { AppSession } from '../app/AppSession';
 import { RecordingClip, RecordingScope } from '../recording/RecordingModels';
 import { RecordingRepository } from '../recording/RecordingRepository';
-import { RECORDING_MIX_VERSION } from '../recording/RecordingMixer';
+import { MAX_MIC_SHIFT_US, RECORDING_MIX_VERSION } from '../recording/RecordingMixer';
 import { PendingVideoShare, RecordingShareService } from '../sharing/RecordingShareService';
 import { ShareCheckInResult } from '../store/ShareCheckInStore';
 import { formatTrialExpiry } from '../store/EntitlementStore';
@@ -19,6 +19,10 @@ const SHARE_SHEET_WIDTH: string = '90%';
 const SHARE_SHEET_MAX_HEIGHT: string = '88%';
 const CALENDAR_ENTRY_HEIGHT: number = 42;
 const PREVIEW_LOAD_TIMEOUT_MS: number = 8000;
+const MIC_SHIFT_LIMIT_MS: number = MAX_MIC_SHIFT_US / 1000;
+const MIC_SHIFT_STEP_MS: number = 10;
+const MIC_ALIGNMENT_RULER_HEIGHT: number = 34;
+const MIC_ALIGNMENT_TICK_COUNT: number = 13;
 
 interface RecordingLibraryParams {
   clipId?: string;
@@ -46,8 +50,11 @@ struct RecordingLibraryPage {
   @State previewMuted: boolean = false;
   @State scope: RecordingScope = 'solo';
   @State micGain: number = 1;
+  @State micShiftMs: number = 0;
   @State renderingAudio: boolean = false;
   @State previewLoading: boolean = false;
+  @State previewReady: boolean = false;
+  @State previewCoverVisible: boolean = true;
   @State calendarVisible: boolean = false;
   @State busy: boolean = false;
   @State pauseConfirmVisible: boolean = false;
@@ -65,10 +72,18 @@ struct RecordingLibraryPage {
   private active: boolean = true;
   private audioRenderSequence: number = 0;
   private audioRenderTask: Promise<RecordingClip | undefined> | undefined = undefined;
+  private coverLoadTask: Promise<void> | undefined = undefined;
+  private requestedMicGain: number = 1;
+  private requestedMicShiftUs: number = 0;
   private previewTimeSeconds: number = 0;
   private previewPlaying: boolean = false;
+  private coverPlayRequested: boolean = false;
   private previewContinuation: PreviewContinuation | undefined = undefined;
   private previewLoadTimer: number = -1;
+  private alignmentCanvas: CanvasRenderingContext2D =
+    new CanvasRenderingContext2D(new RenderingContextSettings(true));
+  private alignmentCanvasReady: boolean = false;
+  private alignmentCanvasWidth: number = 220;
 
   aboutToAppear(): void {
     this.active = true;
@@ -124,6 +139,32 @@ struct RecordingLibraryPage {
     }
     if (!this.renderingAudio) {
       this.micGain = this.selectedClip()?.renderedGain ?? 1;
+      this.micShiftMs = Math.round((this.selectedClip()?.renderedMicShiftUs ?? 0) / 1000);
+      this.requestedMicGain = this.desiredMicGain();
+      this.requestedMicShiftUs = this.desiredMicShiftUs();
+      this.drawMicAlignmentRuler();
+    }
+    this.prepareMissingCovers();
+  }
+
+  private prepareMissingCovers(): void {
+    if (this.coverLoadTask !== undefined) { return; }
+    const ids = this.clips.filter((clip: RecordingClip) => clip.coverPath === undefined)
+      .map((clip: RecordingClip) => clip.id);
+    if (ids.length === 0) { return; }
+    const task = this.loadMissingCovers(ids).finally(() => {
+      if (this.coverLoadTask === task) { this.coverLoadTask = undefined; }
+    });
+    this.coverLoadTask = task;
+  }
+
+  private async loadMissingCovers(ids: string[]): Promise<void> {
+    for (const id of ids) {
+      try {
+        await RecordingRepository.ensureCover(id);
+      } catch (error) {
+        logUserFailure('recording-cover', error);
+      }
     }
   }
 
@@ -161,7 +202,10 @@ struct RecordingLibraryPage {
 
   refreshPlayback(): void {
     const playing = this.practicePlaying();
-    if (playing) { this.stopPreview(); }
+    if (playing) {
+      this.stopPreview();
+      this.previewReady = false;
+    }
     this.practiceActive = playing;
     if (!playing) { this.prepareSelectedPreview(); }
   }
@@ -179,6 +223,7 @@ struct RecordingLibraryPage {
 
   private stopPreview(): void {
     this.previewPlaying = false;
+    this.coverPlayRequested = false;
     this.cancelPreviewContinuation();
     try { this.videoController.pause(); } catch (_error) {}
   }
@@ -219,7 +264,11 @@ struct RecordingLibraryPage {
   }
 
   private previewStarted(id: string, path: string): void {
-    if (this.previewSourceMatches(id, path)) { this.previewPlaying = true; }
+    if (this.previewSourceMatches(id, path)) {
+      this.coverPlayRequested = false;
+      this.previewCoverVisible = false;
+      this.previewPlaying = true;
+    }
   }
 
   private previewPaused(id: string, path: string): void {
@@ -230,13 +279,22 @@ struct RecordingLibraryPage {
     if (!this.previewSourceMatches(id, path)) { return; }
     this.previewPlaying = false;
     this.previewTimeSeconds = 0;
+    this.previewCoverVisible = true;
     this.cancelPreviewContinuation();
   }
 
   private previewPrepared(id: string, path: string): void {
     const resume = this.previewContinuation;
-    if (resume === undefined || resume.clipId !== id || resume.path !== path ||
-      !this.previewSourceMatches(id, path) || this.practicePlaying()) { return; }
+    if (!this.previewSourceMatches(id, path) || this.practicePlaying()) { return; }
+    this.previewReady = true;
+    if (resume === undefined) {
+      if (this.coverPlayRequested) {
+        this.coverPlayRequested = false;
+        this.videoController.start();
+      }
+      return;
+    }
+    if (resume.clipId !== id || resume.path !== path) { return; }
     resume.prepared = true;
     if (resume.timeSeconds > 0) {
       // Wait for the seek update before starting audio; starting immediately
@@ -270,10 +328,17 @@ struct RecordingLibraryPage {
     if (this.busy || this.renderingAudio || this.selectedId === clip.id) { return; }
     this.stopPreview();
     this.videoController = new VideoController();
+    this.previewReady = false;
+    this.coverPlayRequested = false;
     this.audioRenderSequence++;
     this.selectedId = clip.id;
     this.previewTimeSeconds = 0;
+    this.previewCoverVisible = true;
     this.micGain = clip.renderedGain ?? 1;
+    this.micShiftMs = Math.round((clip.renderedMicShiftUs ?? 0) / 1000);
+    this.requestedMicGain = this.desiredMicGain();
+    this.requestedMicShiftUs = this.desiredMicShiftUs();
+    this.drawMicAlignmentRuler();
     this.previewMuted = false;
     this.prepareSelectedPreview();
   }
@@ -300,52 +365,57 @@ struct RecordingLibraryPage {
   }
 
   private canAdjustMic(): boolean {
-    return this.hasSeparateAudio() && !this.busy && !this.renderingAudio && !this.previewLoading && !this.practiceActive &&
+    return this.hasSeparateAudio() && !this.busy && !this.practiceActive &&
       this.pendingClipId !== this.selectedId;
   }
 
+  private desiredMicGain(): number {
+    return Math.max(0, Math.min(2, Math.round(this.micGain * 100) / 100));
+  }
+
+  private desiredMicShiftUs(): number {
+    return Math.max(-MIC_SHIFT_LIMIT_MS,
+      Math.min(MIC_SHIFT_LIMIT_MS, Math.round(this.micShiftMs))) * 1000;
+  }
+
+  private clipHasSeparateAudio(clip: RecordingClip): boolean {
+    return clip.sourcePath !== undefined && clip.micPath !== undefined && clip.innerPath !== undefined;
+  }
+
+  private renderMatches(clip: RecordingClip, gain: number, micShiftUs: number): boolean {
+    return Math.abs((clip.renderedGain ?? 1) - gain) < 0.001 &&
+      (clip.renderedMicShiftUs ?? 0) === micShiftUs &&
+      ((clip.renderedMixVersion ?? 0) >= RECORDING_MIX_VERSION || !this.clipHasSeparateAudio(clip));
+  }
+
   private renderSelectedAudio(): Promise<RecordingClip | undefined> {
+    this.requestedMicGain = this.desiredMicGain();
+    this.requestedMicShiftUs = this.desiredMicShiftUs();
     if (this.audioRenderTask !== undefined) { return this.audioRenderTask; }
     const clip = this.selectedClip();
     if (clip === undefined) { return Promise.resolve(undefined); }
-    const gain = Math.max(0, Math.min(2, Math.round(this.micGain * 100) / 100));
-    if (Math.abs((clip.renderedGain ?? 1) - gain) < 0.001 &&
-      ((clip.renderedMixVersion ?? 0) >= RECORDING_MIX_VERSION || !this.hasSeparateAudio())) {
+    if (this.renderMatches(clip, this.requestedMicGain, this.requestedMicShiftUs)) {
       return Promise.resolve(clip);
     }
     if (this.practicePlaying()) {
-      showUserNotice('请先暂停练习，再调整视频中的麦克风声音', 'recording-mix-playing');
+      showUserNotice('请先暂停练习，再调整视频中的麦克风声音或对齐', 'recording-mix-playing');
       return Promise.resolve(undefined);
     }
     this.renderingAudio = true;
     const sequence = ++this.audioRenderSequence;
     const selectedId = this.selectedId;
-    // The repository rebuilds from immutable, separate input tracks. The
-    // app's rhythm track stays at unity; never substitute Video.volume here.
-    const task: Promise<RecordingClip | undefined> = RecordingRepository.render(clip, gain)
-      .then((updated: RecordingClip): RecordingClip => {
-        if (this.active && this.audioRenderSequence === sequence && this.selectedId === selectedId) {
-          if (updated.path !== clip.path) {
-            this.previewContinuation = {
-              clipId: updated.id, path: updated.path,
-              // ArkUI reports native video progress as whole seconds. Seeking
-              // to a fractional zero may produce no update and cannot be awaited.
-              timeSeconds: Math.floor(Math.min(this.previewTimeSeconds, Math.max(0, updated.durationMs / 1000 - 0.05))),
-              playing: this.previewPlaying && !this.practicePlaying(), prepared: false
-            };
-            // Keep another gain change from replacing a source whose seek is
-            // still pending; its native loading pause is not a user pause.
-            this.previewLoading = true;
-            this.videoController = new VideoController();
-            this.watchPreviewLoad(updated.id, updated.path);
-          }
-          this.clips = RecordingRepository.list(this.scope);
-          this.micGain = updated.renderedGain ?? gain;
-        }
-        return updated;
-      }).catch((error: Object): undefined => {
+    const task: Promise<RecordingClip | undefined> = this.drainAudioEdits(clip, selectedId, sequence)
+      .catch((error: Object): undefined => {
         logUserFailure('recording-mix', error);
         if (this.active && this.audioRenderSequence === sequence && this.selectedId === selectedId) {
+          const latest = RecordingRepository.get(selectedId);
+          if (latest !== undefined) {
+            this.micGain = latest.renderedGain ?? 1;
+            this.micShiftMs = Math.round((latest.renderedMicShiftUs ?? 0) / 1000);
+            this.requestedMicGain = this.desiredMicGain();
+            this.requestedMicShiftUs = this.desiredMicShiftUs();
+            this.applyRenderedClip(latest, latest.renderedGain ?? 1, latest.renderedMicShiftUs ?? 0);
+          }
           showUserNotice('声音处理未完成，原视频和独立音轨已保留，请重试', 'recording-mix');
         }
         return undefined;
@@ -353,16 +423,127 @@ struct RecordingLibraryPage {
         if (this.audioRenderTask === task) {
           this.audioRenderTask = undefined;
           this.renderingAudio = false;
+          if (this.active && (this.audioRenderSequence !== sequence || this.selectedId !== selectedId)) {
+            this.refresh();
+          }
         }
       });
     this.audioRenderTask = task;
     return task;
   }
 
+  private async drainAudioEdits(initial: RecordingClip, selectedId: string,
+    sequence: number): Promise<RecordingClip | undefined> {
+    let current = initial;
+    while (this.active && this.audioRenderSequence === sequence && this.selectedId === selectedId) {
+      const gain = this.requestedMicGain;
+      const micShiftUs = this.requestedMicShiftUs;
+      if (this.renderMatches(current, gain, micShiftUs)) {
+        this.applyRenderedClip(current, gain, micShiftUs);
+        return current;
+      }
+      // The repository always rebuilds from immutable stems. Its cached
+      // floating-point MIC residual avoids repeating echo fitting; if the user
+      // keeps editing, this loop skips intermediate preview source swaps.
+      const updated = await RecordingRepository.render(current, gain, micShiftUs);
+      if (!this.active || this.audioRenderSequence !== sequence || this.selectedId !== selectedId) {
+        return updated;
+      }
+      current = updated;
+      if (this.renderMatches(updated, this.requestedMicGain, this.requestedMicShiftUs)) {
+        this.applyRenderedClip(updated, gain, micShiftUs);
+        return updated;
+      }
+    }
+    return undefined;
+  }
+
+  private applyRenderedClip(updated: RecordingClip, gain: number, micShiftUs: number): void {
+    const displayed = this.selectedClip();
+    if (displayed !== undefined && updated.path !== displayed.path) {
+      this.cancelPreviewContinuation();
+      this.previewContinuation = {
+        clipId: updated.id, path: updated.path,
+        // ArkUI reports native video progress as whole seconds. Seeking
+        // to a fractional zero may produce no update and cannot be awaited.
+        timeSeconds: Math.floor(Math.min(this.previewTimeSeconds, Math.max(0, updated.durationMs / 1000 - 0.05))),
+        playing: this.previewPlaying && !this.practicePlaying(), prepared: false
+      };
+      this.previewLoading = true;
+      this.videoController = new VideoController();
+      this.previewReady = false;
+      this.coverPlayRequested = false;
+      this.watchPreviewLoad(updated.id, updated.path);
+    }
+    this.clips = RecordingRepository.list(this.scope);
+    if (Math.abs(this.desiredMicGain() - gain) < 0.001 && this.desiredMicShiftUs() === micShiftUs) {
+      this.micGain = gain;
+      this.micShiftMs = Math.round(micShiftUs / 1000);
+    }
+    this.drawMicAlignmentRuler();
+  }
+
   private changeMicGain(value: number, mode: SliderChangeMode): void {
     if (!this.canAdjustMic()) { return; }
     this.micGain = Math.max(0, Math.min(2, value));
     if (mode === SliderChangeMode.End || mode === SliderChangeMode.Click) { void this.renderSelectedAudio(); }
+  }
+
+  private changeMicShift(value: number, mode: SliderChangeMode): void {
+    if (!this.canAdjustMic()) { return; }
+    this.micShiftMs = Math.max(-MIC_SHIFT_LIMIT_MS,
+      Math.min(MIC_SHIFT_LIMIT_MS, Math.round(value / MIC_SHIFT_STEP_MS) * MIC_SHIFT_STEP_MS));
+    this.drawMicAlignmentRuler();
+    if (mode === SliderChangeMode.End || mode === SliderChangeMode.Click) { void this.renderSelectedAudio(); }
+  }
+
+  private nudgeMicShift(deltaMs: number): void {
+    if (!this.canAdjustMic()) { return; }
+    this.changeMicShift(this.micShiftMs + deltaMs, SliderChangeMode.Click);
+  }
+
+  private micShiftLabel(): string {
+    if (this.micShiftMs < 0) { return `人声提前 ${Math.abs(this.micShiftMs)} 毫秒`; }
+    if (this.micShiftMs > 0) { return `人声延后 ${this.micShiftMs} 毫秒`; }
+    return '人声不提前或延后';
+  }
+
+  private drawMicAlignmentRuler(): void {
+    if (!this.alignmentCanvasReady) { return; }
+    const width = this.alignmentCanvasWidth;
+    const height = MIC_ALIGNMENT_RULER_HEIGHT;
+    const middle = height / 2;
+    this.alignmentCanvas.clearRect(0, 0, width, height);
+    this.alignmentCanvas.strokeStyle = '#71817D';
+    this.alignmentCanvas.lineCap = 'round';
+    this.alignmentCanvas.lineWidth = 1;
+    this.alignmentCanvas.beginPath();
+    this.alignmentCanvas.moveTo(0, middle);
+    this.alignmentCanvas.lineTo(width, middle);
+    this.alignmentCanvas.stroke();
+    for (let index = 0; index < MIC_ALIGNMENT_TICK_COUNT; index++) {
+      const x = width * index / (MIC_ALIGNMENT_TICK_COUNT - 1);
+      const tickHalfHeight = index % 2 === 0 ? 6 : 3;
+      this.alignmentCanvas.beginPath();
+      this.alignmentCanvas.moveTo(x, middle - tickHalfHeight);
+      this.alignmentCanvas.lineTo(x, middle + tickHalfHeight);
+      this.alignmentCanvas.stroke();
+    }
+    const center = width / 2;
+    this.alignmentCanvas.strokeStyle = '#A34530';
+    this.alignmentCanvas.lineWidth = 1.5;
+    this.alignmentCanvas.beginPath();
+    this.alignmentCanvas.moveTo(center, middle - 13);
+    this.alignmentCanvas.lineTo(center, middle + 13);
+    this.alignmentCanvas.stroke();
+    const ratio = (this.micShiftMs + MIC_SHIFT_LIMIT_MS) / (MIC_SHIFT_LIMIT_MS * 2);
+    const marker = Math.max(1.5, Math.min(width - 1.5, ratio * width));
+    this.alignmentCanvas.strokeStyle = CORAL;
+    this.alignmentCanvas.lineWidth = 3;
+    this.alignmentCanvas.beginPath();
+    this.alignmentCanvas.moveTo(marker, middle - 15);
+    this.alignmentCanvas.lineTo(marker, middle + 15);
+    this.alignmentCanvas.stroke();
   }
 
   private requestShare(): void {
@@ -519,6 +700,43 @@ struct RecordingLibraryPage {
     } finally { this.busy = false; }
   }
 
+  private selectedCoverSource(): string {
+    const path = this.selectedClip()?.coverPath;
+    return path === undefined ? '' : fileUri.getUriFromPath(path);
+  }
+
+  private startPreviewFromCover(): void {
+    if (this.previewLoading || this.busy) { return; }
+    if (this.practicePlaying()) {
+      this.requestPreview();
+      return;
+    }
+    if (this.previewReady) {
+      this.videoController.start();
+    } else {
+      this.coverPlayRequested = true;
+    }
+  }
+
+  @Builder
+  private previewCover() {
+    Stack({ alignContent: Alignment.Center }) {
+      Image(this.selectedCoverSource()).width('100%').height('100%')
+        .objectFit(ImageFit.Contain).interpolation(ImageInterpolation.High)
+      Column({ space: 7 }) {
+        Stack({ alignContent: Alignment.Center }) {
+          Circle().width(48).height(48).fill('#D9FFF9EE').stroke(PAPER).strokeWidth(1.5)
+          Image($rawfile('comic/icons/play.svg')).width(19).height(19)
+        }.width(48).height(48)
+        if (this.previewLoading) {
+          Text('正在准备预览…').fontSize(10).fontWeight(900).fontColor(PAPER)
+        }
+      }
+    }.width('100%').height('100%').backgroundColor(INK)
+      .enabled(!this.previewLoading && !this.busy)
+      .onClick(() => this.startPreviewFromCover())
+  }
+
   @Builder
   private previewVideo() {
     // A two-value @Builder captures its initial parameters. Key the real Video
@@ -536,7 +754,10 @@ struct RecordingLibraryPage {
       .onError(() => {
         if (!this.previewSourceMatches(clip.id, clip.path)) { return; }
         this.cancelPreviewContinuation();
+        this.previewReady = false;
+        this.coverPlayRequested = false;
         this.previewPlaying = false;
+        this.previewCoverVisible = true;
         showUserNotice('这段视频暂时无法预览，可尝试保存相册后查看', 'recording-video-preview');
       })
     }, (clip: RecordingClip) => `${clip.id}:${clip.path}`)
@@ -546,11 +767,16 @@ struct RecordingLibraryPage {
   private clipCard(clip: RecordingClip) {
     Row({ space: 12 }) {
       Stack() {
-        Image($rawfile('comic/decor/recording_share_hero.png')).width(68).height(48).objectFit(ImageFit.Contain)
+        if (clip.coverPath !== undefined) {
+          Image(fileUri.getUriFromPath(clip.coverPath)).width('100%').height('100%')
+            .objectFit(ImageFit.Cover).interpolation(ImageInterpolation.High)
+        } else {
+          Image($rawfile('comic/decor/recording_share_hero.png')).width(68).height(48).objectFit(ImageFit.Contain)
+        }
         Circle().width(28).height(28).fill('#E6FFF9EE').stroke(INK).strokeWidth(1)
         Image($rawfile('comic/icons/play.svg')).width(14).height(14)
       }.width(76).height(58).backgroundColor(this.selectedId === clip.id ? LILAC : '#E4F2EB')
-        .border({ width: 1, color: INK }).borderRadius(5)
+        .border({ width: 1, color: INK }).borderRadius(5).clip(true)
       Column({ space: 5 }) {
         Text(this.dateLabel(clip.createdAt)).fontSize(14).fontWeight(900).fontColor(INK).width('100%')
         Text(`${this.durationLabel(clip.durationMs)} · ${clip.interrupted ? '中断后已保留' : '画面 / 节奏 / MIC'}`)
@@ -704,6 +930,10 @@ struct RecordingLibraryPage {
                   }.width('100%')
                 } else {
                   this.previewVideo()
+                  if (this.selectedClip()?.coverPath !== undefined &&
+                    (this.previewCoverVisible || this.previewLoading)) {
+                    this.previewCover()
+                  }
                 }
               }.width('100%').height(VIDEO_PREVIEW_HEIGHT).backgroundColor(INK)
                 .border({ width: 2, color: INK }).borderRadius(8).clip(true)
@@ -734,6 +964,48 @@ struct RecordingLibraryPage {
                   Blank()
                   Text('200%').fontSize(9).fontColor('#625C54')
                 }.width('100%')
+                Divider().strokeWidth(1).color('#B9CCC6').margin({ top: 7, bottom: 5 })
+                Row() {
+                  Text('人声对齐').fontSize(12).fontWeight(900).fontColor(INK)
+                  Blank()
+                  Text('范围 ±300ms').fontSize(9).fontWeight(FontWeight.Bold).fontColor('#625C54')
+                }.width('100%')
+                Row({ space: 8 }) {
+                  Button({ type: ButtonType.Normal }) {
+                    Text('‹').fontSize(27).fontWeight(900).fontColor(INK)
+                  }.width(38).height(38).padding(0).backgroundColor('#D4DDDA')
+                    .border({ width: 1, color: INK }).borderRadius(7).enabled(this.canAdjustMic())
+                    .accessibilityText('人声提前 10 毫秒')
+                    .onClick(() => this.nudgeMicShift(-MIC_SHIFT_STEP_MS))
+                  Stack({ alignContent: Alignment.Center }) {
+                    Canvas(this.alignmentCanvas).width('100%').height(MIC_ALIGNMENT_RULER_HEIGHT)
+                      .hitTestBehavior(HitTestMode.None)
+                      .onReady(() => {
+                        this.alignmentCanvasReady = true;
+                        this.drawMicAlignmentRuler();
+                      })
+                      .onAreaChange((_oldArea, area) => {
+                        this.alignmentCanvasWidth = Number(area.width);
+                        this.drawMicAlignmentRuler();
+                      })
+                    Slider({
+                      value: this.micShiftMs, min: -MIC_SHIFT_LIMIT_MS, max: MIC_SHIFT_LIMIT_MS,
+                      step: MIC_SHIFT_STEP_MS, style: SliderStyle.OutSet
+                    }).width('100%').height(MIC_ALIGNMENT_RULER_HEIGHT).opacity(0.01)
+                      .enabled(this.canAdjustMic())
+                      .accessibilityText(this.micShiftLabel())
+                      .onChange((value: number, mode: SliderChangeMode) => this.changeMicShift(value, mode))
+                  }.layoutWeight(1).height(MIC_ALIGNMENT_RULER_HEIGHT)
+                  Button({ type: ButtonType.Normal }) {
+                    Text('›').fontSize(27).fontWeight(900).fontColor(INK)
+                  }.width(38).height(38).padding(0).backgroundColor('#D4DDDA')
+                    .border({ width: 1, color: INK }).borderRadius(7).enabled(this.canAdjustMic())
+                    .accessibilityText('人声延后 10 毫秒')
+                    .onClick(() => this.nudgeMicShift(MIC_SHIFT_STEP_MS))
+                }.width('100%')
+                Text(this.micShiftLabel()).fontSize(10).fontWeight(FontWeight.Bold)
+                  .fontColor(this.micShiftMs === 0 ? '#625C54' : '#A34530')
+                  .textAlign(TextAlign.Center).width('100%')
                 if (!this.hasSeparateAudio()) {
                   Text('旧版视频已合并声音，重新录制可单独调 MIC。')
                     .fontSize(10).fontColor('#777065').lineHeight(17).width('100%')
@@ -741,7 +1013,9 @@ struct RecordingLibraryPage {
                   Text('请先确认或取消本次分享，再调整这段作品的 MIC。')
                     .fontSize(10).fontColor('#777065').lineHeight(17).width('100%')
                 } else {
-                  Text(this.renderingAudio ? '正在处理新音量，完成后从当前位置续播…' : '松开滑块后应用新音量，播放位置会保留。保存与分享使用当前音量。')
+                  Text(this.renderingAudio ?
+                    '正在应用声音设置；可继续调节，将自动合并到最后一次，完成后从当前位置续播…' :
+                    '松开后应用音量与对齐。首次会准备快速 MIC 轨，之后调整更快；保存与分享使用当前设置。')
                     .fontSize(10).fontColor('#625C54').lineHeight(17).width('100%')
                 }
               }.width('100%').padding(12).backgroundColor('#E8F2EB').border({ width: 1, color: INK }).borderRadius(7)

@@ -34,6 +34,70 @@ struct Fit {
     double referenceRms = 0;
 };
 
+struct EnvelopeDelay {
+    bool valid = false;
+    int frames = 0;
+    double correlation = 0;
+};
+
+/**
+ * Tonal clicks have many sample-level phase peaks. A 1 ms RMS envelope keeps
+ * delay discovery tied to the physical onset; the FIR handles sub-ms phase.
+ */
+inline EnvelopeDelay EstimateEnvelopeDelay(const int16_t *reference, const int16_t *microphone,
+    int frameCount, int maximumLagFrames, int channel)
+{
+    constexpr int ENVELOPE_FRAMES = 48;
+    EnvelopeDelay result;
+    if (reference == nullptr || microphone == nullptr || frameCount < 4800 ||
+        maximumLagFrames < 0 || channel < 0 || channel >= CHANNELS) return result;
+    const int bins = frameCount / ENVELOPE_FRAMES;
+    const int maximumLagBins = std::min(maximumLagFrames / ENVELOPE_FRAMES,
+        std::max(0, (bins - 50) / 2));
+    if (maximumLagBins <= 0) return result;
+    std::vector<double> referenceEnvelope(bins), microphoneEnvelope(bins);
+    for (int bin = 0; bin < bins; ++bin) {
+        double referenceEnergy = 0, microphoneEnergy = 0;
+        for (int frame = 0; frame < ENVELOPE_FRAMES; ++frame) {
+            const int index = (bin * ENVELOPE_FRAMES + frame) * CHANNELS + channel;
+            const double x = reference[index];
+            const double y = microphone[index];
+            referenceEnergy += x * x;
+            microphoneEnergy += y * y;
+        }
+        referenceEnvelope[bin] = std::sqrt(referenceEnergy / ENVELOPE_FRAMES);
+        microphoneEnvelope[bin] = std::sqrt(microphoneEnergy / ENVELOPE_FRAMES);
+    }
+    const int first = maximumLagBins;
+    const int end = bins - maximumLagBins;
+    for (int delay = -maximumLagBins; delay <= maximumLagBins; ++delay) {
+        double referenceSum = 0, microphoneSum = 0, referenceSquare = 0;
+        double microphoneSquare = 0, product = 0;
+        int count = 0;
+        for (int bin = first; bin < end; ++bin) {
+            const double x = referenceEnvelope[bin - delay];
+            const double y = microphoneEnvelope[bin];
+            referenceSum += x;
+            microphoneSum += y;
+            referenceSquare += x * x;
+            microphoneSquare += y * y;
+            product += x * y;
+            ++count;
+        }
+        const double referenceVariance = referenceSquare - referenceSum * referenceSum / count;
+        const double microphoneVariance = microphoneSquare - microphoneSum * microphoneSum / count;
+        const double covariance = product - referenceSum * microphoneSum / count;
+        if (!(referenceVariance > 1) || !(microphoneVariance > 1) || !(covariance > 0)) continue;
+        const double correlation = covariance / std::sqrt(referenceVariance * microphoneVariance);
+        if (correlation > result.correlation) {
+            result.correlation = correlation;
+            result.frames = delay * ENVELOPE_FRAMES;
+        }
+    }
+    result.valid = result.correlation >= 0.20;
+    return result;
+}
+
 inline Fit Measure(const int16_t *reference, const int16_t *microphone, int firstFrame,
     int endFrame, int delay, int channel, int stride, int validationPart = -1,
     bool allowNegativeCovariance = false)
@@ -199,6 +263,7 @@ struct EchoFirChannelEstimate {
     double trainingReduction = 0;
     double validationReduction = 0;
     double validationCorrelation = 0;
+    double appliedScale = 1;
     bool revalidated = false;
 };
 
@@ -255,6 +320,36 @@ inline double PredictAt(const int16_t *reference, int microphoneFrame, int chann
     return prediction;
 }
 
+/**
+ * Ridge fitting determines the response shape; held-out data determines the
+ * safe amplitude. Using the lower train/validation optimum with 2% headroom
+ * guarantees a small positive residual instead of an audible inverse echo.
+ */
+inline bool ApplyConservativeFirScale(const int16_t *reference, const int16_t *microphone,
+    int first, int end, int channel, EchoFirChannelEstimate &estimate)
+{
+    double product[2]{}, predictionEnergy[2]{};
+    for (int frame = first; frame < end; ++frame) {
+        const int part = (frame / 480) & 1;
+        const double prediction = PredictAt(reference, frame, channel, estimate) / 32768.0;
+        const double observed = microphone[frame * 2 + channel] / 32768.0;
+        product[part] += prediction * observed;
+        predictionEnergy[part] += prediction * prediction;
+    }
+    if (!(predictionEnergy[0] > 1e-12) || !(predictionEnergy[1] > 1e-12)) return false;
+    const double trainingScale = product[0] / predictionEnergy[0];
+    const double validationScale = product[1] / predictionEnergy[1];
+    if (!std::isfinite(trainingScale) || !std::isfinite(validationScale) ||
+        !(trainingScale > 0) || !(validationScale > 0)) return false;
+    constexpr double UNDER_CANCEL_HEADROOM = 0.98;
+    const double scale = std::min({1.0, trainingScale, validationScale}) *
+        UNDER_CANCEL_HEADROOM;
+    if (scale < 0.05) return false;
+    for (auto &tap : estimate.taps) tap *= scale;
+    estimate.appliedScale *= scale;
+    return true;
+}
+
 inline void ValidateFir(const int16_t *reference, const int16_t *microphone,
     int first, int end, int channel, EchoFirChannelEstimate &estimate)
 {
@@ -307,12 +402,18 @@ inline StereoEchoFirEstimate EstimateStereoEchoFir(const int16_t *alignedInner,
     const int stride = std::max(16, ((end - first + MAX_TRAINING_ROWS * 2 - 1) /
         (MAX_TRAINING_ROWS * 2) + 15) / 16 * 16);
     for (int channel = 0; channel < 2; ++channel) {
-        const int candidateDelays[2] = {coarse.channels[channel].delayFrames, positive.channels[channel].delayFrames};
+        const auto envelope = echo_detail::EstimateEnvelopeDelay(alignedInner, alignedMic,
+            frameCount, maxLag, channel);
+        const int candidateDelays[2] = {
+            envelope.valid ? envelope.frames : coarse.channels[channel].delayFrames,
+            positive.channels[channel].delayFrames
+        };
+        const int candidateCount = envelope.valid ? 1 : 2;
         result.channels[channel].delayFrames = candidateDelays[0];
-        // Tonal references can have neighboring positive and negative peaks.
-        // Compare both bounded candidates by held-out prediction quality,
-        // rather than letting the strongest inverted peak displace a valid fit.
-        for (int candidate = 0; candidate < 2; ++candidate) {
+        // An envelope lock is deliberately the only candidate: neighboring
+        // sample-phase peaks alternate with the 660/880 Hz beat sequence.
+        // Raw signed candidates remain a fallback for low-envelope material.
+        for (int candidate = 0; candidate < candidateCount; ++candidate) {
             if (candidate == 1 && candidateDelays[1] == candidateDelays[0]) continue;
             EchoFirChannelEstimate estimate;
             estimate.delayFrames = candidateDelays[candidate];
@@ -341,6 +442,8 @@ inline StereoEchoFirEstimate EstimateStereoEchoFir(const int16_t *alignedInner,
             double norm = 0;
             for (double tap : estimate.taps) norm += tap * tap;
             if (!std::isfinite(norm) || norm > maximumReferenceGain * maximumReferenceGain) continue;
+            if (!echo_detail::ApplyConservativeFirScale(alignedInner, alignedMic,
+                first, end, channel, estimate)) continue;
             echo_detail::ValidateFir(alignedInner, alignedMic, first, end, channel, estimate);
             auto &best = result.channels[channel];
             if ((estimate.enabled && (!best.enabled || estimate.validationReduction > best.validationReduction)) ||
@@ -390,14 +493,17 @@ inline EchoFirChannelEstimate RevalidateEchoFir(const EchoFirChannelEstimate &pr
     if (!std::isfinite(trainingScale) || !std::isfinite(validationScale) ||
         trainingScale < 0.05 || trainingScale > 2 || !(validationScale > 0)) return rejected;
     const double ratio = validationScale / trainingScale;
-    if (ratio < 0.5 || ratio > 2 || norm * trainingScale * trainingScale > 16) return rejected;
+    constexpr double UNDER_CANCEL_HEADROOM = 0.98;
+    const double safeScale = std::min({1.0, trainingScale, validationScale}) * UNDER_CANCEL_HEADROOM;
+    if (ratio < 0.5 || ratio > 2 || safeScale < 0.05 || norm * safeScale * safeScale > 16) return rejected;
     auto result = previous;
     result.enabled = false;
     result.revalidated = true;
     result.trainingReduction = 0;
     result.validationReduction = 0;
     result.validationCorrelation = 0;
-    for (auto &tap : result.taps) tap *= trainingScale;
+    for (auto &tap : result.taps) tap *= safeScale;
+    result.appliedScale *= safeScale;
     echo_detail::ValidateFir(alignedInner, alignedMic, MARGIN, end, channel, result);
     // Weak echo can explain little of a loud independent near-end signal.
     // Only a known shape with repeatable gain may use this smaller residual
