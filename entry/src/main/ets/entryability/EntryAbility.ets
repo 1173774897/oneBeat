@@ -2,10 +2,14 @@ import { AbilityConstant, UIAbility, Want } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
 import { DOMAIN, TAG } from '../common/Constants';
+import { RecordingCoordinator } from '../recording/RecordingCoordinator';
+import { RecordingRepository } from '../recording/RecordingRepository';
+import { RecordingShareService } from '../sharing/RecordingShareService';
+import { initializeShareCheckInStore, refreshShareCheckInClock } from '../store/ShareCheckInStore';
 import { DrumSampleBank } from '../audio/DrumSampleBank';
 import { AppSession } from '../app/AppSession';
 import { SessionBackgroundKeeper } from '../session/SessionBackgroundKeeper';
-import { initializeEntitlementCache, isSceneAccessible } from '../store/EntitlementStore';
+import { initializeEntitlementCache, initializeMonthlyPassCache, isSceneAccessible } from '../store/EntitlementStore';
 import { startStoreColdStartBootstrap } from '../store/StoreBootstrapSync';
 import { bindStoreSessionPersistenceContext } from '../store/StoreSessionPersistence';
 import { bindAudioLatencyPersistenceContext, restoreCalibrationMs, restoreInputLatencyMs } from '../store/AudioLatencyPersistence';
@@ -33,26 +37,67 @@ export default class EntryAbility extends UIAbility {
     AppStorage.setOrCreate('safeAreaBottom', 0);
     AppStorage.setOrCreate('storeEntitlementEpoch', 0);
     initializeEntitlementCache();
+    AppStorage.setOrCreate('recordingLibraryEpoch', 0);
+    AppStorage.setOrCreate('recordingShareEpoch', 0);
+    AppStorage.setOrCreate('recordingPendingClipId', '');
+    void this.prepareRecordingServices();
+    void this.prepareLocalEntitlements();
     const storedScene = AppStorage.get<string>('selectedSceneKey') ?? 'sunset_coast';
     AppStorage.setOrCreate('selectedSceneKey', isSceneAccessible(storedScene) ? storedScene : 'sunset_coast');
     AppStorage.setOrCreate('playerDisplayName', '');
-    void startStoreColdStartBootstrap().catch((error: Object) => {
-      hilog.warn(DOMAIN, TAG, `Store cold start bootstrap failed: ${JSON.stringify(error)}`);
+
+  }
+
+  private async prepareLocalEntitlements(): Promise<void> {
+    try {
+      await initializeMonthlyPassCache(this.context);
+    } catch (_error) {
+      hilog.warn(DOMAIN, TAG, 'Restore monthly pass summary failed');
+    }
+    // Network refresh may repair an unknown membership cache, but local trial
+    // restoration remains independent of network availability.
+    void startStoreColdStartBootstrap().catch(() => {
+      hilog.warn(DOMAIN, TAG, 'Store cold start bootstrap failed');
     });
+    void initializeShareCheckInStore(this.context).catch(() => {
+      hilog.warn(DOMAIN, TAG, 'Restore local share check-in ledger failed');
+    });
+  }
+
+  private async prepareRecordingServices(): Promise<void> {
+    try {
+      await RecordingRepository.initialize(this.context);
+      await RecordingCoordinator.initialize(this.context);
+    } catch (_error) {
+      hilog.warn(DOMAIN, TAG, 'Prepare recording services failed');
+      return;
+    }
+    try {
+      await RecordingShareService.initialize(this.context);
+    } catch (_error) {
+      // Sharing metadata cannot prevent a local video from being recorded.
+      hilog.warn(DOMAIN, TAG, 'Restore pending video share failed');
+    }
   }
 
   onDestroy(): void {
     hilog.info(DOMAIN, TAG, 'EntryAbility onDestroy');
+    RecordingCoordinator.handleBackground();
     AppSession.clear();
   }
 
   onForeground(): void {
     hilog.info(DOMAIN, TAG, 'EntryAbility onForeground');
+    RecordingCoordinator.handleForeground();
     AppSession.handleAppForeground();
+    void refreshShareCheckInClock().catch(() => {
+      hilog.warn(DOMAIN, TAG, 'Refresh local trial clock failed');
+    });
   }
 
   onBackground(): void {
     hilog.info(DOMAIN, TAG, 'EntryAbility onBackground');
+    RecordingCoordinator.handleBackground();
     AppSession.handleAppBackground();
   }
 

@@ -470,6 +470,7 @@ struct StorePage {
       return;
     }
     this.purchaseBusy = true;
+    AppStorage.setOrCreate('storePurchasePending', true);
     const lifetime = this.storeLifetimeEpoch;
     const productId = this.pendingProductId;
     const isPass = this.pendingType === 'pass';
@@ -553,6 +554,7 @@ struct StorePage {
       this.storeActionStatus = userErrorMessage(e, '购买未完成，请重试；已支付可恢复购买');
       this.storeActionRecovery = 'purchase';
     } finally {
+      AppStorage.setOrCreate('storePurchasePending', false);
       if (this.isCurrentStorePage(lifetime)) {
         this.purchaseBusy = false;
       }

@@ -1,8 +1,162 @@
 import { StoreBootstrap } from './StoreModels';
+import { MonotonicClock } from '../common/MonotonicClock';
+import { common } from '@kit.AbilityKit';
+import { preferences } from '@kit.ArkData';
 
 const ENTITLEMENT_CACHE_SCHEMA: number = 5;
 const DEFAULT_CHARACTERS: string[] = [];
 const DEFAULT_SCENES: string[] = ['sunset_coast'];
+const MONTHLY_PASS_PREFERENCES: string = 'onebeat_monthly_pass_summary';
+const MONTHLY_PASS_KEY: string = 'summary_v1';
+
+interface MonthlyPassSummary {
+  active: boolean;
+  expiresAt: string;
+  capturedAt: number;
+}
+
+let monthlyPassPref: preferences.Preferences | undefined = undefined;
+let monthlyPassSummary: MonthlyPassSummary | undefined = undefined;
+let monthlyPassInitialization: Promise<void> | undefined = undefined;
+let monthlyPassWrites: Promise<void> = Promise.resolve();
+let monthlyPassRevision: number = 0;
+let monthlyPassKnown: boolean = false;
+
+function setMonthlyPassKnown(known: boolean): void {
+  monthlyPassKnown = known;
+  AppStorage.setOrCreate('monthlyPassRewardStateKnown', known);
+}
+
+function projectRestoredMonthlyPass(summary: MonthlyPassSummary): void {
+  AppStorage.setOrCreate('storePassActive', summary.active);
+  AppStorage.setOrCreate('storePassExpiresAt', summary.expiresAt);
+  AppStorage.setOrCreate('storeEntitlementEpoch', (AppStorage.get<number>('storeEntitlementEpoch') ?? 0) + 1);
+}
+
+function validMonthlyPassSummary(summary: MonthlyPassSummary): boolean {
+  return typeof summary.active === 'boolean' && typeof summary.expiresAt === 'string' &&
+    Number.isFinite(summary.capturedAt) && summary.capturedAt >= 0 &&
+    (!summary.active || Number.isFinite(Date.parse(summary.expiresAt)));
+}
+
+function persistMonthlyPassSummary(summary: MonthlyPassSummary, revision: number): Promise<void> {
+  const operation = monthlyPassWrites.then(async (): Promise<void> => {
+    const pref = monthlyPassPref;
+    if (pref === undefined || revision !== monthlyPassRevision) {
+      return;
+    }
+    try {
+      if (!validMonthlyPassSummary(summary)) {
+        throw new Error('月卡状态暂时无法核对，请稍后重试');
+      }
+      // Persist only membership facts. Bootstrap also carries purchase binding
+      // data, which must never be copied into this independent local cache.
+      await pref.put(MONTHLY_PASS_KEY, JSON.stringify(summary));
+      await pref.flush();
+      if (revision === monthlyPassRevision) {
+        setMonthlyPassKnown(true);
+      }
+    } catch (_error) {
+      if (revision === monthlyPassRevision) {
+        setMonthlyPassKnown(false);
+      }
+      throw new Error('月卡状态暂时无法核对，请稍后重试');
+    }
+  });
+  monthlyPassWrites = operation.catch(() => {});
+  return operation;
+}
+
+function acceptMonthlyPassSummary(bootstrap: StoreBootstrap): boolean {
+  const parsedTime = Date.parse(bootstrap.serverTime);
+  const capturedAt = Number.isFinite(parsedTime) ? parsedTime : Date.now();
+  if (monthlyPassSummary !== undefined && capturedAt < monthlyPassSummary.capturedAt) {
+    // Concurrent catalog/purchase requests can resolve out of order. A response
+    // older than our last accepted server snapshot cannot revoke newer access.
+    return false;
+  }
+  const summary: MonthlyPassSummary = {
+    active: bootstrap.pass.active, expiresAt: bootstrap.pass.expiresAt ?? '', capturedAt
+  };
+  monthlyPassSummary = summary;
+  const revision = ++monthlyPassRevision;
+  setMonthlyPassKnown(false);
+  if (monthlyPassPref !== undefined) {
+    void persistMonthlyPassSummary(summary, revision).catch(() => {
+      console.warn('[MonthlyPassCache] persistence failed');
+    });
+  }
+  return true;
+}
+
+async function restoreMonthlyPassCache(context: common.Context): Promise<void> {
+  const restoreRevision = monthlyPassRevision;
+  const pref = await preferences.getPreferences(context, MONTHLY_PASS_PREFERENCES);
+  monthlyPassPref = pref;
+  const raw = await pref.get(MONTHLY_PASS_KEY, '') as string;
+  if (monthlyPassRevision !== restoreRevision || monthlyPassSummary !== undefined) {
+    const latest = monthlyPassSummary;
+    if (latest !== undefined) {
+      await persistMonthlyPassSummary(latest, monthlyPassRevision);
+    }
+    return;
+  }
+  if (raw.length > 0) {
+    const restored = JSON.parse(raw) as MonthlyPassSummary;
+    if (!validMonthlyPassSummary(restored)) {
+      throw new Error('月卡状态暂时无法核对，请稍后重试');
+    }
+    monthlyPassSummary = restored;
+    projectRestoredMonthlyPass(restored);
+    setMonthlyPassKnown(true);
+    return;
+  }
+  const sessionPref = await preferences.getPreferences(context, 'onebeat_store_session');
+  const diskToken = await sessionPref.get('storeAccessToken', '') as string;
+  if (monthlyPassRevision !== restoreRevision) {
+    const latest = monthlyPassSummary;
+    if (latest !== undefined) {
+      await persistMonthlyPassSummary(latest, monthlyPassRevision);
+    }
+    return;
+  }
+  if (diskToken.length > 0 || (AppStorage.get<string>('storeAccessToken') ?? '').length > 0) {
+    // An existing account without a summary is unknown until bootstrap arrives;
+    // treating it as a new install could grant a member an unintended trial.
+    setMonthlyPassKnown(false);
+    return;
+  }
+  const fresh: MonthlyPassSummary = { active: false, expiresAt: '', capturedAt: 0 };
+  monthlyPassSummary = fresh;
+  await persistMonthlyPassSummary(fresh, ++monthlyPassRevision);
+}
+
+/** Restore membership before local reward decisions, including offline launches. */
+export async function initializeMonthlyPassCache(context: common.Context): Promise<void> {
+  if (monthlyPassInitialization === undefined) {
+    monthlyPassInitialization = restoreMonthlyPassCache(context).catch((error: Error) => {
+      monthlyPassInitialization = undefined;
+      throw error;
+    });
+  }
+  await monthlyPassInitialization;
+}
+
+export function isMonthlyPassRewardStateKnown(): boolean {
+  return monthlyPassKnown;
+}
+
+/** Wait only for local restore/writes; unknown network state leaves a share pending. */
+export async function waitForMonthlyPassCache(): Promise<void> {
+  if (monthlyPassInitialization !== undefined) {
+    await monthlyPassInitialization.catch(() => {});
+  }
+  let previous: Promise<void>;
+  do {
+    previous = monthlyPassWrites;
+    await previous;
+  } while (previous !== monthlyPassWrites);
+}
 
 function normalizeCharacterKey(key: string): string {
   // Legacy matchman was a free default and must not silently grant the new paid lamp.
@@ -104,6 +258,9 @@ export function initializeEntitlementCache(): void {
 }
 
 export function applyStoreBootstrap(bootstrap: StoreBootstrap): void {
+  if (!acceptMonthlyPassSummary(bootstrap)) {
+    return;
+  }
   const characters: string[] = [];
   const scenes: string[] = [];
   let proActive = false;
@@ -210,6 +367,81 @@ export function isSceneAccessible(key: string): boolean {
 }
 
 export function isProDrumMachineAccessible(): boolean {
+  return resolveDrumAccess().allowed;
+}
+
+export interface DrumAccess {
+  allowed: boolean;
+  source: string;
+  expiresAt: number;
+}
+
+/** Calendar rewards never change the audio clock; this anchor only ages access. */
+export function currentDrumAccessTime(): number {
+  const wallAnchor = AppStorage.get<number>('shareTrialClockWallAnchor') ?? 0;
+  const monoAnchor = AppStorage.get<number>('shareTrialClockMonoAnchor') ?? 0;
+  const lastObserved = AppStorage.get<number>('shareLastObservedWallMs') ?? 0;
+  const elapsed = wallAnchor > 0 ? Math.max(0, MonotonicClock.nowMs() - monoAnchor) : 0;
+  return Math.max(Date.now(), lastObserved, wallAnchor + elapsed);
+}
+
+export function isMonthlyPassActive(now: number = Date.now()): boolean {
   initializeEntitlementCache();
-  return AppStorage.get<boolean>('storeProDrumMachine') === true;
+  if (AppStorage.get<boolean>('storePassActive') !== true) {
+    return false;
+  }
+  const expiresAt = Date.parse(AppStorage.get<string>('storePassExpiresAt') ?? '');
+  return Number.isFinite(expiresAt) && expiresAt > now;
+}
+
+export function resolveDrumAccess(now?: number): DrumAccess {
+  initializeEntitlementCache();
+  // The campaign's rollback floor only restricts its own trial. An anomalous
+  // local check-in clock must not revoke otherwise valid paid membership.
+  const formalNow = now ?? Date.now();
+  const trialNow = now ?? currentDrumAccessTime();
+  if (isMonthlyPassActive(formalNow)) {
+    return { allowed: true, source: 'monthly',
+      expiresAt: Date.parse(AppStorage.get<string>('storePassExpiresAt') ?? '') };
+  }
+  const raw = AppStorage.get<string>('storeBootstrapCache') ?? '';
+  if (raw.length > 0) {
+    try {
+      const bootstrap = JSON.parse(raw) as StoreBootstrap;
+      const feature = bootstrap.items.find((item) => item.itemKey === 'feature.pro_drum_machine');
+      if (feature !== undefined && feature.access.allowed) {
+        const expiry = feature.access.validUntil ?? '';
+        const expiresAt = expiry.length > 0 ? Date.parse(expiry) : 0;
+        const reason = feature.access.reason.toUpperCase();
+        // A pass-derived cached feature cannot outlive the pass. Independent
+        // purchased/promotional access may still have its own valid deadline.
+        const passDerived = reason.indexOf('PASS') >= 0 || reason.indexOf('SUBSCRIPTION') >= 0;
+        if (!passDerived && (expiresAt > formalNow || (expiresAt === 0 && !bootstrap.pass.active))) {
+          return { allowed: true, source: 'owned', expiresAt };
+        }
+      }
+    } catch (_e) {
+    }
+  } else if (AppStorage.get<boolean>('storeProDrumMachine') === true &&
+    AppStorage.get<boolean>('storePassActive') !== true) {
+    return { allowed: true, source: 'owned', expiresAt: 0 };
+  }
+  const trialExpiresAt = AppStorage.get<number>('shareTrialExpiresAt') ?? 0;
+  if (trialExpiresAt > trialNow) {
+    return { allowed: true, source: 'trial', expiresAt: trialExpiresAt };
+  }
+  return { allowed: false, source: 'locked', expiresAt: 0 };
+}
+
+/** All campaign dates and deadlines are shown in Beijing time on every device. */
+export function formatTrialExpiry(ms: number): string {
+  if (!Number.isFinite(ms) || ms <= 0) {
+    return '';
+  }
+  const date = new Date(ms + 8 * 3600000);
+  const month = `${date.getUTCMonth() + 1}`.padStart(2, '0');
+  const day = `${date.getUTCDate()}`.padStart(2, '0');
+  const hour = `${date.getUTCHours()}`.padStart(2, '0');
+  const minute = `${date.getUTCMinutes()}`.padStart(2, '0');
+  return `${month}/${day} ${hour}:${minute}`;
 }

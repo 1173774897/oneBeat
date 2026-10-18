@@ -18,6 +18,8 @@ export interface TransportControlHandler {
 export class SessionBackgroundKeeper {
   private static context: Context | undefined = undefined;
   private static active: boolean = false;
+  private static recordingActive: boolean = false;
+  private static backgroundTaskStarted: boolean = false;
   private static operation: Promise<void> = Promise.resolve();
   private static session: avSession.AVSession | undefined = undefined;
   private static controlHandler: TransportControlHandler | undefined = undefined;
@@ -40,23 +42,21 @@ export class SessionBackgroundKeeper {
    */
   static start(showMediaCard: boolean): Promise<void> {
     SessionBackgroundKeeper.operation = SessionBackgroundKeeper.operation.then(async () => {
-      if (SessionBackgroundKeeper.active || SessionBackgroundKeeper.context === undefined) {
+      if (SessionBackgroundKeeper.context === undefined) {
+        return;
+      }
+      if (SessionBackgroundKeeper.active) {
+        if (SessionBackgroundKeeper.session === undefined) {
+          try { await SessionBackgroundKeeper.ensureAvSession(showMediaCard); }
+          catch (err) { console.warn(`SessionBackgroundKeeper media card: ${(err as Error).message}`); }
+        }
         return;
       }
       try {
-        const agent = await wantAgent.getWantAgent({
-          wants: [{ bundleName: BUNDLE_NAME, abilityName: ABILITY_NAME }],
-          actionType: wantAgent.OperationType.START_ABILITY,
-          requestCode: 9527,
-          actionFlags: [wantAgent.WantAgentFlags.UPDATE_PRESENT_FLAG]
-        });
-        await backgroundTaskManager.startBackgroundRunning(
-          SessionBackgroundKeeper.context,
-          ['audioPlayback', 'multiDeviceConnection'],
-          agent
-        );
-        await SessionBackgroundKeeper.ensureAvSession(showMediaCard);
+        await SessionBackgroundKeeper.applyBackgroundModes(true, SessionBackgroundKeeper.recordingActive);
+        // The background owner exists even if its optional media card fails.
         SessionBackgroundKeeper.active = true;
+        await SessionBackgroundKeeper.ensureAvSession(showMediaCard);
         await SessionBackgroundKeeper.ensureRunningLock();
       } catch (err) {
         console.warn(`SessionBackgroundKeeper start: ${(err as Error).message}`);
@@ -72,7 +72,7 @@ export class SessionBackgroundKeeper {
       }
       try {
         await SessionBackgroundKeeper.destroyAvSession();
-        await backgroundTaskManager.stopBackgroundRunning(SessionBackgroundKeeper.context);
+        await SessionBackgroundKeeper.applyBackgroundModes(false, SessionBackgroundKeeper.recordingActive);
       } catch (err) {
         console.warn(`SessionBackgroundKeeper stop: ${(err as Error).message}`);
       } finally {
@@ -81,6 +81,52 @@ export class SessionBackgroundKeeper {
       }
     });
     return SessionBackgroundKeeper.operation;
+  }
+
+  /** A UIAbility owns one task: capture must extend it without releasing team audio/connection. */
+  static setRecordingActive(active: boolean): Promise<void> {
+    const task = SessionBackgroundKeeper.operation.then(async () => {
+      if (SessionBackgroundKeeper.recordingActive === active) {
+        return;
+      }
+      await SessionBackgroundKeeper.applyBackgroundModes(SessionBackgroundKeeper.active, active);
+      SessionBackgroundKeeper.recordingActive = active;
+    });
+    SessionBackgroundKeeper.operation = task.catch(() => {});
+    return task;
+  }
+
+  private static async applyBackgroundModes(team: boolean, recording: boolean): Promise<void> {
+    const context = SessionBackgroundKeeper.context;
+    if (context === undefined) {
+      throw new Error('后台任务尚未准备好，请稍后重试');
+    }
+    const modes: string[] = [];
+    if (team) {
+      modes.push('audioPlayback', 'multiDeviceConnection');
+    }
+    if (recording) {
+      modes.push('audioRecording');
+    }
+    if (modes.length === 0) {
+      if (SessionBackgroundKeeper.backgroundTaskStarted) {
+        await backgroundTaskManager.stopBackgroundRunning(context);
+        SessionBackgroundKeeper.backgroundTaskStarted = false;
+      }
+      return;
+    }
+    if (SessionBackgroundKeeper.backgroundTaskStarted) {
+      await backgroundTaskManager.updateBackgroundRunning(context, modes);
+      return;
+    }
+    const agent = await wantAgent.getWantAgent({
+      wants: [{ bundleName: BUNDLE_NAME, abilityName: ABILITY_NAME }],
+      actionType: wantAgent.OperationType.START_ABILITY,
+      requestCode: 9527,
+      actionFlags: [wantAgent.WantAgentFlags.UPDATE_PRESENT_FLAG]
+    });
+    await backgroundTaskManager.startBackgroundRunning(context, modes, agent);
+    SessionBackgroundKeeper.backgroundTaskStarted = true;
   }
 
   /**

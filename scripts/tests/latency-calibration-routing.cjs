@@ -120,6 +120,7 @@ function harness(initialWireless = true, leader = true) {
     '../network/p2p/BleRoomDiscovery': { BleRoomDiscovery: class { async stopLeaderAdvertising() {} } },
     '../network/p2p/P2pInvitation': {},
     '../common/UserFeedback': { showUserNotice: message => toasts.push(message), logUserFailure() {} },
+    '../store/EntitlementStore': { isProDrumMachineAccessible: () => true },
     '../common/Constants': { PROTOCOL_VERSION: 6 },
     '../common/MonotonicClock': { MonotonicClock: { nowMs: () => now } },
     '../common/MeterModel': { defaultBeatPointStates: () => [] },

@@ -5,5 +5,7 @@
   "main": "",
   "author": "",
   "license": "Apache-2.0",
-  "dependencies": {}
+  "dependencies": {
+    "libonebeat_recording.so": "file:./src/main/cpp/types/libonebeat_recording"
+  }
 }

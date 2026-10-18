@@ -25,21 +25,37 @@ const suites = [
   'drum-preview-live-update.cjs',
   'latency-calibration-routing.cjs',
   'route-probe-playback.cjs',
-  'time-card-calibration.cjs'
+  'time-card-calibration.cjs',
+  'share-check-in.cjs',
+  'recording-capture-lifecycle.cjs',
+  'recording-share-storage.cjs',
+  'recording-page-flow.cjs'
 ];
+
+function isUsableTypeScript(candidate) {
+  try {
+    const runtime = require(candidate);
+    return typeof runtime.transpileModule === 'function' && runtime.ModuleKind?.CommonJS !== undefined;
+  } catch { return false; }
+}
 
 function resolveTypeScript() {
   if (process.argv[2]) {
     const explicit = path.resolve(process.argv[2]);
-    if (!fs.existsSync(explicit)) throw new Error(`TypeScript not found: ${explicit}`);
+    if (!fs.existsSync(explicit) || !isUsableTypeScript(explicit)) {
+      throw new Error(`Usable TypeScript compiler API not found: ${explicit}`);
+    }
     return explicit;
   }
-  try { return require.resolve('typescript'); } catch {}
+  try {
+    const local = require.resolve('typescript');
+    if (isUsableTypeScript(local)) return local;
+  } catch {}
   const bundled = [
     path.resolve(path.dirname(process.execPath), '../../hvigor/hvigor/node_modules/typescript/lib/typescript.js'),
     '/Applications/DevEco-Studio.app/Contents/tools/hvigor/hvigor/node_modules/typescript/lib/typescript.js'
   ];
-  const found = bundled.find(candidate => fs.existsSync(candidate));
+  const found = bundled.find(candidate => fs.existsSync(candidate) && isUsableTypeScript(candidate));
   if (found) return found;
   throw new Error('Pass the path to typescript/lib/typescript.js as the first argument; no dependency is installed automatically.');
 }

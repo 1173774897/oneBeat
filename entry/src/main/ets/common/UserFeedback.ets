@@ -20,6 +20,19 @@ let shownNotices: ShownNotice[] = [];
 // These are explicit business messages produced by the app, rather than an
 // arbitrary server/native error string that could contain payloads or credentials.
 const PRODUCT_ERROR_MESSAGES: string[] = [
+  '打卡记录尚未准备好，请稍后重试',
+  '设备时间发生回拨，请开启自动时间后再确认打卡',
+  '月卡购买结果待确认，请完成购买后再确认分享',
+  '月卡状态暂时无法核对，请稍后重试；本次分享会保留',
+  '未能打开系统分享面板，请稍后重试',
+  '没有待确认的小红书分享，请先分享一段录制视频',
+  '请先确认或取消上一次分享，再发起新的分享',
+  '请先完成或取消这段视频的待确认分享',
+  '已取消保存视频',
+  '视频文件不存在，请重新录制',
+
+  '鼓机权益已到期，请重新解锁后再试听',
+  '鼓机权益已到期，请重新解锁或切回普通节拍',
   '双方版本不一致，请更新 OneBeat 后重试',
   '邀请已过期，请让队长重新创建队伍',
   '订单与当前华为账号不匹配，请确认登录账号后重试',
@@ -41,7 +54,11 @@ const PRODUCT_ERROR_MESSAGES: string[] = [
   '需要允许 Wi-Fi 附近设备权限才能组队。请在系统弹窗中点允许，或到 设置 → OneBeat → 权限 中开启。',
   '手输加入码需要蓝牙附近发现权限，请允许后重试；也可以直接扫码加入。',
   '扫码需要相机权限，请在设置中允许；也可以输入加入码。',
-  '当前设备不支持多人组队，可使用单人练习'
+  '当前设备不支持多人组队，可使用单人练习',
+  '原始音轨已保留，合成成品视频失败',
+  '成品视频已生成，写入作品列表失败',
+  '设备录屏时间戳不兼容，原始音轨已保留',
+  '视频仍在结束处理中，请稍候再点重试保存'
 ];
 
 function feedbackErrorCode(error: Object): number {
@@ -110,6 +127,12 @@ export function userErrorMessage(error: Object, fallback: string): string {
   if (text.indexOf('华为账号登录') >= 0 || feedbackErrorCode(error) === 1001502001 ||
     feedbackErrorCode(error) === 1001860050) {
     return '请先登录华为账号，再重试';
+  }
+  if (text.indexOf('原始音轨已保留') >= 0 || text.indexOf('成品视频已生成') >= 0 ||
+    text.indexOf('设备录屏时间戳') >= 0 || text.indexOf('视频仍在结束处理') >= 0 ||
+    text.indexOf('写入作品列表失败') >= 0 || text.indexOf('合成成品视频失败') >= 0 ||
+    text.indexOf('录制视频') >= 0 || text.indexOf('原始音轨') >= 0) {
+    return text;
   }
   return fallback.trim().length > 0 ? fallback : '操作未完成，请重试';
 }

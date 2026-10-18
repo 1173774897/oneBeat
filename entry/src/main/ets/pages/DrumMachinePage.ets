@@ -154,7 +154,7 @@ struct DrumMachinePage {
     this.pageLifetimeRevision++;
     this.saving = false;
     if (!isProDrumMachineAccessible()) {
-      showUserNotice('PRO 定制鼓机包含在畅游月卡中', 'drum.entitlement');
+      showUserNotice('请先在大厅解锁鼓机月卡或分享试用', 'drum.entitlement');
       router.back();
       return;
     }
@@ -1133,6 +1133,10 @@ struct DrumMachinePage {
     if (!this.editorVisible || AppSession.get() === undefined) {
       return;
     }
+    if (!isProDrumMachineAccessible()) {
+      showUserNotice('鼓机权益已到期，编排已保留，请解锁后再试听', 'drum.preview.entitlement');
+      return;
+    }
     const revision = this.editorPreviewRevision;
     const startPositionBeats = Math.max(0, this.editorPlayheadBeats);
     this.editorPreviewCycle = startPositionBeats > 0 || this.editorPlayheadBeats >= 0 ? 0 : -1;
@@ -1426,6 +1430,10 @@ struct DrumMachinePage {
       this.songPreviewMessage = '';
       return false;
     }
+    if (!isProDrumMachineAccessible()) {
+      showUserNotice('鼓机权益已到期，编排已保留，请解锁后再试听', 'drum.preview.entitlement');
+      return false;
+    }
     if (this.previewTarget.length > 0) {
       return false;
     }
@@ -1629,6 +1637,10 @@ struct DrumMachinePage {
     if (session === undefined || !session.controller.isLeader || this.saving) {
       return;
     }
+    if (!isProDrumMachineAccessible()) {
+      showUserNotice('鼓机权益已到期，编排已保留，请解锁后再应用', 'drum.apply.entitlement');
+      return;
+    }
     const controller = session.controller;
     const lifetime = this.pageLifetimeRevision;
     this.saving = true;
@@ -1641,6 +1653,10 @@ struct DrumMachinePage {
       session.stopDrumPreview();
       await controller.updateMeter(this.beatsPerBar, this.beatUnit);
       if (lifetime !== this.pageLifetimeRevision || AppSession.get() !== session || session.controller !== controller) {
+        return;
+      }
+      if (!isProDrumMachineAccessible()) {
+        showUserNotice('鼓机权益已到期，编排已保留，请解锁后再应用', 'drum.apply.entitlement');
         return;
       }
       await controller.updateDrumProgram(raw);

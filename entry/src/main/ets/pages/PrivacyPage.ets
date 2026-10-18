@@ -50,7 +50,7 @@ struct PrivacyPage {
       .width('100%')
       .padding({ left: 18, right: 18, top: 8 + this.topSafeInset })
 
-      Text('更新日期：2026年9月24日')
+      Text('更新日期：2026年10月18日')
         .fontSize(12)
         .fontColor('#6A6A6A')
         .width('100%')
@@ -80,9 +80,12 @@ struct PrivacyPage {
           this.bulletText('Wi‑Fi 信息：用于检查 Wi-Fi 状态、发现附近 P2P 设备并创建或加入临时 P2P 组。')
           this.bulletText('蓝牙：仅在您使用六位加入码时，用于在附近查找对应队长并取得临时邀请信息。')
           this.bulletText('相机：用于扫描队长二维码以加入队伍；仅在您主动使用扫码加入时使用。')
+          this.bulletText('麦克风与屏幕录制：仅在您主动录制行进视频并授权后，采集行进画面、应用声音和周围声音，同时显示实时声波；停止录制或离开应用后结束采集。')
+          this.bulletText('相册保存：仅在您点击保存视频并通过系统保存弹窗授权后，将所选视频保存到相册。')
 
           this.sectionTitle('三、数据存储与安全')
           this.bodyText('应用产生的设置、练习与商店相关本地状态均存储在您的设备上。除上述附近设备 P2P 组队同步外，本应用不包含将用户数据后台上传至开发者服务器的机制。')
+          this.bodyText('录制视频、分享确认记录和鼓机试用截止时间保存在本机；换设备、卸载或清除应用数据不恢复。仅在您主动分享时，将选中的视频交给目标应用，并由该应用处理发布；本应用不在后台上传录音或视频。')
           this.bodyText('请妥善保管加入码与二维码，避免被附近的非预期人员加入会话。')
 
           this.sectionTitle('四、第三方服务')

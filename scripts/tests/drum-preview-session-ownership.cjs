@@ -43,7 +43,7 @@ const bank = (marker = 12345) => new Map([
   ['kick', new Int16Array([marker, -6789, 4321, 0]).buffer]
 ]);
 
-function harness({ sampleBankClass, engineOptions = {} } = {}) {
+function harness({ sampleBankClass, engineOptions = {}, drumAccess = () => true } = {}) {
   const loads = [];
   const cached = new Map();
   const storage = new Map();
@@ -96,6 +96,7 @@ function harness({ sampleBankClass, engineOptions = {} } = {}) {
     '../network/p2p/BleRoomDiscovery': { BleRoomDiscovery: class { async stopLeaderAdvertising() {} } },
     '../network/p2p/P2pInvitation': {},
     '../common/UserFeedback': { showUserNotice() {}, logUserFailure() {} },
+    '../store/EntitlementStore': { isProDrumMachineAccessible: drumAccess },
     '../common/Constants': { PROTOCOL_VERSION: 6 },
     '../common/MonotonicClock': { MonotonicClock: { nowMs: () => h.now } },
     '../common/MeterModel': { defaultBeatPointStates: count => Array(count).fill('normal') },

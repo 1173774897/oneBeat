@@ -29,6 +29,7 @@
         "exported": true,
         "backgroundModes": [
           "audioPlayback",
+          "audioRecording",
           "multiDeviceConnection"
         ],
         "skills": [
@@ -44,6 +45,11 @@
       }
     ],
     "requestPermissions": [
+      {
+        "name": "ohos.permission.MICROPHONE",
+        "reason": "$string:perm_recording_microphone_reason",
+        "usedScene": { "abilities": ["EntryAbility"], "when": "inuse" }
+      },
       {
         "name": "ohos.permission.INTERNET",
         "reason": "$string:perm_internet_reason",

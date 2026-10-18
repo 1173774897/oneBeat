@@ -70,6 +70,7 @@ function harness() {
   const page = new context.exports.LeaderLobbyPage();
   page.btAudioActive = true;
   page.stopRosterStatusAnimation = () => trace.push('stop-roster-animation');
+  page.stopDrumAccessRefresh = () => {};
   return { page, requests, toasts, routes, trace };
 }
 
@@ -112,6 +113,8 @@ function mainHarness() {
   page.leader = true;
   page.refresh = () => {};
   page.startVisualLoop = () => {};
+  page.startRecordingLoop = () => {};
+  page.finishRecordingOnLeave = async () => {};
   return { page, requests, notices, replaceSession: () => { session = {}; } };
 }
 

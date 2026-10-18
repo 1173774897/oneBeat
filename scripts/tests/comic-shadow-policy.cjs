@@ -41,7 +41,10 @@ assert.ok(inline >= 17, 'All audited inline shadows must use the shared compatib
 assert.equal(transparentOff, 1, 'Only the solid-button face intentionally disables native shadows');
 assert.ok(sharpText >= 6, 'Do not blanket-rewrite sharp text shadows as component blur');
 const main = fs.readFileSync(path.join(root, 'pages/MainPage.ets'), 'utf8');
-assert.match(main, /\.shadow\(\{ radius: 8, color: '#9935D6E4', offsetX: 0, offsetY: 0 \}\)/);
-assert.match(main, /radius: INK_SHADOW_RADIUS, offsetX: 3, offsetY: -4/, 'Keep upward bottom-panel shadow');
+assert.match(main, /\{ radius: 8, color: '#CC35D6E4', offsetX: 0, offsetY: 0 \}/,
+  'The current beat keeps its cyan glow');
+assert.match(main, /Circle\(\)\.width\(17\)\.height\(17\)\.fill\(CORAL\)[\s\S]*?\.shadow\(CONTROL_SHADOW\)[\s\S]*?Text\(this\.recordingState === 'recording' \? '停止' : '录制'\)/,
+  'The recording button replacing the member drawer keeps its ink shadow');
+assert.doesNotMatch(main, /Text\('人'\)/, 'The removed member button must not reappear');
 console.log('PASS: ' + shared + ' shared and ' + inline +
   ' inline component shadows enabled; sharp text, cyan glow and transparent shadow-off retained');

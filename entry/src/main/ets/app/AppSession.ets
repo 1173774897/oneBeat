@@ -19,6 +19,7 @@ import { defaultBeatPointStates } from '../common/MeterModel';
 import { SessionBackgroundKeeper } from '../session/SessionBackgroundKeeper';
 import { router } from '@kit.ArkUI';
 import { logUserFailure, showUserNotice } from '../common/UserFeedback';
+import { isProDrumMachineAccessible } from '../store/EntitlementStore';
 import {
   TransportPausePayload,
   TransportPayload,
@@ -149,9 +150,9 @@ export class AppSession {
           return;
         }
         if (this.controller.state === 'idle') {
-          void this.leaderStart();
+          void this.leaderStart().catch((error: Error) => this.reportBackgroundPlayFailure(error));
         } else if (this.controller.state === 'paused') {
-          void this.leaderResume();
+          void this.leaderResume().catch((error: Error) => this.reportBackgroundPlayFailure(error));
         }
       },
       onPause: () => {
@@ -438,6 +439,9 @@ export class AppSession {
     previewStartPositionBeats: number = 0,
     previewSectionKeys?: string[]
   ): Promise<void> {
+    if (!isProDrumMachineAccessible()) {
+      throw new Error('鼓机权益已到期，请重新解锁后再试听');
+    }
     const token = ++this.drumPreviewToken;
     this.drumPreviewActive = true;
     this.drumPreviewReady = false;
@@ -453,6 +457,9 @@ export class AppSession {
       }
       if (!ready) {
         throw new Error('鼓机试听配置已失效，请重试');
+      }
+      if (!isProDrumMachineAccessible()) {
+        throw new Error('鼓机权益已到期，请重新解锁后再试听');
       }
       if (previewSectionKeys !== undefined) {
         this.metronome.attachDrumPreviewPlan(previewSectionKeys);
@@ -984,6 +991,7 @@ export class AppSession {
   }
 
   async leaderStart(): Promise<void> {
+    this.assertDrumAccessForTransport();
     if (this.preemptDrumPreview()) {
       this.syncEngineFromSession();
     }
@@ -994,6 +1002,7 @@ export class AppSession {
     } catch (err) {
       console.warn(`MetronomeEngine prewarm failed: ${(err as Error).message}`);
     }
+    this.assertDrumAccessForTransport();
     await this.controller.startTransport();
     // Once walking has started, the physical stream belongs to this team
     // session and remains alive across every later walk/lobby transition.
@@ -1013,10 +1022,30 @@ export class AppSession {
   }
 
   async leaderResume(): Promise<void> {
+    this.assertDrumAccessForTransport();
     if (this.preemptDrumPreview()) {
       this.syncEngineFromSession();
     }
     await this.controller.resumeTransport();
+  }
+
+  private assertDrumAccessForTransport(): void {
+    // Followers receive an authorized leader program without needing their own
+    // trial. Existing playback is never revoked from an asynchronous timer.
+    if (this.controller.isLeader && this.controller.rhythm === 3 &&
+      this.controller.drumProgram.length > 0 && !isProDrumMachineAccessible()) {
+      throw new Error('鼓机权益已到期，请重新解锁或切回普通节拍');
+    }
+  }
+
+  private reportBackgroundPlayFailure(error: Error): void {
+    logUserFailure('background-play', error);
+    if (AppSession.instance !== this) {
+      return;
+    }
+    const needsDrumAccess = this.controller.rhythm === 3 && !isProDrumMachineAccessible();
+    showUserNotice(needsDrumAccess ? '鼓机权益已到期，请重新解锁或切回普通节拍' :
+      '播放未开始，请回到行进页重试', 'background-play');
   }
 
   private handleTransportFromStorage(): void {

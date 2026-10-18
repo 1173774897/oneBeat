@@ -73,6 +73,7 @@ function harness() {
     '../network/p2p/BleRoomDiscovery': { BleRoomDiscovery: MockBle },
     '../network/p2p/P2pInvitation': {},
     '../common/UserFeedback': { showUserNotice: message => trace.push(`toast:${message}`), logUserFailure() {} },
+    '../store/EntitlementStore': { isProDrumMachineAccessible: () => true },
     '../common/Constants': {},
     '../common/MonotonicClock': {},
     '../common/MeterModel': {},

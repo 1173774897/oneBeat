@@ -47,8 +47,11 @@ import { DrumProgram, parseDrumProgram, styleByKey } from '../audio/DrumMachineC
 import {
   isProDrumMachineAccessible,
   isSceneAccessible,
-  limitedFreeCharacterKeys
+  limitedFreeCharacterKeys,
+  resolveDrumAccess,
+  formatTrialExpiry
 } from '../store/EntitlementStore';
+import { ShareCalendarSheet } from '../components/ShareCalendarSheet';
 import { refreshStoreEntitlementsNow } from '../store/StoreBootstrapSync';
 import { SESSION_MAX_MEMBER_COUNT } from '../common/Constants';
 import { getCalibrationMs } from '../store/AudioLatencyPersistence';
@@ -79,6 +82,7 @@ const PRO_CHAIN_WIDTH: number = PRO_CHAIN_SOURCE_WIDTH * PRO_CHAIN_SCALE;
 const PRO_CHAIN_HEIGHT: number = PRO_CHAIN_SOURCE_HEIGHT * PRO_CHAIN_SCALE;
 const PRO_CHAIN_TOP_OFFSET: number = PRO_DRUM_ENTRY_PADDING - PRO_CHAIN_BUTTON_TOP_PX * PRO_CHAIN_SCALE;
 const PRO_CHAIN_OFFSET_X: number = -20;
+const PRO_DRUM_TRIAL_LABEL_SIZE: number = 10;
 
 const CHARACTER_PICK_AVATAR_SIZE: number = 48;
 const CHARACTER_PICK_AVATAR_TOP: number = 6;
@@ -152,6 +156,11 @@ struct LeaderLobbyPage {
   @State bluetoothRouteProbePlaying: boolean = false;
   @State bluetoothRouteProbePlayed: boolean = false;
   @State bluetoothRouteStatus: string = '';
+  @State drumAccessAllowed: boolean = false;
+  @State drumAccessSource: string = 'locked';
+  @State drumAccessExpiresAt: number = 0;
+  @State proDrumToastVisible: boolean = false;
+  @State proDrumEntryScale: number = 1;
   // Closing and reopening the dialog can overlap two asynchronous probes. A
   // completion belongs only to the request that still owns the visible dialog.
   private bluetoothRouteProbeRequestToken: number = 0;
@@ -162,6 +171,7 @@ struct LeaderLobbyPage {
   private randomSelectionToken: number = 0;
   private randomPreviewPreviousDrawId: number = 0;
   private rosterStatusAnimationTimer: number = -1;
+  private drumAccessRefreshTimer: number = -1;
   private actionSequence: number = 0;
   // Late results from an earlier action or room cannot overwrite visible feedback.
   private readonly pendingActions: Map<string, number> = new Map();
@@ -425,6 +435,7 @@ struct LeaderLobbyPage {
   aboutToAppear(): void {
     this.latencyCalibrationMs = getCalibrationMs();
     this.startRosterStatusAnimation();
+    this.startDrumAccessRefresh();
     try {
       access.on('stateChange', this.bluetoothStateListener);
     } catch (_e) {
@@ -432,6 +443,7 @@ struct LeaderLobbyPage {
     void this.initialize();
   }
   aboutToDisappear(): void {
+    this.stopDrumAccessRefresh();
     this.pendingActions.clear();
     this.actionSessions.clear();
     this.bluetoothRouteProbeRequestToken++;
@@ -449,6 +461,10 @@ struct LeaderLobbyPage {
     }
   }
   onBackPress(): boolean {
+    if (this.proDrumToastVisible) {
+      this.proDrumToastVisible = false;
+      return true;
+    }
     if (this.bluetoothRouteConfirmVisible) {
       this.dismissBluetoothRouteConfirmation();
       return true;
@@ -463,6 +479,7 @@ struct LeaderLobbyPage {
   onPageShow(): void {
     this.randomPreviewPageVisible = true;
     this.startRosterStatusAnimation();
+    this.startDrumAccessRefresh();
     this.enteringStage = false;
     this.refreshingConnectivity = false;
     this.refresh();
@@ -470,6 +487,8 @@ struct LeaderLobbyPage {
     void this.refreshLeaderConnectivity();
   }
   onPageHide(): void {
+    this.proDrumToastVisible = false;
+    this.stopDrumAccessRefresh();
     this.pendingActions.clear();
     this.actionSessions.clear();
     this.bluetoothRouteProbeRequestToken++;
@@ -549,7 +568,39 @@ struct LeaderLobbyPage {
   }
 
   private onStoreEntitlementsChanged(): void {
+    this.refreshDrumAccess();
     this.refresh();
+  }
+
+  private refreshDrumAccess(): void {
+    const access = resolveDrumAccess();
+    this.drumAccessAllowed = access.allowed;
+    this.drumAccessSource = access.source;
+    this.drumAccessExpiresAt = access.expiresAt;
+  }
+
+  private startDrumAccessRefresh(): void {
+    this.refreshDrumAccess();
+    if (this.drumAccessRefreshTimer < 0) {
+      this.drumAccessRefreshTimer = setInterval(() => this.refreshDrumAccess(), 1000);
+    }
+  }
+
+  private stopDrumAccessRefresh(): void {
+    if (this.drumAccessRefreshTimer >= 0) {
+      clearInterval(this.drumAccessRefreshTimer);
+      this.drumAccessRefreshTimer = -1;
+    }
+  }
+
+  private drumAccessLabel(): string {
+    if (this.drumAccessSource === 'trial') {
+      return `试用中 · 截止 ${formatTrialExpiry(this.drumAccessExpiresAt)}`;
+    }
+    if (this.drumAccessSource === 'monthly') {
+      return '月卡已解锁';
+    }
+    return this.drumAccessAllowed ? '已解锁' : '使用前需解锁';
   }
 
   private async initialize(): Promise<void> {
@@ -1062,10 +1113,17 @@ struct LeaderLobbyPage {
 
   private editDrumMachine(): void {
     if (!isProDrumMachineAccessible()) {
-      showUserNotice('PRO 定制鼓机包含在畅游月卡中', 'lobby-pro-drum');
+      this.showProDrumAccessToast();
+      this.proDrumEntryScale = 0.96;
+      animateTo({ duration: 240, curve: Curve.EaseOut }, () => { this.proDrumEntryScale = 1; });
       return;
     }
     router.pushUrl({ url: 'pages/DrumMachinePage' });
+  }
+
+  private showProDrumAccessToast(): void {
+    this.refreshDrumAccess();
+    this.proDrumToastVisible = true;
   }
 
   private async switchToBasicBeat(): Promise<void> {
@@ -1439,30 +1497,59 @@ struct LeaderLobbyPage {
         .border({ width: 1.5, color: INK }).borderRadius(7)
         .shadow(CARD_SHADOW).opacity(locked ? 0.68 : 1)
         .align(Alignment.Top).translate({ y: PRO_DRUM_ENTRY_PADDING })
+        .onClick(() => this.editDrumMachine())
       this.proChain(asset)
       // Keep the title above the decorative chain so narrow-screen labels stay readable.
       Row() {
-        Text('PRO 定制鼓机').fontSize(21).fontWeight(900).fontStyle(FontStyle.Italic).fontColor(INK)
+        Column({ space: 2 }) {
+          Text('PRO 定制鼓机').fontSize(21).fontWeight(900).fontStyle(FontStyle.Italic).fontColor(INK)
+            .onClick(() => this.editDrumMachine())
+          if (!locked) {
+            Text(this.drumAccessLabel()).fontSize(PRO_DRUM_TRIAL_LABEL_SIZE)
+              .fontWeight(FontWeight.Bold).fontColor('#5D574F')
+              .onClick(() => this.showProDrumAccessToast())
+          }
+        }.alignItems(HorizontalAlign.Start)
         Blank()
         Text('›').fontSize(30).fontColor(INK)
+          .onClick(() => this.editDrumMachine())
       }
       .width('100%').height(PRO_DRUM_BUTTON_HEIGHT).padding({ left: 16, right: 14 })
       .opacity(locked ? 0.68 : 1)
       .align(Alignment.Top).translate({ y: PRO_DRUM_ENTRY_PADDING })
-      .onClick(() => this.editDrumMachine())
     }
     // Intentionally paint the hanging tail above later controls without adding
     // layout space; the decorative image must still let their taps through.
     .width('100%').height(PRO_DRUM_BUTTON_HEIGHT + PRO_DRUM_ENTRY_PADDING * 2).clip(false).zIndex(1)
+    .scale({ x: this.proDrumEntryScale, y: this.proDrumEntryScale })
   }
 
   @Builder
   private proDrumMachineEntry() {
-    if (isProDrumMachineAccessible()) {
+    if (this.drumAccessAllowed) {
       this.proDrumMachineEntryWithChain('comic/decor/pro-chain-anchored.png', false)
     } else {
       this.proDrumMachineEntryWithChain('comic/decor/pro-chain-locked.png', true)
     }
+  }
+
+  @Builder
+  private proDrumAccessToast() {
+    ShareCalendarSheet({
+      bottomInset: this.bottomSafeInset,
+      scope: this.soloTeam ? 'solo' : 'team',
+      showShareAction: true,
+      showStoreAction: true,
+      onClose: (): void => { this.proDrumToastVisible = false; },
+      onShare: (): void => {
+        this.proDrumToastVisible = false;
+        router.pushUrl({ url: 'pages/RecordingLibraryPage', params: { scope: this.soloTeam ? 'solo' : 'team' } });
+      },
+      onOpenStore: (): void => {
+        this.proDrumToastVisible = false;
+        router.pushUrl({ url: 'pages/StorePage' });
+      }
+    })
   }
 
   @Builder
@@ -1756,6 +1843,11 @@ struct LeaderLobbyPage {
                 .padding({ left: 8, right: 8, top: 4, bottom: 4 })
                 .border({ width: 1, color: INK }).borderRadius(3).rotate({ angle: 2 })
             }.width('100%')
+            if (this.leader) {
+              Text(this.drumAccessLabel()).fontSize(11).fontWeight(FontWeight.Bold)
+                .fontColor('#61566F').width('100%')
+                .onClick(() => this.showProDrumAccessToast())
+            }
             Row({ space: 12 }) {
               Stack() {
                 Circle().width(68).height(68).fill(this.activeDrumStyleColor()).stroke(INK).strokeWidth(2)
@@ -1863,6 +1955,9 @@ struct LeaderLobbyPage {
       }
       if (this.bluetoothRouteConfirmVisible) {
         this.bluetoothRouteConfirmationOverlay()
+      }
+      if (this.proDrumToastVisible) {
+        this.proDrumAccessToast()
       }
     }.height('100%').width('100%').backgroundColor(PAPER)
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])

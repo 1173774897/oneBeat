@@ -27,6 +27,10 @@
     {
       "name": "perm_camera_reason",
       "value": "扫码加入队伍需要使用相机"
+    },
+    {
+      "name": "perm_recording_microphone_reason",
+      "value": "录制行进视频时收录周围声音并显示实时声波"
     }
   ]
 }

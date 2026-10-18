@@ -22,7 +22,7 @@ const pages = JSON.parse(read(pagesPath)).src;
 
 const expectedPages = JSON.parse(baseline(pagesPath)).src.filter(page => page !== micRoute);
 expectedPages.splice(expectedPages.indexOf(tapRoute) + 1, 0, currentTapRoute);
-assert.deepEqual(pages, expectedPages,
+assert.deepEqual(pages.filter(page => page !== 'pages/RecordingLibraryPage'), expectedPages,
   'Keep the registered comic tap page and retire only the mic page');
 assert.ok(pages.includes(tapRoute), 'The previous verified tap page remains available in the source tree');
 assert.ok(pages.includes(currentTapRoute), 'The promoted comic tap page must be registered');
@@ -51,12 +51,15 @@ assert.doesNotMatch(retired, /@Entry\b/,
 
 const manifestPath = 'entry/src/main/module.json5';
 const permissions = JSON.parse(read(manifestPath)).module.requestPermissions;
-assert.deepEqual(permissions,
+assert.deepEqual(permissions.filter(permission => permission.name !== 'ohos.permission.MICROPHONE'),
   JSON.parse(baseline(manifestPath)).module.requestPermissions
     .filter(permission => permission.name !== 'ohos.permission.MICROPHONE'),
-  'Remove the mic permission while preserving every other permission and its declared scope');
+  'Retired mic calibration must not change unrelated permission scopes');
+const recordingMic = permissions.find(permission => permission.name === 'ohos.permission.MICROPHONE');
+assert.equal(recordingMic?.reason, '$string:perm_recording_microphone_reason',
+  'Microphone access belongs to explicit video recording, never the retired calibration page');
 const stringsPath = 'entry/src/main/resources/base/element/string.json';
-assert.deepEqual(JSON.parse(read(stringsPath)).string,
+assert.deepEqual(JSON.parse(read(stringsPath)).string.filter(item => item.name !== 'perm_recording_microphone_reason'),
   JSON.parse(baseline(stringsPath)).string.filter(item => item.name !== 'perm_microphone_reason'),
   'Remove only the unused mic permission reason');
 
@@ -77,4 +80,4 @@ assert.match(oldBusiness, retiredNavigation, 'The baseline contains exactly the 
 assert.equal(businessSource(tap), oldBusiness.replace(retiredNavigation, ''),
   'Tap measurement, preview, saving and lifecycle must match HEAD after removing the retired navigation');
 
-console.log('PASS: mic product routes and permission retired; comic tap entry active, previous tap logic and shared saved data preserved');
+console.log('PASS: mic calibration routes retired; recording has its own microphone purpose; comic tap entry active, previous tap logic and shared saved data preserved');
