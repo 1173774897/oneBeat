@@ -167,8 +167,8 @@ export class SessionBackgroundKeeper {
     const session = SessionBackgroundKeeper.session;
     await session.setAVMetadata({
       assetId: 'onebeat-metronome',
-      title: 'oneBeat',
-      artist: 'oneBeat'
+      title: '同拍',
+      artist: '同拍'
     });
     if (showMediaCard) {
       await session.activate();

@@ -1,5 +1,7 @@
 export type RecordingState = 'idle' | 'preparing' | 'recording' | 'stopping' | 'failed';
 export type RecordingScope = 'solo' | 'team';
+/** Coarse, completed I/O boundaries; these stages are not a time-based percentage. */
+export type RecordingSavePhase = 'finishing' | 'mixing' | 'indexing';
 
 /** A completed, app-private MP4; deleting the app also deletes its local work and check-ins. */
 export interface RecordingClip {
@@ -37,6 +39,10 @@ export interface RecordingClip {
   videoTimestampDivisor?: number;
   /** True when capture started on built-in speaker; mix applies echo bleed cancel. */
   builtInSpeakerCapture?: boolean;
+  /** Media-library URI produced by "save to album"; reused for sharing so the album copy is made only once. */
+  albumUri?: string;
+  /** renderedAt (or createdAt) of the content stored at albumUri; used to invalidate the URI after a re-render. */
+  albumContentAt?: number;
 }
 
 /** A finished capture awaiting export/indexing; never an already playable library entry. */
@@ -54,6 +60,8 @@ export interface RecordingSnapshot {
   error: string;
   /** Actionable detail for a pending save; cleared when save succeeds or pending clip is discarded. */
   saveFailureDetail: string;
+  /** Meaningful during stopping; the UI reports real stages without guessing elapsed progress. */
+  savePhase?: RecordingSavePhase;
   micMuted: boolean;
   lastClip?: RecordingClip;
   pendingClip?: RecordingClip;

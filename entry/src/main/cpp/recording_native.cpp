@@ -980,6 +980,25 @@ napi_value Mix(napi_env env, napi_callback_info info)
     job->mix.speakerBleedCancel = GetNumber(env, args[0], "speakerBleedCancel");
     return Queue(env, job);
 }
+napi_value Chmod(napi_env env, napi_callback_info info)
+{
+    size_t argc = 2;
+    napi_value args[2];
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    bool ok = false;
+    if (argc >= 2) {
+        size_t size = 0;
+        napi_get_value_string_utf8(env, args[0], nullptr, 0, &size);
+        std::string path(size, '\0');
+        napi_get_value_string_utf8(env, args[0], path.data(), size + 1, &size);
+        uint32_t mode = 0;
+        napi_get_value_uint32(env, args[1], &mode);
+        ok = chmod(path.c_str(), static_cast<mode_t>(mode)) == 0;
+    }
+    napi_value value;
+    napi_get_boolean(env, ok, &value);
+    return value;
+}
 napi_value Init(napi_env env, napi_value exports)
 {
     napi_property_descriptor descriptors[] = {
@@ -987,7 +1006,8 @@ napi_value Init(napi_env env, napi_value exports)
         {"stop", nullptr, Stop, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"cancel", nullptr, Cancel, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"getStatus", nullptr, Status, nullptr, nullptr, nullptr, napi_default, nullptr},
-        {"mix", nullptr, Mix, nullptr, nullptr, nullptr, napi_default, nullptr}
+        {"mix", nullptr, Mix, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"chmod", nullptr, Chmod, nullptr, nullptr, nullptr, napi_default, nullptr}
     };
     napi_define_properties(env, exports, sizeof(descriptors) / sizeof(descriptors[0]), descriptors);
     return exports;

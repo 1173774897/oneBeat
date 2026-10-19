@@ -33,7 +33,7 @@ const PRODUCT_ERROR_MESSAGES: string[] = [
 
   '鼓机权益已到期，请重新解锁后再试听',
   '鼓机权益已到期，请重新解锁或切回普通节拍',
-  '双方版本不一致，请更新 OneBeat 后重试',
+  '双方版本不一致，请更新同拍后重试',
   '邀请已过期，请让队长重新创建队伍',
   '订单与当前华为账号不匹配，请确认登录账号后重试',
   '购买验证失败，请尝试恢复购买',
@@ -51,7 +51,7 @@ const PRODUCT_ERROR_MESSAGES: string[] = [
   '上次队伍连接尚未释放，请稍后重试',
   '请输入 6 位加入码',
   '队长已拒绝本次加入请求，请和队长确认后再试一次',
-  '需要允许 Wi-Fi 附近设备权限才能组队。请在系统弹窗中点允许，或到 设置 → OneBeat → 权限 中开启。',
+  '需要允许 Wi-Fi 附近设备权限才能组队。请在系统弹窗中点允许，或到 设置 → 同拍 → 权限 中开启。',
   '手输加入码需要蓝牙附近发现权限，请允许后重试；也可以直接扫码加入。',
   '扫码需要相机权限，请在设置中允许；也可以输入加入码。',
   '当前设备不支持多人组队，可使用单人练习',
@@ -82,7 +82,7 @@ export function userErrorMessage(error: Object, fallback: string): string {
     return text;
   }
   if (text.indexOf('双方版本不一致') >= 0 || text.indexOf('不是当前版本的 OneBeat 邀请') >= 0) {
-    return '双方版本不一致，请更新 OneBeat 后重试';
+    return '双方版本不一致，请更新同拍后重试';
   }
   if (text.indexOf('邀请缺少') >= 0 || text.indexOf('邀请认证信息不完整') >= 0 ||
     text.indexOf('邀请端口无效') >= 0) {
@@ -110,7 +110,7 @@ export function userErrorMessage(error: Object, fallback: string): string {
     return '队伍同步尚未完成，请稍后重试';
   }
   if (text === '队长版本不支持即时连接结果回执') {
-    return '双方版本不一致，请更新 OneBeat 后重试';
+    return '双方版本不一致，请更新同拍后重试';
   }
   if (text === '队长未提供 OneBeat 房间邀请') {
     return '邀请信息不完整，请重新扫描队长二维码';

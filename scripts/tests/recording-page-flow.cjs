@@ -4,7 +4,7 @@ const vm = require('node:vm');
 const ts = require(process.argv[2] || '/Applications/DevEco-Studio.app/Contents/tools/hvigor/hvigor/node_modules/typescript/lib/typescript.js');
 const mainPageSource = fs.readFileSync('entry/src/main/ets/pages/MainPage.ets', 'utf8');
 assert.match(mainPageSource,
-  /private recordingSavedOverlay\(\)[\s\S]*Button\('继续行进'[\s\S]*Button\('退出去查看'/,
+  /private recordingSaveOverlay\(\)[\s\S]*Button\('继续行进'[\s\S]*Button\('退出去查看'/,
   'Recording success must offer continue and exit-to-view actions');
 assert.match(mainPageSource,
   /private recordingErrorOverlay\(\)[\s\S]*Text\(this\.recordingErrorMessage\)[\s\S]*Button\('知道了，继续行进'/,
@@ -40,13 +40,16 @@ function harness(options = {}) {
   const timeouts = new Map();
   let timeoutId = 0;
   let snapshot = { state: 'idle', elapsedMs: 0, amplitude: 0, error: '', saveFailureDetail: '', micMuted: false };
-  let pending;
+  let pending = [];
+  let todayCompleted = false;
   let storedClips = [clip];
   const controller = { isLeader: true, state: 'playing' };
   const session = { controller, async leaderPause() { trace.push('pause-practice'); controller.state = 'paused'; } };
   const storage = new Map();
   const context = {
-    exports: {}, Map, Date, RECORDING_MIX_VERSION: 6, MAX_MIC_SHIFT_US: 300000,
+    exports: {}, Map, Date,
+    beijingDayKey: now => new Date(now + 8 * 3600000).toISOString().substring(0, 10), SHARE_CHECK_IN_DAY_MS: 86400000,
+    getShareCheckInSummary: () => ({ todayCompleted }), RECORDING_MIX_VERSION: 6, MAX_MIC_SHIFT_US: 300000,
     RenderingContextSettings: class {},
     CanvasRenderingContext2D: class {
       clearRect() {} beginPath() {} moveTo() {} lineTo() {} stroke() {}
@@ -106,18 +109,26 @@ function harness(options = {}) {
         const updated = { ...source, path: `/private/mix-${gain}-${micShiftUs}.mp4`,
           renderedGain: gain, renderedMicShiftUs: micShiftUs, renderedMixVersion: 6 };
         storedClips = storedClips.map(item => item.id === updated.id ? updated : item); return updated; },
-      async saveToAlbum(source) { trace.push(`save:${source.renderedGain}`); }
+      async saveToAlbum(source) {
+        trace.push(`save:${source.renderedGain}`);
+        if (options.albumSaveFailure) throw new Error('simulated album write failure');
+        return options.albumSaveResult ?? true;
+      },
+      async remove(id) { trace.push(`remove:${id}`); storedClips = storedClips.filter(item => item.id !== id); }
     },
     RecordingShareService: {
-      getPending: () => pending,
-      async share() { trace.push('system-share'); pending = { id: 'attempt-1', clipId: clip.id, handedOff: true }; return pending; },
-      async confirmPublished(id) { trace.push(`confirm:${id}`); pending = undefined;
-        return { streakDays: 3, rewardGranted: true, monthlySkipped: false, trialExpiresAt: 10000 }; }
+      async markReturnedToApp() {},
+      getPendingListToday: () => todayCompleted ? [] : pending,
+      getPendingForClipToday: id => todayCompleted ? undefined : pending.find(item => item.clipId === id),
+      async confirmPublished(id) { trace.push(`confirm:${id}`); pending = []; todayCompleted = true;
+        return { streakDays: 3, rewardGranted: true, monthlySkipped: false, trialExpiresAt: 10000 }; },
+      async dismissForClip(id) { trace.push(`dismiss:${id}`); pending = pending.filter(item => item.clipId !== id); }
     },
     formatTrialExpiry: () => '明天',
     fileUri: { getUriFromPath: value => value }
   };
-  return { context, trace, routes, notices, controller, timeouts, setSnapshot: value => { snapshot = { ...snapshot, ...value }; } };
+  return { context, trace, routes, notices, controller, timeouts, setPending: value => { pending = value; },
+    setClips: value => { storedClips = value; }, setSnapshot: value => { snapshot = { ...snapshot, ...value }; } };
 }
 
 (async () => {
@@ -172,10 +183,12 @@ function harness(options = {}) {
   viewingPage.refreshRecordingState();
   assert.equal(viewingPage.savedRecordingLabel, '多人练习作品');
   await viewingPage.exitAndViewSavedRecording();
-  assert.equal(viewing.routes.length, 1);
-  assert.equal(viewing.routes[0].url, 'pages/RecordingLibraryPage');
-  assert.equal(viewing.routes[0].params.scope, 'team');
-  assert.equal(viewing.routes[0].params.clipId, teamClip.id,
+  assert.equal(viewing.routes.length, 2);
+  assert.equal(viewing.routes[0].url, 'pages/Index',
+    'Exit-to-view must leave home on the stack so library back does not quit the app');
+  assert.equal(viewing.routes[1].url, 'pages/RecordingLibraryPage');
+  assert.equal(viewing.routes[1].params.scope, 'team');
+  assert.equal(viewing.routes[1].params.clipId, teamClip.id,
     'Exit-to-view opens the matching library and selects the newly saved clip');
   assert.deepEqual(viewing.trace, ['reset-session', 'clear-router'],
     'Exit-to-view releases the session and clears the walking stack before navigation');
@@ -271,41 +284,24 @@ function harness(options = {}) {
   const memberLibrary = loadPage('RecordingLibraryPage', member.context);
   memberLibrary.clips = [clip]; memberLibrary.selectedId = clip.id;
   memberLibrary.refreshPlayback();
-  memberLibrary.requestPreview(); memberLibrary.requestShare(); memberLibrary.togglePreviewSound();
+  memberLibrary.requestPreview(); memberLibrary.togglePreviewSound();
   assert.equal(memberLibrary.practiceActive, true, 'An active practice keeps the actual Video player unmounted');
   assert.equal(memberLibrary.previewMuted, false, 'Blocking playback does not change the default sound preference');
   assert.equal(member.trace.includes('pause-practice'), false, 'A member cannot force the leader to pause');
-  assert.equal(member.trace.includes('system-share'), false, 'A member must wait for pause before leaving to share');
-  memberLibrary.pendingId = 'attempt-member'; memberLibrary.pendingHandedOff = true;
-  await memberLibrary.confirmPublished();
-  assert.equal(member.trace.some(item => item.startsWith('confirm:')), false,
-    'A member must wait for pause before committing an existing pending check-in');
-  assert.equal(member.trace.includes('pause-practice'), false);
 
-  const sharing = harness();
-  const sharingLibrary = loadPage('RecordingLibraryPage', sharing.context);
-  sharingLibrary.clips = [clip]; sharingLibrary.selectedId = clip.id; sharingLibrary.hostContext = () => ({});
-  sharingLibrary.requestShare();
-  assert.equal(sharingLibrary.pauseConfirmVisible, true);
-  assert.equal(sharing.trace.includes('pause-practice'), false, 'Share does not pause until the leader explicitly confirms');
-  await sharingLibrary.pauseAndContinue();
-  assert.equal(sharing.trace.filter(item => item === 'pause-practice').length, 1);
-  assert.equal(sharing.trace.filter(item => item === 'system-share').length, 1);
-
-  await library.shareSelected();
-  assert.equal(library.pendingHandedOff, true);
-  assert.equal(playback.trace.some(item => item.startsWith('confirm:')), false, 'System handoff must not count as publication');
-  playback.controller.state = 'playing';
-  await library.confirmPublished();
-  assert.equal(library.pauseAction, 'confirm');
-  assert.equal(library.pauseConfirmVisible, true);
-  assert.equal(playback.trace.some(item => item.startsWith('confirm:')), false,
-    'Confirming an old pending share also requires an explicit leader pause');
-  await library.pauseAndContinue();
-  assert.equal(playback.trace.filter(item => item === 'system-share').length, 1,
-    'Pausing to confirm a pending publication must not launch another system share');
-  assert.equal(playback.trace.filter(item => item === 'confirm:attempt-1').length, 1);
-  assert.match(library.resultTitle, /24 小时/);
+  const secondClip = { ...clip, id: 'clip-2', path: '/private/clip-2.mp4' };
+  const deletion = harness();
+  deletion.setClips([clip, secondClip]);
+  deletion.setPending([{ id: 'delete-todo', clipId: secondClip.id }]);
+  const deleteLibrary = loadPage('RecordingLibraryPage', deletion.context);
+  deleteLibrary.clips = [clip, secondClip]; deleteLibrary.selectedId = clip.id;
+  deleteLibrary.requestDeleteClip(secondClip.id);
+  assert.equal(deleteLibrary.selectedId, clip.id, 'A card close control cannot switch the selected preview');
+  assert.equal(deletion.trace.some(item => item.startsWith('remove:')), false, 'The close control requires explicit deletion confirmation');
+  await deleteLibrary.deleteSelected();
+  assert.equal(deleteLibrary.selectedId, clip.id);
+  assert.equal(deletion.trace.includes('pause-preview'), false, 'Deleting a different work does not pause the current video');
+  assert.ok(deletion.trace.indexOf('remove:clip-2') < deletion.trace.indexOf('dismiss:clip-2'));
 
   const mixing = harness(); mixing.controller.state = 'paused';
   const mixLibrary = loadPage('RecordingLibraryPage', mixing.context);
@@ -326,14 +322,28 @@ function harness(options = {}) {
   assert.equal(mixLibrary.micShiftLabel(), '已自动提前 1 毫秒');
   mixLibrary.micShiftMs = -60;
   assert.equal(mixLibrary.micShiftLabel(), '自动基准上提前 60 毫秒');
-  mixLibrary.micGain = 0.3;
+  mixLibrary.changeMicGain(0.3, mixing.context.SliderChangeMode.End);
+  await mixLibrary.audioRenderTask;
+  const beforeSaveRenders = mixing.trace.filter(item => item.startsWith('render:')).length;
   await mixLibrary.saveSelected();
-  assert.ok(mixing.trace.indexOf('render:0.3:-60000') < mixing.trace.indexOf('save:0.3'),
-    'Saving must await the current independent MIC render');
-  mixLibrary.micGain = 0.5;
-  await mixLibrary.shareSelected();
-  assert.ok(mixing.trace.indexOf('render:0.5:-60000') < mixing.trace.indexOf('system-share'),
-    'Sharing must await the current independent MIC render');
+  assert.ok(mixing.trace.includes('save:0.3'));
+  assert.equal(mixing.trace.filter(item => item.startsWith('render:')).length, beforeSaveRenders,
+    'Saving uses the committed MIC render without starting another export');
+  assert.equal(mixing.routes.at(-1).url, 'pages/SavedRecordingPage');
+  assert.equal(mixing.routes.at(-1).params.clipId, clip.id);
+
+  for (const options of [{ albumSaveResult: false }, { albumSaveFailure: true }]) {
+    const album = harness(options);
+    const albumLibrary = loadPage('RecordingLibraryPage', album.context);
+    albumLibrary.clips = [clip]; albumLibrary.selectedId = clip.id;
+    albumLibrary.hostContext = () => ({});
+    await albumLibrary.saveSelected();
+    assert.equal(album.routes.length, 0, 'Cancellation or a failed write must not open the saved page');
+    assert.equal(albumLibrary.busy, false);
+    assert.equal(albumLibrary.savingToAlbum, false, 'The button must become usable after every outcome');
+    assert.equal(album.notices.length, options.albumSaveFailure ? 1 : 0,
+      'User cancellation is silent; a real write failure remains visible');
+  }
 
   const queued = harness(); queued.controller.state = 'paused';
   let queuedClips = [clip];
@@ -459,5 +469,5 @@ function harness(options = {}) {
   await delayedMix;
   assert.equal(staleLibrary.selectedId, 'another-clip', 'A late render must not restore the previously selected clip');
   assert.equal(staleLibrary.clips[0].path, clip.path, 'A hidden page must not apply a stale preview source');
-  console.log('PASS: capture consent, saved/error dialogs, exit-to-view cleanup, preview focus gate, explicit check-in and independent MIC render ordering');
+  console.log('PASS: capture consent, saved/error dialogs, exit-to-view cleanup, preview focus gate, deletion ownership and independent MIC render ordering');
 })().catch(error => { console.error(error); process.exitCode = 1; });

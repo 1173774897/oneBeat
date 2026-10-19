@@ -28,7 +28,7 @@ function p2pError(err: Error, fallback: string): Error {
     return new Error('当前设备不支持 Wi-Fi P2P，无法使用多人练习');
   }
   if (message.indexOf('201') >= 0) {
-    return new Error('缺少附近设备权限，请在系统设置中允许 OneBeat 使用 Wi-Fi');
+    return new Error('缺少附近设备权限，请在系统设置中允许同拍使用 Wi-Fi');
   }
   return new Error(message.length > 0 ? message : fallback);
 }

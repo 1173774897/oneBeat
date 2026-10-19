@@ -24,22 +24,30 @@ const HOME_PRACTICE_TEXT_TOP_INSET: number = 14;
 const HOME_PRACTICE_TEXT_LEFT_INSET: number = 14;
 const HOME_PRACTICE_TEXT_RIGHT_INSET: number = 14;
 const HOME_PRACTICE_ART_RIGHT_INSET: number = 6;
-const HOME_PRACTICE_ART_BOTTOM_INSET: number = 3;
+const HOME_PRACTICE_ART_BOTTOM_INSET: number = 10;
 /** Extra bottom inset for the team art row so trees stay inside the 138vp card. */
 const HOME_TEAM_ART_BOTTOM_INSET: number = 10;
-const HOME_PRACTICE_SOLO_ART_ROW_HEIGHT: number = 46;
 const HOME_STORE_HEIGHT: number = 64;
-const HOME_STORE_ACTION_WIDTH: number = 96;
-const HOME_TEAM_ART_WIDTH: number = 109;
+const HOME_TEAM_ART_WIDTH: number = 121;
 const HOME_TEAM_ART_HEIGHT: number = 92;
-const HOME_TEAM_TREE_HEIGHT: number = 86;
+const HOME_TEAM_PLANT_09_WIDTH: number = 42;
+const HOME_TEAM_PLANT_09_HEIGHT: number = 34;
+const HOME_TEAM_TREE_HEIGHT: number = 92;
+const HOME_TEAM_TREE_DISPLAY_WIDTH: number = 68;
 const HOME_TEAM_PLANT_06_WIDTH: number = 52;
 const HOME_TEAM_PLANT_06_HEIGHT: number = 31;
 const HOME_TEAM_PLANT_08_WIDTH: number = 30;
 const HOME_TEAM_PLANT_08_HEIGHT: number = 34;
+/** Row padding around the whole team illustration; does not add space between images. */
 const HOME_TEAM_PLANT_ROW_INSET_LEFT: number = 0;
-const HOME_TEAM_PLANT_ROW_INSET_RIGHT: number = 2;
-const HOME_SOLO_ART_WIDTH: number = 58;
+const HOME_TEAM_PLANT_ROW_INSET_RIGHT: number = 0;
+/** Negative margin pulls the next sprite over the previous PNG's transparent padding. */
+const HOME_TEAM_ART_TILE_OVERLAP: number = 26;
+const HOME_SOLO_ART_TILE_OVERLAP: number = 32;
+const HOME_SOLO_ROCKS_WIDTH: number = 66;
+const HOME_SOLO_ROCKS_HEIGHT: number = 56;
+const HOME_SOLO_ART_WIDTH: number = 94;
+const HOME_SOLO_ART_HEIGHT: number = 90;
 const HOME_SOLO_SIGN_HEIGHT: number = 90;
 
 @Entry
@@ -101,21 +109,26 @@ struct Index {
 
   @Builder
   private teamEntryArtwork() {
-    Stack({ alignContent: Alignment.Bottom }) {
+    Row({ space: 0 }) {
+      Image($rawfile('vegetation/plant_09.png'))
+        .width(HOME_TEAM_PLANT_09_WIDTH).height(HOME_TEAM_PLANT_09_HEIGHT).objectFit(ImageFit.Contain)
+        .zIndex(1)
+      Image($rawfile('vegetation/plant_06.png'))
+        .width(HOME_TEAM_PLANT_06_WIDTH).height(HOME_TEAM_PLANT_06_HEIGHT).objectFit(ImageFit.Contain)
+        .margin({ left: -HOME_TEAM_ART_TILE_OVERLAP }).zIndex(2)
       Image($rawfile('scenes/sunset/entities/tree.png'))
-        .height(HOME_TEAM_TREE_HEIGHT).objectFit(ImageFit.Contain).align(Alignment.Bottom)
-      Row() {
-        Image($rawfile('vegetation/plant_06.png'))
-          .width(HOME_TEAM_PLANT_06_WIDTH).height(HOME_TEAM_PLANT_06_HEIGHT).objectFit(ImageFit.Contain)
-        Blank().layoutWeight(1)
-        Image($rawfile('vegetation/plant_08.png'))
-          .width(HOME_TEAM_PLANT_08_WIDTH).height(HOME_TEAM_PLANT_08_HEIGHT).objectFit(ImageFit.Contain)
-      }.width('100%').alignItems(VerticalAlign.Bottom)
-        .padding({
-          left: HOME_TEAM_PLANT_ROW_INSET_LEFT,
-          right: HOME_TEAM_PLANT_ROW_INSET_RIGHT
-        })
-    }.width(HOME_TEAM_ART_WIDTH).height(HOME_TEAM_ART_HEIGHT).hitTestBehavior(HitTestMode.None)
+        .width(HOME_TEAM_TREE_DISPLAY_WIDTH).height(HOME_TEAM_TREE_HEIGHT).objectFit(ImageFit.Contain)
+        .margin({ left: -HOME_TEAM_ART_TILE_OVERLAP }).zIndex(3)
+      Image($rawfile('vegetation/plant_08.png'))
+        .width(HOME_TEAM_PLANT_08_WIDTH).height(HOME_TEAM_PLANT_08_HEIGHT).objectFit(ImageFit.Contain)
+        .margin({ left: -HOME_TEAM_ART_TILE_OVERLAP+8  }).zIndex(4)
+    }.width(HOME_TEAM_ART_WIDTH).height(HOME_TEAM_ART_HEIGHT).alignItems(VerticalAlign.Bottom)
+      .justifyContent(FlexAlign.Start).clip(true)
+      .padding({
+        left: HOME_TEAM_PLANT_ROW_INSET_LEFT,
+        right: HOME_TEAM_PLANT_ROW_INSET_RIGHT
+      })
+      .hitTestBehavior(HitTestMode.None)
   }
 
   private practiceArtBottomInset(kind: RecordingScope): number {
@@ -133,10 +146,16 @@ struct Index {
 
   @Builder
   private soloEntryArtwork() {
-    Stack({ alignContent: Alignment.Bottom }) {
+    Row({ space: 0 }) {
+      Image($rawfile('scenes/sunset/entities/rocks.png'))
+        .width(HOME_SOLO_ROCKS_WIDTH).height(HOME_SOLO_ROCKS_HEIGHT).objectFit(ImageFit.Contain)
+        .zIndex(1)
       Image($rawfile('scenes/sunset/entities/sign.png'))
-        .height(HOME_SOLO_SIGN_HEIGHT).objectFit(ImageFit.Contain).align(Alignment.Bottom)
-    }.width(HOME_SOLO_ART_WIDTH).height(HOME_PRACTICE_SOLO_ART_ROW_HEIGHT).hitTestBehavior(HitTestMode.None)
+        .height(HOME_SOLO_SIGN_HEIGHT).objectFit(ImageFit.Contain)
+        .margin({ left: -HOME_SOLO_ART_TILE_OVERLAP }).zIndex(2)
+    }.width(HOME_SOLO_ART_WIDTH).height(HOME_SOLO_ART_HEIGHT).alignItems(VerticalAlign.Bottom)
+      .justifyContent(FlexAlign.Start).clip(true)
+      .hitTestBehavior(HitTestMode.None)
   }
 
   @Builder
@@ -174,21 +193,23 @@ struct Index {
         }.width('100%').height(HOME_PRACTICE_HEIGHT).padding(0).backgroundColor(fill)
           .border({ width: HOME_ENTRY_BORDER, color: INK }).borderRadius(HOME_ENTRY_RADIUS).clip(true)
           .onClick(() => this.goPrimary(kind)).accessibilityText(this.practiceAccessibility(kind, title))
-        Button({ type: ButtonType.Normal }) {
-          Row({ space: 3 }) {
-            Text(`作品 ${this.worksCount(kind)}`).fontSize(12).fontWeight(900).fontColor(INK)
-            Blank()
-            Text('›').fontSize(18).fontWeight(900).fontColor(INK)
-          }.width('100%')
-        }.width(HOME_WORKS_PILL_WIDTH).height(HOME_WORKS_PILL_HEIGHT)
-          .padding({ left: 10, right: 8 }).backgroundColor(WHITE)
-          .border({ width: HOME_ENTRY_BORDER, color: INK }).borderRadius(HOME_WORKS_PILL_HEIGHT / 2)
-          .position({
-            x: HOME_WORKS_PILL_INSET_LEFT,
-            y: HOME_PRACTICE_HEIGHT - HOME_WORKS_PILL_HEIGHT - HOME_WORKS_PILL_INSET_BOTTOM
-          })
-          .zIndex(2)
-          .onClick(() => this.goSecondary(kind)).accessibilityText(this.worksAccessibility(kind))
+        if (this.worksCount(kind) > 0) {
+          Button({ type: ButtonType.Normal }) {
+            Row({ space: 3 }) {
+              Text(`作品 ${this.worksCount(kind)}`).fontSize(12).fontWeight(900).fontColor(INK)
+              Blank()
+              Text('›').fontSize(18).fontWeight(900).fontColor(INK)
+            }.width('100%')
+          }.width(HOME_WORKS_PILL_WIDTH).height(HOME_WORKS_PILL_HEIGHT)
+            .padding({ left: 10, right: 8 }).backgroundColor(WHITE)
+            .border({ width: HOME_ENTRY_BORDER, color: INK }).borderRadius(HOME_WORKS_PILL_HEIGHT / 2)
+            .position({
+              x: HOME_WORKS_PILL_INSET_LEFT,
+              y: HOME_PRACTICE_HEIGHT - HOME_WORKS_PILL_HEIGHT - HOME_WORKS_PILL_INSET_BOTTOM
+            })
+            .zIndex(2)
+            .onClick(() => this.goSecondary(kind)).accessibilityText(this.worksAccessibility(kind))
+        }
       }.width('100%').height(HOME_PRACTICE_HEIGHT).clip(false)
     }.layoutWeight(kind === 'team' ? HOME_TEAM_ENTRY_WEIGHT : HOME_SOLO_ENTRY_WEIGHT)
       .height(HOME_PRACTICE_HEIGHT).clip(false)
@@ -207,12 +228,6 @@ struct Index {
             Text('角色 / 场景 / 鼓机').fontSize(10).fontWeight(FontWeight.Bold).fontColor(INK)
               .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).layoutWeight(1)
           }.layoutWeight(1).alignItems(VerticalAlign.Center)
-          Row({ space: 4 }) {
-            Text('去逛逛').fontSize(13).fontWeight(900).fontColor(INK)
-            Text('›').fontSize(18).fontWeight(900).fontColor(INK)
-          }.width(HOME_STORE_ACTION_WIDTH).height(HOME_WORKS_PILL_HEIGHT).justifyContent(FlexAlign.Center)
-            .padding({ left: 10, right: 6 }).backgroundColor(WHITE)
-            .border({ width: HOME_ENTRY_BORDER, color: INK }).borderRadius(HOME_WORKS_PILL_HEIGHT / 2)
         }.width('100%').alignItems(VerticalAlign.Center)
       }.width('100%').height(HOME_STORE_HEIGHT)
         .padding({ left: 16, right: 14 }).backgroundColor(LILAC)

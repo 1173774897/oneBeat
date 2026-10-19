@@ -2318,7 +2318,7 @@ async function main() {
   const sectionBuilder = source.slice(source.indexOf('  private sectionCard(index: number)'),
     source.indexOf('  private savedProgramCard('));
   assert.ok(sectionBuilder.includes('.onClick(() => this.toggleSectionExpanded(index))'),
-    'Each manual card arrow must use the tested independent expansion action');
+    'Each card header must use the tested independent expansion action');
   assert.ok(sectionBuilder.includes('if (this.isSectionExpanded(index))'),
     'Card contents must follow their own expansion state');
   assert.ok(sectionBuilder.includes('.enabled(this.sections.length > 1)'),
@@ -2328,7 +2328,7 @@ async function main() {
   assert.equal(sectionBuilder.includes('this.selectedSection === index'), false,
     'The editor-selected section must never control card visibility');
   assert.equal(sectionBuilder.includes('.onClick(() => this.selectedSection = index)'), false,
-    'The card title must not select or fold the card');
+    'Folding a card must not change the section selected in the editor');
   assert.match(source, /const DRUM_SECTION_PLAYING_COLOR: string = '#EDE4FA';/,
     'The playing card must use the requested light-purple palette');
   assert.ok(sectionBuilder.includes('this.playingSongSection === index') && sectionBuilder.includes('DRUM_SECTION_PLAYING_COLOR'),

@@ -56,7 +56,7 @@ struct PrivacyPage {
         .width('100%')
         .padding({ left: 18, right: 18, top: 4 })
 
-      Text('开发者：李喆    应用名称：OneBeat')
+      Text('开发者：李喆    应用名称：同拍')
         .fontSize(13)
         .fontWeight(FontWeight.Bold)
         .fontColor(INK)

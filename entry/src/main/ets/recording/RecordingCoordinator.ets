@@ -6,7 +6,7 @@ import * as recordingNative from 'libonebeat_recording.so';
 import { AudioOutputMonitor } from '../audio/AudioOutputMonitor';
 import { MonotonicClock } from '../common/MonotonicClock';
 import { SessionBackgroundKeeper } from '../session/SessionBackgroundKeeper';
-import { RecordingClip, RecordingListener, RecordingScope, RecordingSnapshot, RecordingState } from './RecordingModels';
+import { RecordingClip, RecordingListener, RecordingScope, RecordingSnapshot, RecordingState, RecordingSavePhase } from './RecordingModels';
 import { RecordingRepository, RecordingTarget } from './RecordingRepository';
 import { RecordingMixer, RECORDING_MIX_VERSION } from './RecordingMixer';
 
@@ -34,6 +34,7 @@ export class RecordingCoordinator {
   private static amplitude: number = 0;
   private static error: string = '';
   private static saveFailureDetail: string = '';
+  private static savePhase: RecordingSavePhase = 'finishing';
   private static micMuted: boolean = false;
   private static builtInSpeakerCapture: boolean = false;
   private static lastClip: RecordingClip | undefined = undefined;
@@ -90,6 +91,7 @@ export class RecordingCoordinator {
       state: RecordingCoordinator.state, elapsedMs: RecordingCoordinator.elapsedMs,
       amplitude: RecordingCoordinator.amplitude, error: RecordingCoordinator.error,
       saveFailureDetail: RecordingCoordinator.saveFailureDetail,
+      savePhase: RecordingCoordinator.savePhase,
       micMuted: RecordingCoordinator.micMuted, lastClip: RecordingCoordinator.lastClip,
       pendingClip: RecordingCoordinator.pendingClip
     };
@@ -287,6 +289,7 @@ export class RecordingCoordinator {
   private static async stopExclusive(): Promise<RecordingClip | undefined> {
     const starting = RecordingCoordinator.startOperation;
     if (starting !== undefined) { try { await starting; } catch (_) { return undefined; } }
+    RecordingCoordinator.savePhase = 'finishing';
     RecordingCoordinator.setState('stopping');
     const result = await RecordingCoordinator.releaseCapture();
     const innerLeadUs = result.innerOffsetUs - result.micOffsetUs;
@@ -329,6 +332,7 @@ export class RecordingCoordinator {
   }
 
   private static async saveRetainedClip(clip: RecordingClip): Promise<RecordingClip | undefined> {
+    RecordingCoordinator.savePhase = 'mixing';
     RecordingCoordinator.setState('stopping');
     RecordingCoordinator.saveFailureDetail = '';
     try {
@@ -371,6 +375,8 @@ export class RecordingCoordinator {
         throw new Error(RecordingCoordinator.saveFailureNoticeText());
       }
     }
+    RecordingCoordinator.savePhase = 'indexing';
+    RecordingCoordinator.notify();
     try {
       await RecordingRepository.add(clip);
     } catch (err) {
@@ -426,7 +432,7 @@ export class RecordingCoordinator {
       const result = await manager.requestPermissionsFromUser(context, [MICROPHONE_PERMISSION]);
       if (result.authResults.length === 1 && result.authResults[0] === granted) { return; }
     }
-    throw new Error('录制需要麦克风权限，请在系统设置中为 oneBeat 开启后重试');
+    throw new Error('录制需要麦克风权限，请在系统设置中为同拍开启后重试');
   }
 
   private static schedulePeakRead(): void {

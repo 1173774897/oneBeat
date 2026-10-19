@@ -17,6 +17,8 @@ assert.match(home, /this\.practiceEntryPanel\('solo', '单人练习', '跟着节
 assert.match(home, /Row\(\{ space: HOME_ENTRANCE_GAP \}\)[\s\S]*this\.storeEntryPanel\(\)/);
 assert.match(home, /scenes\/sunset\/entities\/tree\.png/);
 assert.match(home, /vegetation\/plant_06\.png/);
+assert.match(home, /vegetation\/plant_09\.png/);
+assert.match(home, /scenes\/sunset\/entities\/rocks\.png/);
 assert.match(home, /vegetation\/plant_08\.png/);
 assert.match(home, /scenes\/sunset\/entities\/sign\.png/);
 const homeCard = home.slice(home.indexOf('  private practiceEntryPanel('), home.indexOf('  @Builder\n  private storeEntryPanel'));
@@ -45,8 +47,6 @@ assert.match(homeCard, /backgroundColor\(WHITE\)/,
 const storeCard = home.slice(home.indexOf('  private storeEntryPanel('), home.indexOf('  build()'));
 assert.doesNotMatch(storeCard, /Image\(/, 'The selected store panel intentionally has no illustration');
 assert.match(storeCard, /backgroundColor\(LILAC\)/);
-assert.match(storeCard, /backgroundColor\(CORAL\)[\s\S]*borderRadius\(HOME_WORKS_PILL_HEIGHT \/ 2\)/,
-  'The shop action uses the coral pill from the reference layout');
 assert.match(storeCard, /角色 \/ 场景 \/ 鼓机/);
 assert.match(home, /SAME BEAT!/);
 assert.match(storeCard, /onClick\(\(\) => this\.goPrimary\('store'\)\)/);

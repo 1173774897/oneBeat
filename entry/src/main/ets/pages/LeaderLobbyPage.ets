@@ -51,7 +51,6 @@ import {
   resolveDrumAccess,
   formatTrialExpiry
 } from '../store/EntitlementStore';
-import { ShareCalendarSheet } from '../components/ShareCalendarSheet';
 import { refreshStoreEntitlementsNow } from '../store/StoreBootstrapSync';
 import { SESSION_MAX_MEMBER_COUNT } from '../common/Constants';
 import { getCalibrationMs } from '../store/AudioLatencyPersistence';
@@ -159,7 +158,6 @@ struct LeaderLobbyPage {
   @State drumAccessAllowed: boolean = false;
   @State drumAccessSource: string = 'locked';
   @State drumAccessExpiresAt: number = 0;
-  @State proDrumToastVisible: boolean = false;
   @State proDrumEntryScale: number = 1;
   // Closing and reopening the dialog can overlap two asynchronous probes. A
   // completion belongs only to the request that still owns the visible dialog.
@@ -461,10 +459,6 @@ struct LeaderLobbyPage {
     }
   }
   onBackPress(): boolean {
-    if (this.proDrumToastVisible) {
-      this.proDrumToastVisible = false;
-      return true;
-    }
     if (this.bluetoothRouteConfirmVisible) {
       this.dismissBluetoothRouteConfirmation();
       return true;
@@ -487,7 +481,6 @@ struct LeaderLobbyPage {
     void this.refreshLeaderConnectivity();
   }
   onPageHide(): void {
-    this.proDrumToastVisible = false;
     this.stopDrumAccessRefresh();
     this.pendingActions.clear();
     this.actionSessions.clear();
@@ -1123,7 +1116,8 @@ struct LeaderLobbyPage {
 
   private showProDrumAccessToast(): void {
     this.refreshDrumAccess();
-    this.proDrumToastVisible = true;
+    showUserNotice(this.drumAccessAllowed ? this.drumAccessLabel() :
+      '定制鼓机包含在畅游月卡中', 'lobby-drum-access');
   }
 
   private async switchToBasicBeat(): Promise<void> {
@@ -1507,7 +1501,6 @@ struct LeaderLobbyPage {
           if (!locked) {
             Text(this.drumAccessLabel()).fontSize(PRO_DRUM_TRIAL_LABEL_SIZE)
               .fontWeight(FontWeight.Bold).fontColor('#5D574F')
-              .onClick(() => this.showProDrumAccessToast())
           }
         }.alignItems(HorizontalAlign.Start)
         Blank()
@@ -1531,25 +1524,6 @@ struct LeaderLobbyPage {
     } else {
       this.proDrumMachineEntryWithChain('comic/decor/pro-chain-locked.png', true)
     }
-  }
-
-  @Builder
-  private proDrumAccessToast() {
-    ShareCalendarSheet({
-      bottomInset: this.bottomSafeInset,
-      scope: this.soloTeam ? 'solo' : 'team',
-      showShareAction: true,
-      showStoreAction: true,
-      onClose: (): void => { this.proDrumToastVisible = false; },
-      onShare: (): void => {
-        this.proDrumToastVisible = false;
-        router.pushUrl({ url: 'pages/RecordingLibraryPage', params: { scope: this.soloTeam ? 'solo' : 'team' } });
-      },
-      onOpenStore: (): void => {
-        this.proDrumToastVisible = false;
-        router.pushUrl({ url: 'pages/StorePage' });
-      }
-    })
   }
 
   @Builder
@@ -1955,9 +1929,6 @@ struct LeaderLobbyPage {
       }
       if (this.bluetoothRouteConfirmVisible) {
         this.bluetoothRouteConfirmationOverlay()
-      }
-      if (this.proDrumToastVisible) {
-        this.proDrumAccessToast()
       }
     }.height('100%').width('100%').backgroundColor(PAPER)
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])

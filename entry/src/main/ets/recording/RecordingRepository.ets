@@ -1,6 +1,7 @@
 import { common } from '@kit.AbilityKit';
 import { preferences } from '@kit.ArkData';
 import { fileIo as fs, fileUri } from '@kit.CoreFileKit';
+import * as recordingNative from 'libonebeat_recording.so';
 import { photoAccessHelper } from '@kit.MediaLibraryKit';
 import { util } from '@kit.ArkTS';
 import { readOptional, writeAtomic } from '../common/AtomicTextFile';
@@ -154,7 +155,8 @@ export class RecordingRepository {
       autoMicShiftReliable: clip.autoMicShiftReliable,
       renderedMixVersion: clip.renderedMixVersion,
       captureSyncValid: clip.captureSyncValid, captureMappingVersion: clip.captureMappingVersion,
-      videoTimestampDivisor: clip.videoTimestampDivisor, builtInSpeakerCapture: clip.builtInSpeakerCapture
+      videoTimestampDivisor: clip.videoTimestampDivisor, builtInSpeakerCapture: clip.builtInSpeakerCapture,
+      albumUri: clip.albumUri, albumContentAt: clip.albumContentAt
     };
   }
 
@@ -245,9 +247,6 @@ export class RecordingRepository {
       }
       const stored = RecordingRepository.get(clip.id);
       if (stored === undefined) { throw new Error('视频文件不存在，请重新录制'); }
-      if (AppStorage.get<string>('recordingPendingClipId') === stored.id) {
-        throw new Error('请先完成或取消这次分享，再调整声音');
-      }
       const desired = Math.round(gain * 100) / 100;
       const desiredShiftUs = Math.round(micShiftUs / 1000) * 1000;
       const autoAlignmentKnown = stored.autoMicShiftUs !== undefined &&
@@ -282,8 +281,8 @@ export class RecordingRepository {
         const next = RecordingRepository.clips.map((entry: RecordingClip) => entry.id === updated.id ? updated : entry);
         await RecordingRepository.commit(next);
         try { await fs.unlink(recoveryPath); } catch (_error) {}
-        // Gain edits are forbidden while sharing. A paused preview may still
-        // hold its old FD, but unlinking that derived file does not invalidate it.
+        // Share handoffs own immutable snapshots. A preview holding its old FD
+        // remains valid after this obsolete derived file is unlinked.
         if (stored.path !== stored.sourcePath && stored.path !== stored.innerPath &&
           stored.path !== stored.micPath && RecordingRepository.isOwnedPath(stored.path)) {
           try { await fs.unlink(stored.path); } catch (_error) {}
@@ -338,6 +337,35 @@ export class RecordingRepository {
     return task;
   }
 
+  /**
+   * Temporary debug helper: copy the latest recording's raw PCM tracks
+   * (inner + mic) to world-readable files so they can be pulled via hdc.
+   */
+  static async exportLatestTracksForDebug(): Promise<string[]> {
+    const clips = RecordingRepository.list();
+    if (clips.length === 0) {
+      return [];
+    }
+    const latest = clips[0];
+    const exported: string[] = [];
+    await RecordingRepository.exportTrackForDebug(latest.innerPath, 'inner', exported);
+    await RecordingRepository.exportTrackForDebug(latest.micPath, 'mic', exported);
+    return exported;
+  }
+
+  private static async exportTrackForDebug(src: string | undefined, label: string, exported: string[]): Promise<void> {
+    if (src === undefined || src.length === 0 || !RecordingRepository.isOwnedMediaPath(src)) {
+      return;
+    }
+    if (!await fs.access(src)) {
+      return;
+    }
+    const dest = `${RecordingRepository.directory}/debug-export-${label}.pcm`;
+    await fs.copyFile(src, dest);
+    recordingNative.chmod(dest, 0o644);
+    exported.push(dest);
+  }
+
   static add(clip: RecordingClip): Promise<void> {
     return RecordingRepository.enqueue(async () => {
       if (!RecordingRepository.isOwnedPath(clip.path) || !Number.isFinite(clip.durationMs) || clip.durationMs <= 0) {
@@ -360,9 +388,6 @@ export class RecordingRepository {
 
   static remove(id: string): Promise<void> {
     return RecordingRepository.enqueue(async () => {
-      if (AppStorage.get<string>('recordingPendingClipId') === id) {
-        throw new Error('请先完成或取消这段视频的待确认分享');
-      }
       const clip = RecordingRepository.get(id);
       if (clip === undefined) {
         return;
@@ -395,29 +420,47 @@ export class RecordingRepository {
     });
   }
 
-  static async saveToAlbum(clip: RecordingClip, context: common.UIAbilityContext): Promise<void> {
+  /** Returns false for a cancelled system save dialog; true means the current indexed MP4 was copied to its authorized album URI. */
+  static async saveToAlbum(clip: RecordingClip, context: common.UIAbilityContext): Promise<boolean> {
     const stored = RecordingRepository.get(clip.id);
-    if (stored === undefined || !await fs.access(stored.path)) {
+    if (stored === undefined || !RecordingRepository.isOwnedPath(stored.path)) {
       throw new Error('视频文件不存在，请重新录制');
     }
-    const helper = photoAccessHelper.getPhotoAccessHelper(context);
+    const source = await fs.open(stored.path, fs.OpenMode.READ_ONLY);
     try {
-      // The system dialog grants access only to this destination; no broad photo-library permission.
-      const destinations = await helper.showAssetsCreationDialog([fileUri.getUriFromPath(stored.path)], [{
-        title: `oneBeat-${stored.id.substring(0, 8)}`,
-        fileNameExtension: 'mp4', photoType: photoAccessHelper.PhotoType.VIDEO
-      }]);
-      if (destinations.length !== 1) {
-        throw new Error('已取消保存视频');
+      const sourceStat = await fs.stat(source.fd);
+      if (!sourceStat.isFile() || !Number.isFinite(sourceStat.size) || sourceStat.size <= 0) {
+        throw new Error('视频文件无效，请重新录制');
       }
-      const target = await fs.open(destinations[0], fs.OpenMode.WRITE_ONLY);
+      const helper = photoAccessHelper.getPhotoAccessHelper(context);
       try {
-        await fs.copyFile(stored.path, target.fd);
+        // The system grants only this destination. Keep the source FD open so a later MIC render cannot change its bytes.
+        const destinations = await helper.showAssetsCreationDialog([fileUri.getUriFromPath(stored.path)], [{
+          title: `oneBeat-${stored.id.substring(0, 8)}`,
+          fileNameExtension: 'mp4', photoType: photoAccessHelper.PhotoType.VIDEO
+        }]);
+        if (destinations.length === 0) { return false; }
+        if (destinations.length !== 1 || destinations[0].length === 0) {
+          throw new Error('相册保存位置无效，请重新保存');
+        }
+        const destination = await fs.open(destinations[0], fs.OpenMode.WRITE_ONLY);
+        try {
+          await fs.copyFile(source.fd, destination.fd);
+        } finally {
+          try { await fs.close(destination); }
+          catch (_error) { console.warn('[RecordingAlbum] destination close failed'); }
+        }
+        // Remember the media-library URI so later shares reuse this copy instead of saving again.
+        await RecordingRepository.recordAlbumUri(stored.id, destinations[0], stored.renderedAt ?? stored.createdAt);
+        return true;
       } finally {
-        await fs.close(target);
+        // Releasing a completed operation must not turn a successful save into a visible failure.
+        try { await helper.release(); }
+        catch (_error) { console.warn('[RecordingAlbum] helper release failed'); }
       }
     } finally {
-      await helper.release();
+      try { await fs.close(source); }
+      catch (_error) { console.warn('[RecordingAlbum] source close failed'); }
     }
   }
 
@@ -435,6 +478,19 @@ export class RecordingRepository {
     await writeAtomic(RecordingRepository.indexPath, JSON.stringify(snapshot));
     RecordingRepository.clips = clips;
     RecordingRepository.notify();
+  }
+
+  /** Persist the media-library URI for a clip so shares can reuse it; no-op if the clip no longer exists. */
+  static recordAlbumUri(id: string, albumUri: string, albumContentAt: number): Promise<void> {
+    return RecordingRepository.enqueue(async () => {
+      const current = RecordingRepository.get(id);
+      if (current === undefined) { return; }
+      const updated = RecordingRepository.copy(current);
+      updated.albumUri = albumUri;
+      updated.albumContentAt = albumContentAt;
+      await RecordingRepository.commit(RecordingRepository.clips.map(
+        (entry: RecordingClip) => entry.id === id ? updated : entry));
+    });
   }
 
   private static enqueue(action: () => Promise<void>): Promise<void> {

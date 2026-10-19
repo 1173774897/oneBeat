@@ -95,7 +95,7 @@ struct TeamPage {
       try {
         const result = await promptAction.showDialog({
           title: '建队前先打开 Wi-Fi',
-          message: 'OneBeat 使用 Wi-Fi 直连组队，不需要连接同一个路由器。打开后再回来创建队伍。',
+          message: '同拍使用 Wi-Fi 直连组队，不需要连接同一个路由器。打开后再回来创建队伍。',
           buttons: [
             { text: '暂不创建', color: '#625B53' },
             { text: '去打开 Wi-Fi', color: CORAL, primary: true }

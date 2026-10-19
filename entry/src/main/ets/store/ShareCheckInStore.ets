@@ -4,7 +4,7 @@ import { MonotonicClock } from '../common/MonotonicClock';
 import { readOptional, writeAtomic } from '../common/AtomicTextFile';
 import { isMonthlyPassActive, isMonthlyPassRewardStateKnown, waitForMonthlyPassCache } from './EntitlementStore';
 import {
-  beijingDayIndex, emptyShareCheckInSnapshot, reduceShareCheckIn, ShareCheckInDay,
+  beijingDayIndex, beijingDayKey, emptyShareCheckInSnapshot, reduceShareCheckIn, ShareCheckInDay,
   ShareCheckInResult, ShareCheckInSnapshot, visibleShareStreak
 } from './ShareCheckInRules';
 
@@ -156,6 +156,11 @@ export function getShareCheckInSummary(): ShareCheckInSummary {
     todayRewarded: today?.rewardGranted ?? false, trialExpiresAt: snapshot.trialExpiresAt,
     history: history.reverse(), clockBlocked: clockBlocked(), ready
   };
+}
+
+/** Share attempts and reward confirmations must use the same local calendar and clock watermark. */
+export function getShareCheckInTodayKey(): string {
+  return beijingDayKey(effectiveNow());
 }
 
 /** Call only after the share service has verified a handed-off local recording. */

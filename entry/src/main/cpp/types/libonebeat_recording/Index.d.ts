@@ -53,3 +53,4 @@ export const stop: () => Promise<NativeCaptureResult>;
 export const cancel: () => void;
 export const getStatus: () => NativeCaptureStatus;
 export const mix: (options: NativeMixOptions) => Promise<NativeMixResult>;
+export const chmod: (path: string, mode: number) => boolean;

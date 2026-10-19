@@ -24,7 +24,7 @@ import {
   serializeDrumProgram
 } from '../audio/DrumMachineCatalog';
 import { RecordingCoordinator } from '../recording/RecordingCoordinator';
-import { RecordingClip, RecordingScope, RecordingState } from '../recording/RecordingModels';
+import { RecordingClip, RecordingScope, RecordingState, RecordingSavePhase } from '../recording/RecordingModels';
 import { RecordingOverlay } from '../components/RecordingOverlay';
 import { isProDrumMachineAccessible } from '../store/EntitlementStore';
 
@@ -41,6 +41,10 @@ const TOP_PANEL_HIDDEN_OFFSET: number = 204;
 const RECORD_INTRO_HERO_HEIGHT: number = 140;
 const RECORD_INTRO_WIDTH: string = '88%';
 const RECORD_RESULT_WIDTH: string = '86%';
+const RECORD_SAVE_DIALOG_HEIGHT: number = 380;
+const RECORD_SAVE_DIALOG_MAX_HEIGHT: string = '82%';
+const RECORD_SAVE_DIALOG_PADDING: number = 20;
+const RECORD_SAVE_ACTION_HEIGHT: number = 88;
 const RECORD_RESULT_Y_OFFSET: number = 0;
 const RECORD_STOP_PANEL_CLEARANCE: number = 140;
 const RECORD_STOP_DRAWER_CLEARANCE: number = 207;
@@ -82,6 +86,8 @@ struct MainPage {
   @State recordingElapsedMs: number = 0;
   @State showRecordIntro: boolean = false;
   @State showRecordingSaved: boolean = false;
+  @State showRecordingSaving: boolean = false;
+  @State recordingSavePhase: RecordingSavePhase = 'finishing';
   @State savedRecordingLabel: string = '';
   @State savedRecordingScope: RecordingScope = 'solo';
   @State showRecordingError: boolean = false;
@@ -164,8 +170,8 @@ struct MainPage {
       this.showRecordingError = false;
       return true;
     }
-    if (this.showRecordingSaved) {
-      this.showRecordingSaved = false;
+    if (this.showRecordingSaved || this.showRecordingSaving) {
+      this.dismissRecordingSaveDialog();
       return true;
     }
     if (this.showDiscardRecordingConfirm) {
@@ -278,8 +284,18 @@ struct MainPage {
   private refreshRecordingState(): void {
     const snapshot = RecordingCoordinator.getSnapshot();
     const wasActive = this.isRecordingActive();
+    const previousState = this.recordingState;
     if (this.recordingState !== snapshot.state) { this.recordingState = snapshot.state; }
     if (this.recordingElapsedMs !== snapshot.elapsedMs) { this.recordingElapsedMs = snapshot.elapsedMs; }
+    this.recordingSavePhase = snapshot.savePhase ?? 'finishing';
+    if (snapshot.state === 'stopping' && previousState !== 'stopping' && !this.showDiscardRecordingConfirm) {
+      this.showRecordingSaving = true;
+      this.showSaveRecovery = false;
+      this.showRecordingSaved = false;
+      this.showRecordingError = false;
+    } else if (snapshot.state !== 'stopping') {
+      this.showRecordingSaving = false;
+    }
     if (this.recordingState === 'preparing' || (!wasActive && this.recordingState === 'recording')) {
       this.chromeVisible = false;
       this.showStyles = false;
@@ -293,7 +309,9 @@ struct MainPage {
     if (this.recordingSaveSummary !== snapshot.error) {
       this.recordingSaveSummary = snapshot.error;
     }
-    if (snapshot.error.length > 0 && snapshot.error !== this.lastRecordingError) {
+    // A stop can carry a capture-interruption reason while export is still running.
+    // Surface its result only after export has actually succeeded or failed.
+    if (snapshot.state !== 'stopping' && snapshot.error.length > 0 && snapshot.error !== this.lastRecordingError) {
       this.lastRecordingError = snapshot.error;
       const failureAlreadyVisible = this.showRecordingError ||
         (snapshot.pendingClip !== undefined && this.showSaveRecovery);
@@ -304,7 +322,8 @@ struct MainPage {
         );
       }
     }
-    if (snapshot.pendingClip !== undefined && snapshot.pendingClip.id !== this.pendingSaveId) {
+    if (snapshot.state === 'failed' && snapshot.pendingClip !== undefined &&
+      (snapshot.pendingClip.id !== this.pendingSaveId || previousState !== 'failed')) {
       this.pendingSaveId = snapshot.pendingClip.id;
       this.showSaveRecovery = true;
     } else if (snapshot.pendingClip === undefined) {
@@ -379,8 +398,13 @@ struct MainPage {
   private async retryRecordingSave(): Promise<void> {
     if (this.retrySaveBusy) { return; }
     this.retrySaveBusy = true;
+    this.showSaveRecovery = false;
+    this.showRecordingSaving = true;
+    this.recordingSavePhase = 'mixing';
     try {
-      const clip = await RecordingCoordinator.retrySave();
+      const operation = RecordingCoordinator.retrySave();
+      this.refreshRecordingState();
+      const clip = await operation;
       if (this.pageActive) {
         this.refreshRecordingState();
         if (clip !== undefined) {
@@ -395,7 +419,10 @@ struct MainPage {
         userErrorMessage(error, RecordingCoordinator.saveFailureNoticeText()),
         '保存未完成'
       );
-    } finally { this.retrySaveBusy = false; }
+    } finally {
+      this.retrySaveBusy = false;
+      if (this.pageActive) { this.refreshRecordingState(); }
+    }
   }
 
   private requestDiscardPendingRecording(): void {
@@ -424,8 +451,14 @@ struct MainPage {
 
   private async stopRecording(): Promise<void> {
     if (this.recordingState !== 'recording') { return; }
+    this.showRecordingSaving = true;
+    this.showSaveRecovery = false;
+    this.showRecordingSaved = false;
+    this.recordingSavePhase = 'finishing';
     try {
-      await RecordingCoordinator.stop('user');
+      const operation = RecordingCoordinator.stop('user');
+      this.refreshRecordingState();
+      await operation;
     } catch (error) {
       logUserFailure('recording-stop', error);
       this.presentRecordingFailureOrRecovery(
@@ -456,6 +489,8 @@ struct MainPage {
     this.savedRecordingScope = scope;
     this.savedRecordingLabel = scope === 'solo' ? '单人练习作品' : '多人练习作品';
     this.showRecordingError = false;
+    this.showRecordingSaving = false;
+    this.showSaveRecovery = false;
     this.showRecordingSaved = true;
   }
 
@@ -463,6 +498,14 @@ struct MainPage {
     if (!this.pageActive || message.trim().length === 0) { return; }
     const snapshot = RecordingCoordinator.getSnapshot();
     const pending = snapshot.pendingClip;
+    if (snapshot.state === 'stopping') {
+      this.showRecordingSaving = true;
+      this.showRecordingSaved = false;
+      this.showSaveRecovery = false;
+      this.showRecordingError = false;
+      return;
+    }
+    this.showRecordingSaving = false;
     if (pending !== undefined) {
       this.pendingSaveId = pending.id;
       this.recordingSaveSummary = snapshot.error.trim().length > 0 ? snapshot.error : message;
@@ -480,7 +523,27 @@ struct MainPage {
   }
 
   private continueWalkingAfterRecording(): void {
+    this.dismissRecordingSaveDialog();
+  }
+
+  private dismissRecordingSaveDialog(): void {
+    this.showRecordingSaving = false;
     this.showRecordingSaved = false;
+    this.showSaveRecovery = false;
+  }
+
+  private recordingSaveTitle(): string {
+    return this.showRecordingSaving ? '正在保存这一拍' :
+      (this.showRecordingSaved ? '这一拍已保存' : '这一拍还在等保存');
+  }
+
+  private recordingSaveStageNumber(): number {
+    return this.recordingSavePhase === 'indexing' ? 3 : (this.recordingSavePhase === 'mixing' ? 2 : 1);
+  }
+
+  private recordingSaveStageLabel(): string {
+    return this.recordingSavePhase === 'indexing' ? '放入你的练习作品' :
+      (this.recordingSavePhase === 'mixing' ? '合成画面、节奏与 MIC 声音' : '整理刚刚录下的画面与声音');
   }
 
   private async exitAndViewSavedRecording(): Promise<void> {
@@ -507,7 +570,9 @@ struct MainPage {
     }
     router.clear();
     try {
-      await router.replaceUrl({
+      // Rebuild Index under the library so back from「我的作品」returns home instead of exiting the app.
+      await router.replaceUrl({ url: 'pages/Index' });
+      await router.pushUrl({
         url: 'pages/RecordingLibraryPage',
         params: { scope: scope, clipId: clipId }
       });
@@ -756,28 +821,85 @@ struct MainPage {
   }
 
   @Builder
-  private recordingSavedOverlay() {
+  private recordingSaveOverlay() {
     Stack({ alignContent: Alignment.Center }) {
-      Column({ space: 14 }) {
-        Text('SAVED / 已保存').fontSize(11).fontWeight(900).letterSpacing(1).fontColor(PAPER)
-          .backgroundColor(INK).padding({ left: 9, right: 9, top: 4, bottom: 4 }).rotate({ angle: -2 })
-        Text('这一拍，保存好了').fontSize(24).fontWeight(900).fontStyle(FontStyle.Italic).width('100%')
-        Text(`已保存到本机「${this.savedRecordingLabel}」`)
-          .fontSize(15).fontWeight(900).fontColor('#7C493A').lineHeight(22).width('100%')
-        Text(`之后可从首页「${this.savedRecordingScope === 'solo' ? '单人练习' : '多人练习'}」卡片右下角的「作品」入口查看、调节 MIC 音量或分享。`)
-          .fontSize(12).fontColor('#625C54').lineHeight(20).width('100%')
-        Row({ space: 10 }) {
-          Button('继续行进', { type: ButtonType.Normal }).layoutWeight(1).height(46)
-            .fontSize(14).fontWeight(900).fontColor(INK).backgroundColor(PAPER)
-            .border({ width: 1.5, color: INK }).borderRadius(6).shadow(CONTROL_SHADOW)
-            .onClick(() => this.continueWalkingAfterRecording())
-          Button('退出去查看', { type: ButtonType.Normal }).layoutWeight(1).height(46)
-            .fontSize(14).fontWeight(900).fontColor(INK).backgroundColor(CORAL)
-            .border({ width: 1.5, color: INK }).borderRadius(6).shadow(CONTROL_SHADOW)
-            .enabled(!this.exiting).onClick(() => { void this.exitAndViewSavedRecording(); })
-        }.width('100%')
-      }.width(RECORD_RESULT_WIDTH).padding(20).backgroundColor(PAPER).border({ width: 2, color: INK })
-        .borderRadius(9).shadow(CARD_SHADOW).translate({ y: RECORD_RESULT_Y_OFFSET })
+      Column({ space: 12 }) {
+        Row() {
+          Text(this.showRecordingSaving ? 'SAVING / 正在保存' :
+            (this.showRecordingSaved ? 'SAVED / 已保存' : 'RETRY / 等待保存'))
+            .fontSize(11).fontWeight(900).letterSpacing(0.6).fontColor(INK)
+            .backgroundColor(this.showRecordingSaved ? LILAC : CORAL)
+            .padding({ left: 9, right: 9, top: 4, bottom: 4 }).rotate({ angle: -2 })
+          Blank()
+          Text('×').fontSize(25).fontWeight(900).width(28).height(28).textAlign(TextAlign.Center)
+            .onClick(() => this.dismissRecordingSaveDialog())
+        }.width('100%').height(28)
+        Text(this.recordingSaveTitle()).fontSize(24).fontWeight(900).fontStyle(FontStyle.Italic)
+          .fontColor(INK).width('100%').height(34).maxLines(1).minFontSize(20).maxFontSize(24)
+        Scroll() {
+          Column({ space: 10 }) {
+            if (this.showRecordingSaving) {
+              Text('视频正在保存到本机，行进练习会继续。')
+                .fontSize(14).fontWeight(900).fontColor('#7C493A').lineHeight(22).width('100%')
+              Text(`正在完成第 ${this.recordingSaveStageNumber()}/3 步`)
+                .fontSize(12).fontWeight(900).fontColor(INK).width('100%')
+              // This bar advances only when a real save stage completes; the native encoder has no fraction callback.
+              Progress({ value: this.recordingSaveStageNumber() - 1, total: 3, type: ProgressType.Linear })
+                .width('100%').color(CORAL).backgroundColor('#E7DFD3').style({ strokeWidth: 8 })
+              Text(this.recordingSaveStageLabel()).fontSize(12).fontColor('#625C54').lineHeight(19).width('100%')
+              Text('较长的视频需要多一点时间。可先收起此窗口，完成后会告诉你。')
+                .fontSize(11).fontColor('#777064').lineHeight(18).width('100%')
+            } else if (this.showRecordingSaved) {
+              Text(`已保存到本机「${this.savedRecordingLabel}」`)
+                .fontSize(15).fontWeight(900).fontColor('#7C493A').lineHeight(22).width('100%')
+              Text(`之后可从首页「${this.savedRecordingScope === 'solo' ? '单人练习' : '多人练习'}」卡片内的「作品」入口查看、调节 MIC 音量或分享。`)
+                .fontSize(12).fontColor('#625C54').lineHeight(20).width('100%')
+            } else {
+              Text(this.recordingSaveSummary.length > 0 ? this.recordingSaveSummary : '这段视频暂未保存到首页作品列表')
+                .fontSize(13).fontWeight(FontWeight.Bold).fontColor('#7C493A').lineHeight(20).width('100%')
+              if (this.recordingSaveDetail.length > 0) {
+                Text(`原因：${this.recordingSaveDetail}`)
+                  .fontSize(12).fontColor('#625C54').lineHeight(18).width('100%')
+              }
+              Text('画面与音轨仍保留在本机应用内。可以重试保存，也可以稍后处理。')
+                .fontSize(12).fontColor('#625C54').lineHeight(19).width('100%')
+            }
+          }.width('100%').alignItems(HorizontalAlign.Start)
+        }.width('100%').layoutWeight(1).align(Alignment.Top).scrollBar(BarState.Auto)
+        Column({ space: 10 }) {
+          Row({ space: 10 }) {
+            Button('继续行进', { type: ButtonType.Normal }).layoutWeight(1).height(46)
+              .fontSize(14).fontWeight(900).fontColor(INK).backgroundColor(PAPER)
+              .border({ width: 1.5, color: INK }).borderRadius(6).shadow(CONTROL_SHADOW)
+              .onClick(() => this.continueWalkingAfterRecording())
+            if (this.showRecordingSaving) {
+              Button('正在保存…', { type: ButtonType.Normal }).layoutWeight(1).height(46)
+                .fontSize(14).fontWeight(900).fontColor('#625C54').backgroundColor('#E7DFD3')
+                .border({ width: 1.5, color: '#A29B90' }).borderRadius(6).enabled(false)
+            } else if (this.showRecordingSaved) {
+              Button('退出去查看', { type: ButtonType.Normal }).layoutWeight(1).height(46)
+                .fontSize(14).fontWeight(900).fontColor(INK).backgroundColor(CORAL)
+                .border({ width: 1.5, color: INK }).borderRadius(6).shadow(CONTROL_SHADOW)
+                .enabled(!this.exiting).onClick(() => { void this.exitAndViewSavedRecording(); })
+            } else {
+              Button('重试保存', { type: ButtonType.Normal }).layoutWeight(1).height(46)
+                .fontSize(14).fontWeight(900).fontColor(INK).backgroundColor(CORAL)
+                .border({ width: 1.5, color: INK }).borderRadius(6).shadow(CONTROL_SHADOW)
+                .enabled(!this.retrySaveBusy).onClick(() => { void this.retryRecordingSave(); })
+            }
+          }.width('100%')
+          if (!this.showRecordingSaving && !this.showRecordingSaved) {
+            Text('放弃这段').fontSize(12).fontWeight(900).fontColor('#7C493A').padding(5)
+              .enabled(!this.retrySaveBusy).onClick(() => this.requestDiscardPendingRecording())
+          } else {
+            Text(this.showRecordingSaving ? '保存只处理本机视频，不会暂停行进' : '关闭窗口后，也能从首页找到这段作品')
+              .fontSize(10).fontColor('#777064').lineHeight(18).height(28)
+          }
+        }.width('100%').height(RECORD_SAVE_ACTION_HEIGHT)
+      }.width(RECORD_RESULT_WIDTH).height(RECORD_SAVE_DIALOG_HEIGHT)
+        .constraintSize({ maxHeight: RECORD_SAVE_DIALOG_MAX_HEIGHT }).padding(RECORD_SAVE_DIALOG_PADDING)
+        .backgroundColor(PAPER).border({ width: 2, color: INK }).borderRadius(9)
+        .shadow(CARD_SHADOW).translate({ y: RECORD_RESULT_Y_OFFSET })
     }.width('100%').height('100%').backgroundColor('#82000000').zIndex(117)
   }
 
@@ -800,33 +922,6 @@ struct MainPage {
       }.width(RECORD_RESULT_WIDTH).padding(20).backgroundColor(PAPER).border({ width: 2, color: INK })
         .borderRadius(9).shadow(CARD_SHADOW).translate({ y: RECORD_RESULT_Y_OFFSET })
     }.width('100%').height('100%').backgroundColor('#82000000').zIndex(118)
-  }
-
-  @Builder
-  private saveRecoveryOverlay() {
-    Stack({ alignContent: Alignment.Center }) {
-      Column({ space: 14 }) {
-        Text('这一拍，还在等保存').fontSize(24).fontWeight(900).fontStyle(FontStyle.Italic).width('100%')
-        Text(this.recordingSaveSummary.length > 0 ?
-          this.recordingSaveSummary : '这段视频暂未保存到首页作品列表')
-          .fontSize(13).fontWeight(FontWeight.Bold).fontColor('#7C493A').lineHeight(20).width('100%')
-        if (this.recordingSaveDetail.length > 0) {
-          Text(`原因：${this.recordingSaveDetail}`)
-            .fontSize(12).fontColor('#625C54').lineHeight(18).width('100%')
-        }
-        Text('画面与音轨仍保留在本机应用内，可重试保存，或放弃这段后重新录制。')
-          .fontSize(13).fontColor('#625C54').lineHeight(21).width('100%')
-        Button(this.retrySaveBusy ? '正在重试保存…' : '重试保存', { type: ButtonType.Normal })
-          .width('100%').height(48).fontSize(16).fontWeight(900).fontColor(INK).backgroundColor(CORAL)
-          .border({ width: 1.5, color: INK }).borderRadius(6).shadow(CONTROL_SHADOW)
-          .enabled(!this.retrySaveBusy).onClick(() => { void this.retryRecordingSave(); })
-        Text('放弃这段').fontSize(12).fontWeight(900).fontColor('#7C493A').padding(5)
-          .enabled(!this.retrySaveBusy).onClick(() => this.requestDiscardPendingRecording())
-        Text('稍后处理，继续练习').fontSize(12).fontWeight(900).padding(5)
-          .enabled(!this.retrySaveBusy).onClick(() => this.showSaveRecovery = false)
-      }.width(RECORD_INTRO_WIDTH).padding(20).backgroundColor(PAPER).border({ width: 2, color: INK })
-        .borderRadius(9).shadow(CARD_SHADOW)
-    }.width('100%').height('100%').backgroundColor('#82000000').zIndex(115)
   }
 
   @Builder
@@ -1132,14 +1227,12 @@ struct MainPage {
       if (this.showRecordIntro) {
         this.recordingIntroOverlay()
       }
-      if (this.showRecordingSaved) {
-        this.recordingSavedOverlay()
+      if (!this.showDiscardRecordingConfirm &&
+        (this.showRecordingSaving || this.showRecordingSaved || this.showSaveRecovery)) {
+        this.recordingSaveOverlay()
       }
       if (this.showRecordingError) {
         this.recordingErrorOverlay()
-      }
-      if (this.showSaveRecovery) {
-        this.saveRecoveryOverlay()
       }
       if (this.showDiscardRecordingConfirm) {
         this.discardRecordingConfirmOverlay()

@@ -5,6 +5,7 @@ const vm = require('node:vm');
 const { TextEncoder } = require('node:util');
 const ts = require(process.argv[2] || '/Applications/DevEco-Studio.app/Contents/tools/hvigor/hvigor/node_modules/typescript/lib/typescript.js');
 const root = path.resolve(__dirname, '../../entry/src/main/ets');
+const testSharedCalendar = require('./share-calendar.cjs');
 
 function load(file, mocks, globals = {}) {
   const compiled = ts.transpileModule(fs.readFileSync(path.join(root, file), 'utf8'), {
@@ -28,7 +29,8 @@ function plain(value) { return JSON.parse(JSON.stringify(value)); }
 
 function durableEnvironment() {
   const durable = new Map(), files = new Map(), directories = new Set(), failNames = new Set(), trace = [];
-  const failRenames = new Set();
+  const failRenames = new Set(), failUnlinks = new Set();
+  const failCopies = new Set(), failCloses = new Set(), failOpens = new Set();
   const descriptors = new Map();
   let nextFd = 1, nextUuid = 1;
   let chunkSize = Number.MAX_SAFE_INTEGER;
@@ -39,11 +41,13 @@ function durableEnvironment() {
     async listFile(name) { return [...files.keys()].filter(file => file.startsWith(`${name}/`) &&
       !file.substring(name.length + 1).includes('/')).map(file => file.substring(name.length + 1)); },
     async stat(name) {
+      if (typeof name === 'number') name = descriptors.get(name).name;
       assert.ok(files.has(name), `Missing virtual file ${name}`);
       return { size: files.get(name).length, isFile: () => true };
     },
     async readText(name) { assert.ok(files.has(name)); return files.get(name).toString('utf8'); },
     async open(name, mode) {
+      if (failOpens.has(name)) throw new Error(`simulated open failure: ${name}`);
       if ((mode & 2) || name.startsWith('content://')) files.set(name, Buffer.alloc(0));
       assert.ok(files.has(name), `Open requires existing file ${name}`);
       const fd = nextFd++; descriptors.set(fd, { name, position: 0 }); return { fd };
@@ -58,13 +62,26 @@ function durableEnvironment() {
       files.set(descriptor.name, output); return bytes.length;
     },
     async fsync(fd) { trace.push(`fsync:${descriptors.get(fd).name}`); },
-    async close(fd) { descriptors.delete(fd); },
+    async close(file) {
+      const fd = typeof file === 'number' ? file : file.fd;
+      const name = descriptors.get(fd)?.name;
+      descriptors.delete(fd);
+      if (failCloses.has(name)) throw new Error(`simulated close failure: ${name}`);
+    },
     async rename(from, to) {
       if (failRenames.has(to)) throw new Error(`simulated atomic rename failure: ${to}`);
       assert.ok(files.has(from)); files.set(to, files.get(from)); files.delete(from); trace.push(`rename:${to}`);
     },
-    async unlink(name) { assert.ok(files.has(name)); files.delete(name); trace.push(`unlink:${name}`); },
-    async copyFile(from, fd) { files.set(descriptors.get(fd).name, Buffer.from(files.get(from))); }
+    async unlink(name) {
+      if (failUnlinks.has(name)) throw new Error(`simulated unlink failure: ${name}`);
+      assert.ok(files.has(name)); files.delete(name); trace.push(`unlink:${name}`);
+    },
+    async copyFile(from, to) {
+      const sourceName = typeof from === 'number' ? descriptors.get(from).name : from;
+      const targetName = typeof to === 'number' ? descriptors.get(to).name : to;
+      if (failCopies.has(targetName)) throw new Error(`simulated copy failure: ${targetName}`);
+      files.set(targetName, Buffer.from(files.get(sourceName)));
+    }
   };
   const arkData = {
     preferences: { async getPreferences(_context, name) {
@@ -84,7 +101,8 @@ function durableEnvironment() {
     } },
     uniformTypeDescriptor: { UniformDataType: { VIDEO: 'video' } }
   };
-  return { durable, files, failNames, failRenames, trace, fileIo, arkData,
+  return { durable, files, failNames, failRenames, failUnlinks, failCopies, failCloses, failOpens, trace, fileIo, arkData,
+    openDescriptorCount: () => descriptors.size,
     chunks(size) { chunkSize = size; },
     coreFile: { fileIo, fileUri: { getUriFromPath: value => `file://${value}` } },
     arkTs: { util: { generateRandomUUID: () => `test-uuid-${nextUuid++}`,
@@ -140,7 +158,12 @@ async function testCoverExtraction() {
 
 function services(environment = durableEnvironment()) {
   const storage = new Map(), ledgerCalls = [], controllers = [], mixCalls = [], coverCalls = [];
-  const globals = { AppStorage: { get: key => storage.get(key), setOrCreate: (key, value) => storage.set(key, value) },
+  const album = { destinations: ['content://album/video'], dialogError: undefined, releaseError: undefined,
+    dialogs: [], releases: 0 };
+  let now = environment.now ?? Date.now(), mono = 1000;
+  environment.now = now;
+  class ShareDate extends Date { static now() { return now; } }
+  const globals = { Date: ShareDate, AppStorage: { get: key => storage.get(key), setOrCreate: (key, value) => storage.set(key, value) },
     setInterval: () => 1, console: { warn() {} } };
   const atomic = load('common/AtomicTextFile.ets', {
     '@kit.CoreFileKit': environment.coreFile, '@kit.ArkTS': environment.arkTs
@@ -149,12 +172,13 @@ function services(environment = durableEnvironment()) {
   const ledger = load('store/ShareCheckInStore.ets', {
     '@kit.ArkData': environment.arkData,
     '../common/AtomicTextFile': atomic,
-    '../common/MonotonicClock': { MonotonicClock: { nowMs: () => 1000 } },
+    '../common/MonotonicClock': { MonotonicClock: { nowMs: () => mono } },
     './EntitlementStore': { isMonthlyPassActive: () => false,
       isMonthlyPassRewardStateKnown: () => true, waitForMonthlyPassCache: async () => {} },
     './ShareCheckInRules': rules
   }, globals);
   const repository = load('recording/RecordingRepository.ets', {
+    'libonebeat_recording.so': { chmod() {} },
     '@kit.ArkData': environment.arkData, '@kit.CoreFileKit': environment.coreFile,
     '../common/AtomicTextFile': atomic,
     '@kit.ArkTS': environment.arkTs,
@@ -175,24 +199,46 @@ function services(environment = durableEnvironment()) {
         autoMicShiftReliable: clip.autoMicShiftReliable ?? true
       };
     } } },
-    '@kit.MediaLibraryKit': { photoAccessHelper: { PhotoType: { VIDEO: 'video' },
-      getPhotoAccessHelper: () => ({ showAssetsCreationDialog: async () => ['content://album/video'], release() {} }) } }
+    '@kit.MediaLibraryKit': { photoAccessHelper: {
+      PhotoType: { VIDEO: 'video' },
+      getPhotoAccessHelper: () => ({ async showAssetsCreationDialog(uris, configs) {
+        album.dialogs.push({ uris: plain(uris), configs: plain(configs) });
+        if (album.dialogError) throw album.dialogError;
+        return [...album.destinations];
+      }, async release() {
+        album.releases++;
+        if (album.releaseError) throw album.releaseError;
+      } }) } }
   }, globals).RecordingRepository;
-  let showGate, showFailure = false;
+  let showGate, showFailure = false, completionSupported = true;
+  const shareDeviceInfo = { sdkApiVersion: 20 };
   class ShareController {
     constructor(data) { this.data = data; controllers.push(this); }
+    callbacks = new Map();
+    on(event, callback) {
+      if (event === 'shareCompleted' && !completionSupported) throw new Error('unsupported event');
+      this.callbacks.set(event, callback);
+    }
+    complete(name = 'com.test.shareReceiver') { this.callbacks.get('shareCompleted')?.({ targetAbilityInfo: { name } }); }
+    dismiss() { this.callbacks.get('dismiss')?.(); }
     async show() { if (showGate) await showGate; if (showFailure) throw new Error('simulated platform share failure'); }
   }
   const share = load('sharing/RecordingShareService.ets', {
+    '@kit.BasicServicesKit': { deviceInfo: shareDeviceInfo },
     '@kit.ArkData': environment.arkData, '@kit.CoreFileKit': environment.coreFile, '@kit.ArkTS': environment.arkTs,
     '@kit.ShareKit': { systemShare: { SharedData: class { constructor(data) { this.data = data; } }, ShareController,
       SharePreviewMode: { DETAIL: 1 }, SelectionMode: { SINGLE: 1 } } },
     '../recording/RecordingRepository': { RecordingRepository: repository },
-    '../store/ShareCheckInStore': { async acceptShareCheckIn(id) { ledgerCalls.push(id); return ledger.acceptShareCheckIn(id); } }
+    '../common/AtomicTextFile': atomic,
+    '../store/ShareCheckInStore': {
+      initializeShareCheckInStore: context => ledger.initializeShareCheckInStore(context),
+      getShareCheckInSummary: () => ledger.getShareCheckInSummary(),
+      getShareCheckInTodayKey: () => ledger.getShareCheckInTodayKey(),
+      async acceptShareCheckIn(id) { ledgerCalls.push(id); return ledger.acceptShareCheckIn(id); } }
   }, globals).RecordingShareService;
   async function initialize() {
     await repository.initialize({ filesDir: '/app/files' });
-    await share.initialize({});
+    await share.initialize({ filesDir: '/app/files' });
     await ledger.initializeShareCheckInStore({ filesDir: '/app/files' });
   }
   async function clip(extra = {}) {
@@ -202,67 +248,229 @@ function services(environment = durableEnvironment()) {
     await repository.add(entry);
     return repository.get(entry.id);
   }
-  return { environment, storage, ledger, repository, share, ledgerCalls, controllers, mixCalls, coverCalls,
+  return { environment, storage, ledger, repository, share, ledgerCalls, controllers, mixCalls, coverCalls, album,
     initialize, clip, atomic,
-    gate(value) { showGate = value; }, failShow(value) { showFailure = value; } };
+    gate(value) { showGate = value; }, failShow(value) { showFailure = value; },
+    supportCompletion(value) { completionSupported = value; },
+    setSdkApiVersion(value) { shareDeviceInfo.sdkApiVersion = value; },
+    async handOff(controller = controllers.at(-1), name) { controller.complete(name); await flush(); },
+    setNow(value) { mono += Math.max(0, value - now); now = value; environment.now = value; } };
 }
 
 async function testExplicitShareConfirmation() {
   const h = services(); await h.initialize();
   const clip = await h.clip();
+  const another = await h.clip();
   const gate = deferred(); h.gate(gate.promise);
-  const opening = h.share.share(clip, {}); await flush();
+  const opening = h.share.share(clip, {}, 'wechat'); await flush();
   assert.equal(h.share.getPending().handedOff, false);
+  assert.equal(h.share.getPendingForClipToday(clip.id), undefined);
   assert.equal(h.ledgerCalls.length, 0);
   await assert.rejects(h.share.confirmPublished(h.share.getPending().id), /没有待确认/);
   await assert.rejects(h.share.share(clip, {}), /分享正在处理中/);
   gate.resolve(); h.gate(undefined);
   const attempt = await opening;
-  assert.equal(attempt.handedOff, true);
-  assert.equal(h.ledger.getShareCheckInSummary().todayCompleted, false, 'Opening or completing system share never counts as publication');
-  assert.equal(h.ledgerCalls.length, 0);
-  await assert.rejects(h.share.share(clip, {}), /请先确认或取消/);
-  await assert.rejects(h.repository.remove(clip.id), /请先完成或取消/);
-  const confirmation = await h.share.confirmPublished(attempt.id);
+  assert.equal(attempt.handedOff, false, 'Showing a chooser is not a target selection');
+  assert.equal(h.ledger.getShareCheckInSummary().todayCompleted, false);
+  const sharedUri = h.controllers.at(-1).data.data.uri;
+  assert.equal(sharedUri, `file://${attempt.sharedPath}`);
+  assert.deepEqual(h.environment.files.get(attempt.sharedPath), h.environment.files.get(clip.path));
+  h.controllers.at(-1).dismiss(); await flush();
+  assert.equal(h.share.getPendingListToday().length, 0, 'Closing without selecting a target never creates a todo');
+  await h.handOff(h.controllers[0]);
+  assert.equal(h.share.getPendingForClipToday(clip.id).id, attempt.id,
+    'A completion arriving after dismiss still records the actual handoff');
+  const second = await h.share.share(another, {}, 'rednote'); await h.handOff();
+  const third = await h.share.share(clip, {}, 'qq'); await h.handOff();
+  assert.equal(h.share.getPendingListToday().length, 3, 'Multiple works and repeated attempts never lock each other');
+  assert.equal(h.share.getPendingForClipToday(clip.id).id, third.id);
+  const confirmation = await h.share.confirmPublished(second.id);
   assert.equal(confirmation.streakDays, 1);
   assert.equal(h.ledgerCalls.length, 1);
   assert.equal(h.ledger.getShareCheckInSummary().todayCompleted, true);
+  assert.equal(h.share.getPendingForClipToday(clip.id), undefined);
+  assert.equal(h.share.getPendingListToday().length, 0, 'One confirmed work hides todos on every work today');
+  for (const pending of [attempt, second, third]) {
+    assert.equal(h.environment.files.has(pending.sharedPath), false, 'Confirmation releases every now-hidden share copy from the accepted day');
+  }
   assert.equal(h.share.getPending(), undefined);
-  await assert.rejects(h.share.confirmPublished(attempt.id), /没有待确认/);
-  const sameDay = await h.share.share(clip, {});
-  const repeated = await h.share.confirmPublished(sameDay.id);
-  assert.equal(repeated.rewardGranted, false);
-  assert.equal(h.ledger.getShareCheckInSummary().history[0].shareCount, 2);
+  await assert.rejects(h.share.confirmPublished(second.id), /没有待确认/);
+  const sameDay = await h.share.share(clip, {}, 'moments'); await h.handOff();
+  assert.equal(h.share.getPending(), undefined, 'Another successful handoff after checking in is immediately retired');
+  assert.equal(h.environment.files.has(sameDay.sharedPath), false);
+  assert.equal(h.ledger.getShareCheckInSummary().history[0].shareCount, 1);
   assert.equal(h.ledger.getShareCheckInSummary().history.length, 1);
+  const filesBeforeFailure = new Set(h.environment.files.keys());
   h.failShow(true);
-  await assert.rejects(h.share.share(clip, {}), /未能打开系统分享面板/);
-  assert.equal(h.share.getPending(), undefined, 'Rejected platform show clears its pending attempt');
-  assert.equal(h.ledgerCalls.length, 2);
-  assert.equal(h.environment.durable.get('onebeat_video_share:pendingVideoShareV1'), '');
+  await assert.rejects(h.share.share(clip, {}, 'weibo'), /未能打开系统分享面板/);
+  assert.equal(h.ledgerCalls.length, 1);
+  assert.deepEqual(new Set([...h.environment.files.keys()].filter(path => path.includes('.share-'))),
+    new Set([...filesBeforeFailure].filter(path => path.includes('.share-'))), 'A failed chooser cleans its private video snapshot');
+  const before = h.ledger.getShareCheckInSummary().history.length;
+  await h.share.dismissForClip(clip.id);
+  assert.equal(h.environment.files.has(attempt.sharedPath), false);
+  assert.equal(h.environment.files.has(third.sharedPath), false);
+  assert.equal(h.ledger.getShareCheckInSummary().history.length, before, 'Deleting a work cannot erase historical check-ins');
   const coverPath = clip.coverPath;
-  assert.ok(coverPath && h.environment.files.has(coverPath), 'A new recording owns a first-frame cover');
+  assert.ok(coverPath && h.environment.files.has(coverPath));
   await h.repository.remove(clip.id);
   assert.equal(h.environment.files.has(clip.path), false);
-  assert.equal(h.environment.files.has(coverPath), false, 'Deleting a recording removes its cover');
+  assert.equal(h.environment.files.has(coverPath), false);
+}
+
+async function testSystemOperationsAndCrossDay() {
+  const h = services(); await h.initialize();
+  const clip = await h.clip();
+  const attempt = await h.share.share(clip, {});
+  await h.handOff(undefined, 'SystemShare_SaveToMediaAsset');
+  assert.equal(h.share.getPendingListToday().length, 0, 'Saving/copying in the system action row cannot create a share todo');
+  h.controllers.at(-1).dismiss(); await flush();
+  const restart = services(h.environment); await restart.initialize();
+  assert.equal(restart.share.getPending(), undefined, 'Unhanded chooser records are not restored as selected targets');
+  assert.equal(h.environment.files.has(attempt.sharedPath), false, 'Abandoned chooser copies are cleaned on startup');
+  const old = await restart.share.share(clip, {}); await restart.handOff();
+  restart.setNow(Date.now() + 2 * 86400000);
+  assert.equal(restart.share.getPendingForClipToday(clip.id), undefined);
+  await assert.rejects(restart.share.confirmPublished(old.id), /不是今天/);
+  assert.equal(restart.ledger.getShareCheckInSummary().todayCompleted, false,
+    "Yesterday's unconfirmed handoff cannot become today's check-in");
+  const fresh = await restart.share.share(clip, {}); await restart.handOff();
+  assert.equal(restart.share.getPendingForClipToday(clip.id).id, fresh.id);
+  await restart.share.confirmPublished(fresh.id);
+  assert.equal(restart.ledger.getShareCheckInSummary().history.length, 1);
+
+  const migrationEnvironment = durableEnvironment();
+  const setup = services(migrationEnvironment); await setup.initialize();
+  const legacyClip = await setup.clip();
+  migrationEnvironment.files.delete('/app/files/video-share-pending-v2.json');
+  migrationEnvironment.durable.set('onebeat_video_share:pendingVideoShareV1', JSON.stringify({
+    id: 'legacy-share-attempt', clipId: legacyClip.id, createdAt: Date.now(), handedOff: true
+  }));
+  const migrated = services(migrationEnvironment); await migrated.initialize();
+  assert.equal(migrated.share.getPendingForClipToday(legacyClip.id), undefined,
+    'An old chooser-open flag cannot be migrated into proof that a target was selected');
 }
 
 async function testShareCrashReplay() {
   const first = services(); await first.initialize();
   const clip = await first.clip();
-  const pending = await first.share.share(clip, {});
-  first.environment.failNames.add('onebeat_video_share');
-  await assert.rejects(first.share.confirmPublished(pending.id), /simulated flush failure/);
-  assert.equal(first.ledger.getShareCheckInSummary().history[0].shareCount, 1,
-    'Ledger commits before clearing pending; a failed cleanup must not undo its day');
-  assert.equal(first.share.getPending().id, pending.id);
-  first.environment.failNames.delete('onebeat_video_share');
+  const pending = await first.share.share(clip, {}); await first.handOff();
+  const second = await first.share.share(clip, {}); await first.handOff();
+  const sourceBytes = Buffer.from(first.environment.files.get(clip.path));
+  first.environment.failRenames.add('/app/files/video-share-pending-v2.json');
+  const accepted = await first.share.confirmPublished(pending.id);
+  assert.equal(accepted.streakDays, 1, 'A durable check-in stays successful even if pending cleanup fails');
+  assert.equal(first.ledger.getShareCheckInSummary().history[0].shareCount, 1);
+  assert.equal(first.share.getPendingListToday().length, 0);
+  assert.equal(first.share.getPending().id, second.id, 'Failed cleanup keeps its durable records available for restart cleanup');
+  const retry = await first.share.confirmPublished(pending.id);
+  assert.equal(retry.alreadyProcessed, true, 'An interrupted cleanup retry is idempotent');
+  assert.equal(first.ledger.getShareCheckInSummary().history[0].shareCount, 1);
+  const failedCleanupRestart = services(first.environment); await failedCleanupRestart.initialize();
+  assert.equal(failedCleanupRestart.share.getPendingListToday().length, 0,
+    'Repeated cleanup failure on startup cannot turn an already recorded day back into an unfinished todo');
+  assert.equal(failedCleanupRestart.ledger.getShareCheckInSummary().todayCompleted, true);
+  first.environment.failRenames.delete('/app/files/video-share-pending-v2.json');
   const restart = services(first.environment); await restart.initialize();
-  assert.equal(restart.share.getPending().id, pending.id);
-  const result = await restart.share.confirmPublished(pending.id);
-  assert.equal(result.alreadyProcessed, true);
-  assert.equal(result.rewardGranted, false);
+  assert.equal(restart.share.getPending(), undefined, 'Startup removes every pending record hidden by an already committed check-in');
+  assert.equal(first.environment.files.has(pending.sharedPath), false);
+  assert.equal(first.environment.files.has(second.sharedPath), false);
+  assert.deepEqual(first.environment.files.get(clip.path), sourceBytes, 'Deferred share cleanup never modifies the source recording');
   assert.equal(restart.ledger.getShareCheckInSummary().history[0].shareCount, 1);
+  const replay = await restart.ledger.acceptShareCheckIn(pending.id);
+  assert.equal(replay.alreadyProcessed, true);
+}
+
+async function testOldSystemSelfReport() {
+  const h = services(); await h.initialize(); h.supportCompletion(false);
+  const clip = await h.clip();
+  const attempt = await h.share.share(clip, {}, 'wechat');
+  assert.equal(h.share.getPendingForClipToday(clip.id), undefined,
+    'The old-system chooser has to return before a self-report todo becomes eligible');
+  await h.share.markReturnedToApp();
+  const eligible = h.share.getPendingForClipToday(clip.id);
+  assert.equal(eligible.id, attempt.id);
+  assert.equal(eligible.verification, 'self_report');
+  assert.equal(h.ledger.getShareCheckInSummary().todayCompleted, false,
+    'Returning to oneBeat never automatically checks in or rewards a trial');
+  await h.share.confirmPublished(eligible.id);
+  assert.equal(h.ledger.getShareCheckInSummary().todayCompleted, true);
+
+  const silentOld = services(); await silentOld.initialize(); silentOld.setSdkApiVersion(12);
+  const oldClip = await silentOld.clip();
+  await silentOld.share.share(oldClip, {});
+  assert.equal(silentOld.controllers.at(-1).callbacks.has('shareCompleted'), false,
+    'Pre-18 devices must skip event registration even when an unknown event would be silently accepted');
+  await silentOld.share.markReturnedToApp();
+  assert.equal(silentOld.share.getPendingForClipToday(oldClip.id).verification, 'self_report');
+  assert.equal(silentOld.ledger.getShareCheckInSummary().todayCompleted, false);
+
+  const modern = services(); await modern.initialize();
+  const modernClip = await modern.clip();
+  await modern.share.share(modernClip, {});
+  modern.controllers.at(-1).dismiss(); await flush();
+  await modern.share.markReturnedToApp();
+  assert.equal(modern.share.getPendingForClipToday(modernClip.id), undefined,
+    'Explicit return cannot bypass an available target callback on modern systems');
+}
+
+async function testShareCopyCleanup() {
+  const h = services(); await h.initialize();
+  const clip = await h.clip();
+  const originalBytes = Buffer.from(h.environment.files.get(clip.path));
+  const expired = await h.share.share(clip, {}); await h.handOff();
+  h.setNow(h.environment.now + 2 * 86400000);
+  const restart = services(h.environment); await restart.initialize();
+  assert.equal(restart.share.getPending(), undefined, 'Expired pending records cannot stay hidden forever');
+  assert.equal(h.environment.files.has(expired.sharedPath), false);
+  assert.equal(restart.ledger.getShareCheckInSummary().history.length, 0, 'Expiring an unconfirmed share cannot create a check-in');
+  assert.deepEqual(h.environment.files.get(clip.path), originalBytes);
+
+  const pending = await restart.share.share(clip, {}); await restart.handOff();
+  h.environment.failUnlinks.add(pending.sharedPath);
+  const accepted = await restart.share.confirmPublished(pending.id);
+  assert.equal(accepted.streakDays, 1);
   assert.equal(restart.share.getPending(), undefined);
+  assert.equal(h.environment.files.has(pending.sharedPath), true, 'A failed unlink may leave a private orphan after metadata cleanup');
+  h.environment.failUnlinks.delete(pending.sharedPath);
+  const final = services(h.environment); await final.initialize();
+  assert.equal(h.environment.files.has(pending.sharedPath), false, 'Startup safely sweeps unreferenced private share snapshots');
+  assert.deepEqual(h.environment.files.get(clip.path), originalBytes, 'Orphan cleanup never unlinks the source recording');
+  assert.equal(final.ledger.getShareCheckInSummary().history.length, 1);
+}
+
+async function testSharePathBoundary() {
+  const h = services(); await h.initialize();
+  const clip = await h.clip();
+  const originalGet = h.repository.get;
+  const externalPath = '/app/outside.mp4';
+  h.environment.files.set(externalPath, Buffer.from('unrelated-private-file'));
+  const before = new Map(h.environment.files);
+  for (const maliciousId of ['../outside', 'bad/id', 'x'.repeat(129)]) {
+    const invalid = { ...clip, id: maliciousId };
+    h.repository.get = id => id === maliciousId ? invalid : originalGet(id);
+    await assert.rejects(h.share.share(invalid, {}), /分享记录无效/);
+    assert.deepEqual(h.environment.files, before, 'An unsafe source ID cannot copy or remove any file');
+  }
+  h.repository.get = originalGet;
+  const attempt = await h.share.share(clip, {});
+  h.controllers.at(-1).callbacks.get('shareCompleted')({}); await flush();
+  assert.equal(h.share.getPendingForClipToday(clip.id), undefined, 'An incomplete platform event cannot grant handoff eligibility');
+  await h.share.dismissPending(attempt.id);
+  for (const unsafe of [
+    { id: '../outside', clipId: clip.id },
+    { id: 'normal-id', clipId: '../../outside' },
+    { id: 'x'.repeat(129), clipId: clip.id }
+  ]) {
+    const malicious = { ...attempt, ...unsafe, handedOff: true,
+      sharedPath: `/app/files/recordings/${unsafe.clipId}.share-${unsafe.id}.mp4` };
+    h.environment.files.set('/app/files/video-share-pending-v2.json', Buffer.from(JSON.stringify({ version: 2, attempts: [malicious] })));
+    const snapshot = new Map(h.environment.files);
+    const restart = services(h.environment);
+    await assert.rejects(restart.initialize(), /分享记录读取失败/);
+    assert.deepEqual(h.environment.files.get(externalPath), Buffer.from('unrelated-private-file'));
+    assert.deepEqual(h.environment.files, snapshot, 'Invalid restored IDs fail before writing or cleaning any share path');
+  }
 }
 
 async function testLibraryRecovery() {
@@ -296,15 +504,82 @@ async function testLibraryRecovery() {
   assert.equal(h.environment.files.has(clip.path), false);
 }
 
+async function testAlbumSaveLifecycle() {
+  const h = services(); await h.initialize();
+  const clip = await h.clip();
+  const sourceBytes = Buffer.from(h.environment.files.get(clip.path));
+  assert.equal(await h.repository.saveToAlbum({ ...clip, path: '/outside/forged-ui.mp4' }, {}), true,
+    'Album saving resolves the latest indexed path, never the caller-provided path');
+  assert.deepEqual(h.album.dialogs[0], {
+    uris: [`file://${clip.path}`], configs: [{ title: `oneBeat-${clip.id.substring(0, 8)}`,
+      fileNameExtension: 'mp4', photoType: 'video' }]
+  });
+  assert.deepEqual(h.environment.files.get('content://album/video'), sourceBytes);
+  assert.equal(h.environment.openDescriptorCount(), 0);
+
+  h.album.destinations = [];
+  const beforeCancel = new Map(h.environment.files);
+  assert.equal(await h.repository.saveToAlbum(clip, {}), false, 'System cancellation returns false without reporting a save failure');
+  assert.deepEqual(h.environment.files, beforeCancel);
+  assert.equal(h.environment.openDescriptorCount(), 0);
+
+  h.album.destinations = ['content://album/video'];
+  h.album.dialogError = new Error('simulated album authorization failure');
+  h.album.releaseError = new Error('simulated helper release failure');
+  await assert.rejects(h.repository.saveToAlbum(clip, {}), /album authorization failure/,
+    'Cleanup cannot mask the original authorization failure');
+  assert.equal(h.environment.openDescriptorCount(), 0);
+  h.album.dialogError = undefined;
+
+  h.environment.failCopies.add('content://album/video');
+  await assert.rejects(h.repository.saveToAlbum(clip, {}), /simulated copy failure/,
+    'A created album destination is not success until the MP4 copy finishes');
+  assert.equal(h.environment.openDescriptorCount(), 0, 'Copy failure closes both source and destination handles');
+  h.environment.failCopies.clear();
+
+  h.environment.failCloses.add(clip.path);
+  h.environment.failCloses.add('content://album/video');
+  assert.equal(await h.repository.saveToAlbum(clip, {}), true,
+    'Source/destination close or helper release errors cannot turn a completed save into failure');
+  assert.deepEqual(h.environment.files.get('content://album/video'), sourceBytes);
+  assert.equal(h.environment.openDescriptorCount(), 0);
+  h.environment.failCloses.clear(); h.album.releaseError = undefined;
+
+  h.environment.failOpens.add('content://album/video');
+  await assert.rejects(h.repository.saveToAlbum(clip, {}), /simulated open failure/);
+  assert.equal(h.environment.openDescriptorCount(), 0, 'Destination open failure still closes the pinned source');
+  h.environment.failOpens.clear();
+
+  const realGet = h.repository.get;
+  const dialogsBeforeInvalid = h.album.dialogs.length;
+  h.repository.get = id => id === clip.id ? { ...clip, path: '/app/files/recordings/../outside.mp4' } : realGet(id);
+  await assert.rejects(h.repository.saveToAlbum(clip, {}), /视频文件不存在/);
+  h.repository.get = realGet;
+  h.environment.files.set(clip.path, Buffer.alloc(0));
+  await assert.rejects(h.repository.saveToAlbum(clip, {}), /视频文件无效/);
+  assert.equal(h.album.dialogs.length, dialogsBeforeInvalid, 'Invalid or non-owned source paths cannot request album authorization');
+  assert.equal(h.environment.openDescriptorCount(), 0);
+  h.environment.files.set(clip.path, sourceBytes);
+  assert.deepEqual(h.environment.files.get(clip.path), sourceBytes, 'Saving and its failures preserve the original work');
+  assert.equal(h.album.releases, h.album.dialogs.length, 'Every constructed helper is released on success, cancellation and failure');
+}
+
 async function testLargeSnapshotsAndAtomicWrites() {
   const h = services(); await h.initialize();
   const clip = await h.clip();
-  for (let i = 0; i < 70; i++) {
-    const attempt = await h.share.share(clip, {});
-    await h.share.confirmPublished(attempt.id);
+  const attempts = [];
+  for (let i = 0; i < 60; i++) {
+    attempts.push(await h.share.share(clip, {})); await h.handOff();
   }
+  assert.ok(h.environment.files.get('/app/files/video-share-pending-v2.json').length > 8192,
+    'Multiple unfinished shares must exceed Preferences limits without blocking new shares');
+  await h.share.confirmPublished(attempts[0].id);
+  assert.equal(h.share.getPending(), undefined);
+  assert.equal([...h.environment.files.keys()].some(name => name.includes('.share-')), false,
+    'Confirming once releases every same-day hidden MP4 snapshot');
+  for (let i = 1; i < 70; i++) await h.ledger.acceptShareCheckIn(`ledger-repeat-${i}`);
   assert.ok(h.environment.files.get('/app/files/share-check-in-v1.json').length > 8192,
-    'Many same-day shares must preserve all consumed attempts beyond Preferences MAX_VALUE_LENGTH');
+    'Many same-day confirmations preserve consumed-attempt deduplication beyond Preferences MAX_VALUE_LENGTH');
   const priorLedger = Buffer.from(h.environment.files.get('/app/files/share-check-in-v1.json'));
   await h.ledger.refreshShareCheckInClock();
   assert.deepEqual(h.environment.files.get('/app/files/share-check-in-v1.json'), priorLedger,
@@ -396,14 +671,20 @@ async function testWorkScopeAndNonDestructiveGain() {
   assert.equal(h.mixCalls[2].clip.sourcePath, team.sourcePath);
   assert.equal(h.environment.files.has(shifted.path), false, 'A successful newer gain render removes the superseded derived MP4');
   for (const [path, bytes] of immutable) assert.deepEqual(h.environment.files.get(path), bytes, 'Gain renders must never overwrite source stems');
-  await h.repository.saveToAlbum(team, {});
+  assert.equal(await h.repository.saveToAlbum(team, {}), true);
+  assert.deepEqual(h.album.dialogs.at(-1).uris, [`file://${muted.path}`],
+    'The system grants the current derived .mix-UUID.mp4 rather than the original stale UI path');
   assert.deepEqual(h.environment.files.get('content://album/video'), h.environment.files.get(muted.path),
     'Saving a stale UI clip reads the latest indexed render');
   await assert.rejects(h.repository.render(team, 1, 300001), /300 毫秒/);
   const attempt = await h.share.share(team, {});
-  assert.equal(h.controllers.at(-1).data.data.uri, `file://${muted.path}`, 'System share reads the latest render rather than a stale UI path');
-  await assert.rejects(h.repository.render(team, 1), /请先完成或取消这次分享/);
-  assert.equal(h.mixCalls.length, 3, 'Pending publication freezes its exact shared render');
+  assert.equal(h.controllers.at(-1).data.data.uri, `file://${attempt.sharedPath}`);
+  assert.deepEqual(h.environment.files.get(attempt.sharedPath), h.environment.files.get(muted.path),
+    'System share snapshots the latest indexed render rather than a stale UI path');
+  const sharedBytes = Buffer.from(h.environment.files.get(attempt.sharedPath));
+  await h.repository.render(team, 1);
+  assert.equal(h.mixCalls.length, 4, 'An unfinished share never blocks another MIC edit');
+  assert.deepEqual(h.environment.files.get(attempt.sharedPath), sharedBytes, 'The receiver retains the exact shared version while MIC edits replace derived files');
   await h.share.dismissPending(attempt.id);
   await assert.rejects(h.repository.render(team, NaN), /麦克风音量无效/);
   const processedMic = `${team.micPath}.clean-v3.f32`;
@@ -536,83 +817,41 @@ function testLobbyToast() {
   });
   assert.equal(result.diagnostics.filter(item => item.category === ts.DiagnosticCategory.Error).length, 0);
   let access = { allowed: false, source: 'locked', expiresAt: 0 };
-  const routes = [], animations = [];
-  const history = [{ dayKey: '2026-10-18', streakOrdinal: 3, rewardGranted: true }];
+  const routes = [], animations = [], notices = [];
   const context = { exports: {}, Scroller: class {}, Map,
     resolveDrumAccess: () => access, isProDrumMachineAccessible: () => access.allowed,
     formatTrialExpiry: () => '10/19 20:00',
-    getShareCheckInSummary: () => ({ streakDays: 3, todayCompleted: true, history }),
+    showUserNotice: message => notices.push(message),
     router: { pushUrl: value => routes.push(value.url) },
     Curve: { EaseOut: 'ease-out' }, animateTo: (options, action) => { animations.push(options); action(); } };
   vm.runInNewContext(result.outputText, context);
   const page = new context.exports.LeaderLobbyPage();
   page.editDrumMachine();
-  assert.equal(page.proDrumToastVisible, true);
+  assert.deepEqual(notices, ['定制鼓机包含在畅游月卡中']);
   assert.equal(page.proDrumEntryScale, 1);
   assert.equal(animations.length, 1);
-  assert.deepEqual(routes, [], 'A locked entry bounces into its toast without navigating to a new activity page');
-  assert.equal(page.onBackPress(), true);
-  assert.equal(page.proDrumToastVisible, false);
+  assert.deepEqual(routes, [], 'The locked entry shows its membership notice without opening records or navigating');
   access = { allowed: true, source: 'trial', expiresAt: 10000 };
   page.showProDrumAccessToast();
-  assert.equal(page.proDrumToastVisible, true, 'An unlocked status label can still inspect records and rules');
   assert.equal(page.drumAccessLabel(), '试用中 · 截止 10/19 20:00');
-  page.proDrumToastVisible = false;
+  assert.equal(notices.at(-1), '试用中 · 截止 10/19 20:00');
   page.editDrumMachine();
   assert.deepEqual(routes, ['pages/DrumMachinePage'], 'The unlocked title/arrow retains direct editor entry');
   access = { allowed: true, source: 'monthly', expiresAt: 10000 };
   page.showProDrumAccessToast();
   assert.equal(page.drumAccessLabel(), '月卡已解锁');
-  const entryBuilder = between('  private proDrumMachineEntryWithChain(', '  @Builder\n  private proDrumMachineEntry()');
-  assert.match(entryBuilder, /Text\(this\.drumAccessLabel\(\)\)[\s\S]*?\.onClick\(\(\) => this\.showProDrumAccessToast\(\)\)/);
-  assert.doesNotMatch(entryBuilder, /stopPropagation/, 'ArkUI handlers must not depend on a DOM-only event API');
-  const toast = between('  private proDrumAccessToast() {', '  @Builder\n  private scenePreview(');
-  assert.match(toast, /ShareCalendarSheet\(\{/);
+  assert.equal(notices.at(-1), '月卡已解锁');
+  assert.doesNotMatch(source, /ShareCalendarSheet/, 'The lobby membership notice has no activity calendar');
   const calendar = fs.readFileSync(path.join(root, 'components/ShareCalendarSheet.ets'), 'utf8');
-  assert.match(calendar, /Text\('打卡记录'\)/); assert.match(calendar, /Text\('玩法说明'\)/);
+  assert.match(calendar, /Text\('打卡日历'\)/);
   assert.match(calendar, /ForEach\(this\.cells/);
   assert.match(calendar, /columnsTemplate\('1fr 1fr 1fr 1fr 1fr 1fr 1fr'\)/);
-  assert.doesNotMatch(toast, /pages\/ShareCheckInPage/, 'Records and rules remain inside the toast');
+
 }
 
-function testSharedCalendar() {
-  const source = fs.readFileSync(path.join(root, 'components/ShareCalendarSheet.ets'), 'utf8');
-  const business = (source.slice(0, source.indexOf('  @Builder')) + '\n}')
-    .replace(/^import[\s\S]*?from\s+['"][^'"]+['"];\s*/gm, '')
-    .replace(/@Component\b\s*/g, '').replace(/@(?:Prop|State)\s+/g, '')
-    .replace(/@(?:StorageLink|Watch)\([^)]*\)\s*/g, '')
-    .replace('export struct ShareCalendarSheet', 'export class ShareCalendarSheet');
-  const result = ts.transpileModule(business, {
-    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021 }, reportDiagnostics: true
-  });
-  assert.equal(result.diagnostics.filter(item => item.category === ts.DiagnosticCategory.Error).length, 0);
-  let now = Date.parse('2026-10-18T12:00:00+08:00');
-  class CalendarDate extends Date { static now() { return now; } }
-  const history = [{ dayKey: '2026-10-18', streakOrdinal: 3, shareCount: 2, rewardGranted: true, trialExpiresAt: 1000 }];
-  const context = { exports: {}, Date: CalendarDate, Map,
-    getShareCheckInSummary: () => ({ history, streakDays: 3, todayCompleted: true, ready: true, clockBlocked: false }),
-    resolveDrumAccess: () => ({ source: 'trial', expiresAt: 1000 }), formatTrialExpiry: () => '10/19 20:00' };
-  vm.runInNewContext(result.outputText, context);
-  const calendar = new context.exports.ShareCalendarSheet();
-  calendar.scope = 'team'; calendar.aboutToAppear();
-  assert.equal(calendar.selectedDayKey, '2026-10-18');
-  assert.equal(calendar.monthTitle, '2026 年 10 月');
-  assert.equal(calendar.cells.length, 35);
-  assert.equal(calendar.cells[3].day, 1, 'Monday-first October 2026 places Thursday 1 in column four');
-  assert.equal(calendar.cells.find(cell => cell.day === 18).rewarded, true);
-  assert.match(calendar.selectedDetail(), /分享 2 次\n已领 24h/);
-  assert.equal(calendar.history.length, 1, 'Work scope never filters the install-wide reward ledger');
-  calendar.moveMonth(-1); assert.equal(calendar.monthTitle, '2026 年 9 月');
-  calendar.moveMonth(1); calendar.moveMonth(1);
-  assert.equal(calendar.monthOffset, 0, 'Month navigation cannot advance beyond the current month');
-  now = Date.parse('2028-02-29T12:00:00+08:00'); calendar.refresh();
-  assert.equal(calendar.cells.filter(cell => cell.day > 0).length, 29, 'The calendar includes leap-day records');
-  now = Date.parse('2026-10-18T15:59:59Z'); assert.equal(calendar.todayKey(), '2026-10-18');
-  now = Date.parse('2026-10-18T16:00:00Z'); assert.equal(calendar.todayKey(), '2026-10-19', 'Day boundaries use Beijing rather than device timezone');
-}
 
 (async () => {
-  await testCoverExtraction(); await testExplicitShareConfirmation(); await testShareCrashReplay(); await testLibraryRecovery();
+  await testCoverExtraction(); await testExplicitShareConfirmation(); await testSystemOperationsAndCrossDay(); await testShareCrashReplay(); await testOldSystemSelfReport(); await testShareCopyCleanup(); await testSharePathBoundary(); await testLibraryRecovery(); await testAlbumSaveLifecycle();
   await testLargeSnapshotsAndAtomicWrites(); await testWorkScopeAndNonDestructiveGain(); await testRenderedRecovery();
   await testBackgroundOwners(); testLobbyToast(); testSharedCalendar();
   console.log('PASS recording share/storage: explicit publication only, durable pending and crash replay, failed-index MP4 recovery, album copy and background owner union/optional media card failure');

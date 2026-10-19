@@ -4,9 +4,12 @@ import { CARD_SHADOW, CONTROL_SHADOW, CORAL, INK, LILAC, PAPER, WHITE } from './
 
 const SHARE_CALENDAR_SIDE_INSET: number = 18;
 const SHARE_CALENDAR_BOTTOM: number = 28;
+const SHARE_CALENDAR_HEIGHT: number = 640;
 const SHARE_CALENDAR_MAX_HEIGHT: string = '88%';
 const SHARE_CALENDAR_CELL_HEIGHT: number = 37;
 const SHARE_CALENDAR_CELL_GAP: number = 3;
+const SHARE_CALENDAR_INFO_SIZE: number = 18;
+const SHARE_CALENDAR_SECTION_HEIGHT: number = 32;
 const SHARE_CALENDAR_WEEKDAYS: string[] = ['一', '二', '三', '四', '五', '六', '日'];
 const BEIJING_OFFSET_MS: number = 8 * 3600000;
 
@@ -118,13 +121,37 @@ export struct ShareCalendarSheet {
     return '连续分享 3 天起，每天可领 24 小时鼓机试用';
   }
 
+  private showsTrialRewards(): boolean {
+    // Membership changes presentation only: keep historical rewards in the ledger
+    // so they reappear unchanged if the user's monthly pass later expires.
+    return this.accessSource !== 'monthly';
+  }
+
+  private ruleLines(): string[] {
+    const lines: string[] = [
+      '① 录下行进视频并发布至任一分享平台，返回票根页点击“去打卡”确认后完成打卡。打开分享面板或保存到相册不会自动记卡。'
+    ];
+    if (!this.showsTrialRewards()) {
+      lines.push('② 按北京时间自然日记录，每天确认一次。连续分享会累计打卡天数，中断后重新累计。');
+      lines.push('③ 月卡权益生效中，可直接使用定制鼓机。分享用于记录练习，和同频的人留下这一拍。');
+      lines.push('④ 今日完成打卡后，分享按钮恢复整行，当天不再显示“去打卡”。');
+      lines.push('⑤ 记录保存在本机，换设备、卸载或清除数据后不恢复。');
+    } else {
+      lines.push('② 按北京时间自然日计，连续第 3、4、5…天，每天首次符合条件的分享赠送 24 小时试用；一天可多次分享，只领一次。');
+      lines.push('③ 截止为确认时刻起 24 小时，时长不累加。漏一天重新累计，已领试用仍按原截止有效。');
+      lines.push('④ 月卡有效时照常打卡，不赠试用；今日完成打卡后，分享按钮恢复整行，当天不再显示“去打卡”，不补发历史奖励。');
+      lines.push('⑤ 到期不影响正在进行的本轮播放；下一次启动、恢复、试听或应用鼓机时需有效权益。记录保存在本机，换设备、卸载或清除数据后不恢复。');
+    }
+    return lines;
+  }
+
   private selectedDetail(): string {
     const record = this.history.find((day: ShareCheckInDay) => day.dayKey === this.selectedDayKey);
     if (record === undefined) {
       return '这天还没有分享打卡';
     }
-    const outcome = record.rewardGranted ? `已领 24h · 截止 ${formatTrialExpiry(record.trialExpiresAt)}` :
-      (record.memberSkipped ? '月卡期间，只记卡不赠试用' : '已完成打卡');
+    const outcome = this.showsTrialRewards() && record.rewardGranted ?
+      `已领 24h · 截止 ${formatTrialExpiry(record.trialExpiresAt)}` : '已完成打卡';
     return `连续第 ${record.streakOrdinal} 天 · 分享 ${record.shareCount} 次\n${outcome}`;
   }
 
@@ -162,9 +189,9 @@ export struct ShareCalendarSheet {
             if (cell.day > 0) {
               Column({ space: 0 }) {
                 Text(`${cell.day}`).fontSize(12).fontWeight(cell.completed ? 900 : FontWeight.Normal).fontColor(INK)
-                Text(cell.rewarded ? '★' : (cell.completed ? '●' : ' ')).fontSize(8).fontWeight(900).fontColor('#7860A4')
+                Text(cell.rewarded && this.showsTrialRewards() ? '★' : (cell.completed ? '●' : ' ')).fontSize(8).fontWeight(900).fontColor('#7860A4')
               }.width('100%').height(SHARE_CALENDAR_CELL_HEIGHT).justifyContent(FlexAlign.Center)
-                .backgroundColor(cell.rewarded ? LILAC : (cell.completed ? '#E5F3EA' : WHITE))
+                .backgroundColor(cell.rewarded && this.showsTrialRewards() ? LILAC : (cell.completed ? '#E5F3EA' : WHITE))
                 .border({ width: this.selectedDayKey === cell.dayKey ? 2 : 1,
                   color: this.selectedDayKey === cell.dayKey ? INK : (cell.dayKey === this.todayKey() ? CORAL : '#DDD5C9') })
                 .borderRadius(5).onClick(() => { this.selectedDayKey = cell.dayKey; })
@@ -177,7 +204,9 @@ export struct ShareCalendarSheet {
         .width('100%').scrollBar(BarState.Off)
       Row({ space: 12 }) {
         Text('● 已打卡').fontSize(9).fontColor('#467A70')
-        Text('★ 已领试用').fontSize(9).fontColor('#7860A4')
+        if (this.showsTrialRewards()) {
+          Text('★ 已领试用').fontSize(9).fontColor('#7860A4')
+        }
         Text('红框为今日').fontSize(9).fontColor('#A45D45')
       }.width('100%')
       Column({ space: 4 }) {
@@ -191,58 +220,66 @@ export struct ShareCalendarSheet {
   @Builder
   private rules() {
     Column({ space: 10 }) {
-      Text('① 录下行进视频并发布至小红书，返回 oneBeat 明确确认已发布后完成打卡。打开分享面板或保存相册不会自动记卡。')
-        .fontSize(12).fontColor('#5D574F').lineHeight(19).width('100%')
-      Text('② 按北京时间自然日计，连续第 3、4、5…天，每天首次符合条件的分享赠送 24 小时试用；一天可多次分享，只领一次。')
-        .fontSize(12).fontColor('#5D574F').lineHeight(19).width('100%')
-      Text('③ 截止为确认时刻起 24 小时，时长不累加。漏一天重新累计，已领试用仍按原截止有效。')
-        .fontSize(12).fontColor('#5D574F').lineHeight(19).width('100%')
-      Text('④ 月卡有效时照常打卡，不赠试用；月卡到期后，当日新的分享仍可领取尚未领取的一次，不补发历史奖励。')
-        .fontSize(12).fontColor('#5D574F').lineHeight(19).width('100%')
-      Text('⑤ 到期不影响正在进行的本轮播放；下一次启动、恢复、试听或应用鼓机时需有效权益。记录保存在本机，换设备、卸载或清除数据后不恢复。')
-        .fontSize(12).fontColor('#5D574F').lineHeight(19).width('100%')
+      ForEach(this.ruleLines(), (line: string) => {
+        Text(line).fontSize(12).fontColor('#5D574F').lineHeight(19).width('100%')
+      }, (line: string) => line)
     }.width('100%')
   }
 
   build() {
     Stack({ alignContent: Alignment.Bottom }) {
       Column().width('100%').height('100%').backgroundColor('#400F0D09').onClick(() => this.onClose())
-      Scroll() {
-        Column({ space: 11 }) {
-          Row() {
-            Text('分享日历').fontSize(22).fontWeight(900).fontStyle(FontStyle.Italic).fontColor(INK)
-            Blank()
-            Text('×').fontSize(25).fontWeight(FontWeight.Bold).fontColor(INK).width(32).height(32)
-              .textAlign(TextAlign.Center).onClick(() => this.onClose())
-          }.width('100%')
-          Text(this.accessLabel()).fontSize(12).fontWeight(900).fontColor('#61566F').width('100%')
-          Text(`已连续 ${this.streakDays} 天 · ${this.todayCompleted ? '今日已打卡' : '今日待分享'}`)
-            .fontSize(13).fontWeight(900).fontColor(INK).width('100%')
-          if (!this.ledgerReady || this.clockBlocked) {
-            Text(this.clockBlocked ? '设备时间发生回拨，请恢复自动时间后再打卡。已有记录会保留。' : '本机记录正在恢复，请稍后重试。')
-              .fontSize(11).fontColor('#A34530').lineHeight(18).width('100%')
+      Column({ space: 11 }) {
+        Row() {
+          Text('打卡日历').fontSize(22).fontWeight(900).fontStyle(FontStyle.Italic).fontColor(INK)
+          Blank()
+          Text('×').fontSize(25).fontWeight(FontWeight.Bold).fontColor(INK).width(32).height(32)
+            .textAlign(TextAlign.Center).onClick(() => this.onClose())
+        }.width('100%')
+        Text() {
+          Span(`${this.accessLabel()} `)
+          ImageSpan($rawfile('comic/icons/info.svg')).width(SHARE_CALENDAR_INFO_SIZE).height(SHARE_CALENDAR_INFO_SIZE)
+            .verticalAlign(ImageSpanAlignment.CENTER)
+        }.fontSize(12).fontWeight(900).fontColor('#61566F').lineHeight(23).width('100%')
+          .accessibilityText(`${this.accessLabel()}，查看玩法说明`).onClick(() => { this.tab = 1; })
+        Text(`已连续 ${this.streakDays} 天 · ${this.todayCompleted ? '今日已打卡' : '今日待打卡'}`)
+          .fontSize(13).fontWeight(900).fontColor(INK).width('100%')
+        if (!this.ledgerReady || this.clockBlocked) {
+          Text(this.clockBlocked ? '设备时间发生回拨，请恢复自动时间后再打卡。已有记录会保留。' : '本机记录正在恢复，请稍后重试。')
+            .fontSize(11).fontColor('#A34530').lineHeight(18).width('100%')
+        }
+        Row() {
+          Text(this.tab === 0 ? '打卡记录' : '玩法说明').fontSize(13).fontWeight(900).fontColor(INK)
+          Blank()
+          if (this.tab === 1) {
+            Button('‹ 返回日历', { type: ButtonType.Normal }).width(94).height(SHARE_CALENDAR_SECTION_HEIGHT)
+              .padding({ left: 8, right: 8 }).fontSize(12).fontWeight(900).fontColor(INK)
+              .backgroundColor(PAPER).border({ width: 1, color: INK }).borderRadius(4)
+              .onClick(() => { this.tab = 0; })
           }
-          Row({ space: 8 }) {
-            Text('打卡记录').fontSize(13).fontWeight(900).fontColor(INK)
-              .padding({ left: 12, right: 12, top: 7, bottom: 7 }).backgroundColor(this.tab === 0 ? LILAC : PAPER)
-              .border({ width: 1, color: INK }).borderRadius(4).onClick(() => { this.tab = 0; })
-            Text('玩法说明').fontSize(13).fontWeight(900).fontColor(INK)
-              .padding({ left: 12, right: 12, top: 7, bottom: 7 }).backgroundColor(this.tab === 1 ? LILAC : PAPER)
-              .border({ width: 1, color: INK }).borderRadius(4).onClick(() => { this.tab = 1; })
-          }.width('100%')
-          if (this.tab === 0) { this.calendar() } else { this.rules() }
-          if (this.showShareAction) {
-            Button('去分享作品', { type: ButtonType.Normal }).width('100%').height(42).fontSize(13).fontWeight(900).fontColor(INK)
-              .backgroundColor(LILAC).border({ width: 1, color: INK }).borderRadius(5).shadow(CONTROL_SHADOW)
-              .onClick(() => this.onShare())
-          }
-          if (this.showStoreAction && this.accessSource === 'locked') {
-            Text('畅游月卡也可直接解锁 ›').fontSize(12).fontWeight(FontWeight.Bold).fontColor('#61566F')
-              .onClick(() => this.onOpenStore())
-          }
-        }.width('100%').padding(16)
+        }.width('100%').height(SHARE_CALENDAR_SECTION_HEIGHT)
+        // Keep the shell and controls stationary; only the active tab scrolls on short screens.
+        // Separate scroll nodes also open each tab at its own beginning instead of reusing an old offset.
+        if (this.tab === 0) {
+          Scroll() {
+            this.calendar()
+          }.width('100%').layoutWeight(1).scrollBar(BarState.Off)
+        } else {
+          Scroll() {
+            this.rules()
+          }.width('100%').layoutWeight(1).scrollBar(BarState.Off)
+        }
+        if (this.showShareAction) {
+          Button('去分享作品', { type: ButtonType.Normal }).width('100%').height(42).fontSize(13).fontWeight(900).fontColor(INK)
+            .backgroundColor(LILAC).border({ width: 1, color: INK }).borderRadius(5).shadow(CONTROL_SHADOW)
+            .onClick(() => this.onShare())
+        }
+        if (this.showStoreAction && this.accessSource === 'locked') {
+          Text('畅游月卡也可直接解锁 ›').fontSize(12).fontWeight(FontWeight.Bold).fontColor('#61566F')
+            .onClick(() => this.onOpenStore())
+        }
       }.width(`calc(100% - ${SHARE_CALENDAR_SIDE_INSET * 2}vp)`)
-        .constraintSize({ maxHeight: SHARE_CALENDAR_MAX_HEIGHT }).scrollBar(BarState.Off)
+        .height(SHARE_CALENDAR_HEIGHT).constraintSize({ maxHeight: SHARE_CALENDAR_MAX_HEIGHT }).padding(16)
         .backgroundColor('#FFF9EC').border({ width: 1.5, color: INK }).borderRadius(10).shadow(CARD_SHADOW)
         .margin({ bottom: SHARE_CALENDAR_BOTTOM + this.bottomInset })
     }.width('100%').height('100%').zIndex(120)

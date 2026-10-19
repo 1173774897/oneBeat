@@ -10,6 +10,7 @@
     "pages/TimeCardCalibrationPage",
     "pages/StorePage",
     "pages/PrivacyPage",
-    "pages/RecordingLibraryPage"
+    "pages/RecordingLibraryPage",
+    "pages/SavedRecordingPage"
   ]
 }

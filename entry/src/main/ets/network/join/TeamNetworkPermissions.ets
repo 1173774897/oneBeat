@@ -115,7 +115,7 @@ export async function ensureCameraPermission(context: common.UIAbilityContext): 
 }
 
 export function teamNetworkPermissionDeniedHint(): string {
-  return '需要允许 Wi-Fi 附近设备权限才能组队。请在系统弹窗中点允许，或到 设置 → OneBeat → 权限 中开启。';
+  return '需要允许 Wi-Fi 附近设备权限才能组队。请在系统弹窗中点允许，或到 设置 → 同拍 → 权限 中开启。';
 }
 
 export function bluetoothPermissionDeniedHint(): string {

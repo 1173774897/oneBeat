@@ -89,6 +89,8 @@ const DRUM_EDITOR_OFF_GRID_HIT_SIZE: number = 18;
 const DRUM_EDITOR_FILL_FOCUS_DELAY_MS: number = 1000;
 const DRUM_EDITOR_LOCKED_CELL_OPACITY: number = 0.52;
 const DRUM_SECTION_PLAYING_COLOR: string = '#EDE4FA';
+const DRUM_SECTION_TITLE_GAP: number = 4;
+const DRUM_SECTION_TOGGLE_WIDTH: number = 22;
 const DRUM_PHRASE_PLAYING_COLOR: string = '#FFF0B8';
 const DRUM_SONG_PREVIEW_PROGRESS_MS: number = 16;
 const DRUM_SONG_PREVIEW_UPDATE_DELAY_MS: number = 150;
@@ -1789,8 +1791,16 @@ struct DrumMachinePage {
   private sectionCard(index: number) {
     Column({ space: 11 }) {
       Row() {
-        Text(`段落 ${this.sections[index].id}`).fontSize(19).fontWeight(900).fontStyle(FontStyle.Italic)
-        Blank()
+        Row({ space: DRUM_SECTION_TITLE_GAP }) {
+          Text(`段落 ${this.sections[index].id}`).fontSize(19).fontWeight(900).fontStyle(FontStyle.Italic)
+          Text(this.isSectionExpanded(index) ? '⌃' : '⌄').fontSize(22)
+            .width(DRUM_SECTION_TOGGLE_WIDTH).textAlign(TextAlign.Center)
+          Blank()
+        }
+        .layoutWeight(1).height(28)
+        .accessibilityText(`${this.isSectionExpanded(index) ? '收起' : '展开'}段落 ${this.sections[index].id}`)
+        .onClick(() => this.toggleSectionExpanded(index))
+        // Keep deletion outside the title hit area, including its disabled state.
         Button({ type: ButtonType.Normal }) {
           Text('×').fontSize(20).fontWeight(900).fontColor('#D83A2E').lineHeight(22)
         }.width(28).height(28).padding(0).backgroundColor('#FFF1E8')
@@ -1799,9 +1809,6 @@ struct DrumMachinePage {
           .opacity(this.sections.length > 1 ? 1 : 0.4)
           .accessibilityText(this.sections.length > 1 ? `删除段落 ${this.sections[index].id}` : '至少保留一个段落')
           .onClick(() => this.requestDeleteSection(index))
-        Text(this.isSectionExpanded(index) ? '⌃' : '⌄').fontSize(22).width(30).textAlign(TextAlign.Center)
-          .accessibilityText(`${this.isSectionExpanded(index) ? '收起' : '展开'}段落 ${this.sections[index].id}`)
-          .onClick(() => this.toggleSectionExpanded(index))
       }.width('100%')
       if (this.isSectionExpanded(index)) {
         Row({ space: 7 }) {

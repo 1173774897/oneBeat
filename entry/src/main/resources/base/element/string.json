@@ -2,15 +2,15 @@
   "string": [
     {
       "name": "module_desc",
-      "value": "OneBeat entry module"
+      "value": "同拍入口模块"
     },
     {
       "name": "EntryAbility_desc",
-      "value": "OneBeat synchronized metronome"
+      "value": "同拍同步节拍器"
     },
     {
       "name": "EntryAbility_label",
-      "value": "OneBeat"
+      "value": "同拍"
     },
     {
       "name": "perm_internet_reason",
@@ -22,7 +22,7 @@
     },
     {
       "name": "perm_bluetooth_reason",
-      "value": "通过加入码发现附近的 OneBeat 房间"
+      "value": "通过加入码发现附近的同拍房间"
     },
     {
       "name": "perm_camera_reason",

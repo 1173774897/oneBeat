@@ -1,0 +1,8 @@
+{
+  "tool": "built-in image_gen.imagegen",
+  "transparent_background": false,
+  "referenceAsset": "designs/app-icons/2026-10-19/20-23-sticker-characters-board.png",
+  "output": "20-23-sticker-characters-coral-wordmark-board.png",
+  "wordmarkFaceColor": "#FF7056",
+  "prompt": "Use case: precise-object-edit / color replacement.\nEdit the attached four-icon comparison image with an extremely localized color change.\nChange ONLY the turquoise/teal FACE FILL of the English wordmark \"ONEBEAT\" in ALL FOUR icon tiles 20, 21, 22 and 23 to the app's warm CORAL RED #FF7056. Keep the existing subtle face texture/shading if any, recoloring only that same front letter surface.\nStrict invariants: preserve EVERY letter shape, exact spelling ONEBEAT, original italic angle, black outline, black thick extruded underside, cream sticker keyline, and all text positions and sizes. Keep all four original characters, their faces, eye counts, body/skin/clothing/hair colors, contours and poses unchanged. DO NOT recolor the cyan cloud character, mint-green teapot, blue beanie walker or any other teal areas outside the seven letters in each wordmark. Do not add red elsewhere.\nKeep all four lavender square backgrounds, sheet gutters, warm-ivory presentation background, numbering 20/21/22/23, image dimensions, composition, crop and sticker thickness unchanged. No redesign, no new styling, no new elements, no text changes, no watermark.\nResult is the SAME exact 2x2 comparison board with only the wordmark faces changed from teal to warm coral-red, suitable for comparing the two color options."
+}

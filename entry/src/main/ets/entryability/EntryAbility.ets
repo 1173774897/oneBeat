@@ -73,6 +73,12 @@ export default class EntryAbility extends UIAbility {
       return;
     }
     try {
+      const exportedTracks = await RecordingRepository.exportLatestTracksForDebug();
+      hilog.info(DOMAIN, TAG, `Debug export tracks: ${JSON.stringify(exportedTracks)}`);
+    } catch (_error) {
+      hilog.warn(DOMAIN, TAG, 'Debug export tracks failed');
+    }
+    try {
       await RecordingShareService.initialize(this.context);
     } catch (_error) {
       // Sharing metadata cannot prevent a local video from being recorded.
@@ -90,6 +96,9 @@ export default class EntryAbility extends UIAbility {
     hilog.info(DOMAIN, TAG, 'EntryAbility onForeground');
     RecordingCoordinator.handleForeground();
     AppSession.handleAppForeground();
+    void RecordingShareService.markReturnedToApp().catch(() => {
+      hilog.warn(DOMAIN, TAG, 'Refresh local share handoff failed');
+    });
     void refreshShareCheckInClock().catch(() => {
       hilog.warn(DOMAIN, TAG, 'Refresh local trial clock failed');
     });

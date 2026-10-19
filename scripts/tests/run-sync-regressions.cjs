@@ -27,9 +27,12 @@ const suites = [
   'route-probe-playback.cjs',
   'time-card-calibration.cjs',
   'share-check-in.cjs',
+  'share-calendar.cjs',
   'recording-capture-lifecycle.cjs',
   'recording-share-storage.cjs',
-  'recording-page-flow.cjs'
+  'recording-page-flow.cjs',
+  'recording-save-dialog.cjs',
+  'saved-recording-page.cjs'
 ];
 
 function isUsableTypeScript(candidate) {
