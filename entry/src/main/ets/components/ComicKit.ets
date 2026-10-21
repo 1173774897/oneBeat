@@ -60,11 +60,12 @@ export struct ComicCharacter {
   // Pose artwork is only for static editorial scenes; walking sprites and
   // portraits retain their original assets and animation/selection contracts.
   @Prop pose: string = '';
+  @Prop objectFit: ImageFit = ImageFit.Contain;
   build() {
     if (this.avatar === 'random') {
       if (isRandomPoolCharacter(this.mysteryAvatar)) {
         Image($rawfile(`comic/mystery/${this.mysteryAvatar}.png`))
-          .width('100%').height('100%').objectFit(ImageFit.Contain)
+          .width('100%').height('100%').objectFit(this.objectFit)
       } else {
         Stack() {
           Text('?').fontSize(this.portrait ? 34 : 92).fontWeight(900).fontColor(INK)
@@ -74,7 +75,7 @@ export struct ComicCharacter {
     } else {
       Image($rawfile(this.portrait ? `comic/avatars/${this.avatar}.png` :
         this.pose.length > 0 ? `comic/poses/${this.pose}.png` : `comic/characters/${this.avatar}.png`))
-        .width('100%').height('100%').objectFit(ImageFit.Contain)
+        .width('100%').height('100%').objectFit(this.objectFit)
     }
   }
 }

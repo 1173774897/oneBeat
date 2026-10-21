@@ -42,8 +42,10 @@ assert.match(homeCard,
   'The selected C layout must retain asymmetric practice cards');
 assert.match(home, /const HOME_TEAM_ENTRY_WEIGHT: number = 56/);
 assert.match(home, /const HOME_SOLO_ENTRY_WEIGHT: number = 44/);
-assert.match(homeCard, /backgroundColor\(WHITE\)/,
-  'Works pills use the white capsule from the reference layout');
+assert.match(homeCard, /backgroundColor\(PAPER\)/,
+  'Works pills use a soft paper capsule distinct from the practice card fill');
+assert.match(homeCard, /HOME_WORKS_PILL_INK/);
+assert.match(homeCard, /HOME_WORKS_PILL_BORDER/);
 const storeCard = home.slice(home.indexOf('  private storeEntryPanel('), home.indexOf('  build()'));
 assert.doesNotMatch(storeCard, /Image\(/, 'The selected store panel intentionally has no illustration');
 assert.match(storeCard, /backgroundColor\(LILAC\)/);

@@ -1491,13 +1491,12 @@ struct LeaderLobbyPage {
         .border({ width: 1.5, color: INK }).borderRadius(7)
         .shadow(CARD_SHADOW).opacity(locked ? 0.68 : 1)
         .align(Alignment.Top).translate({ y: PRO_DRUM_ENTRY_PADDING })
-        .onClick(() => this.editDrumMachine())
+        .hitTestBehavior(HitTestMode.None)
       this.proChain(asset)
       // Keep the title above the decorative chain so narrow-screen labels stay readable.
       Row() {
         Column({ space: 2 }) {
           Text('PRO 定制鼓机').fontSize(21).fontWeight(900).fontStyle(FontStyle.Italic).fontColor(INK)
-            .onClick(() => this.editDrumMachine())
           if (!locked) {
             Text(this.drumAccessLabel()).fontSize(PRO_DRUM_TRIAL_LABEL_SIZE)
               .fontWeight(FontWeight.Bold).fontColor('#5D574F')
@@ -1505,16 +1504,18 @@ struct LeaderLobbyPage {
         }.alignItems(HorizontalAlign.Start)
         Blank()
         Text('›').fontSize(30).fontColor(INK)
-          .onClick(() => this.editDrumMachine())
       }
       .width('100%').height(PRO_DRUM_BUTTON_HEIGHT).padding({ left: 16, right: 14 })
       .opacity(locked ? 0.68 : 1)
       .align(Alignment.Top).translate({ y: PRO_DRUM_ENTRY_PADDING })
+      .hitTestBehavior(HitTestMode.None)
     }
     // Intentionally paint the hanging tail above later controls without adding
-    // layout space; the decorative image must still let their taps through.
+    // layout space; taps anywhere on the entry box share one target.
     .width('100%').height(PRO_DRUM_BUTTON_HEIGHT + PRO_DRUM_ENTRY_PADDING * 2).clip(false).zIndex(1)
     .scale({ x: this.proDrumEntryScale, y: this.proDrumEntryScale })
+    .onClick(() => { this.editDrumMachine(); })
+    .accessibilityText(locked ? 'PRO 定制鼓机，查看开通方案' : 'PRO 定制鼓机，编辑鼓机')
   }
 
   @Builder

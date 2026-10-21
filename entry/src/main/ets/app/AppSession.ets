@@ -204,6 +204,12 @@ export class AppSession {
     return AppSession.instance;
   }
 
+  /** Isolated audio work must also wait for retiring renderers and route observers. */
+  static hasLiveOrRetiringSession(): boolean {
+    return AppSession.instance !== undefined || AppSession.retiringSession !== undefined ||
+      AppSession.resetOperation !== undefined;
+  }
+
   static createLeader(displayName: string): AppSession {
     AppSession.assertPreviousSessionReleased();
     const id = `sess-${Date.now()}`;

@@ -47,6 +47,7 @@ interface StoreCharacter {
   name: string;
   caption: string;
   asset: string;
+  photoAsset?: string;
   color: string;
   productId: string;
   mystery?: boolean;
@@ -71,11 +72,11 @@ class StorePurchaseError extends Error {
 const STORE_EXCLUSIVE_CHARACTERS: StoreCharacter[] = [
   { key: 'cloud', name: '云行者', caption: '轻盈天空拍', asset: 'cloud', color: '#DCE9FA', productId: 'onebeat.character.cloud' },
   { key: 'teapot', name: '茶壶太太', caption: '慢火稳拍', asset: 'teapot', color: '#FFD06A', productId: 'onebeat.character.teapot' },
-  { key: 'wave', name: 'Wave', caption: '浪线步态', asset: 'wave', color: '#7EC8FF', productId: 'onebeat.character.wave' },
-  { key: 'mismatch', name: '条纹步客', caption: '酷脸推进', asset: 'mismatch', color: '#E8DFF6', productId: 'onebeat.character.mismatch' },
+  { key: 'wave', name: 'Wave', caption: '浪线步态', asset: 'wave', photoAsset: 'comic/store/wave.png', color: '#7EC8FF', productId: 'onebeat.character.wave' },
+  { key: 'mismatch', name: '条纹步客', caption: '酷脸推进', asset: 'mismatch', photoAsset: 'comic/store/mismatch.png', color: '#E8DFF6', productId: 'onebeat.character.mismatch' },
   { key: 'scooter', name: '思古特', caption: '双拍十六帧', asset: 'scooter', color: '#FF9E7A', productId: 'onebeat.character.scooter' },
   { key: 'lilroll', name: '轮滑小子', caption: '贴地飞行', asset: 'lilroll', color: '#C7B8EC', productId: 'onebeat.character.lilroll' },
-  { key: 'lamp', name: '台灯漫游者', caption: '暖光引路', asset: 'lamp', color: '#FFB347', productId: 'onebeat.character.lamp' }
+  { key: 'lamp', name: '台灯漫游者', caption: '暖光引路', asset: 'lamp', photoAsset: 'comic/store/lamp.png', color: '#FFB347', productId: 'onebeat.character.lamp' }
 ];
 
 const STORE_MULTI_CHARACTERS: StoreCharacter[] = [
@@ -115,6 +116,12 @@ const PASS_BANNER_ACTION_X: string = '78.4%';
 const PASS_BANNER_ACTION_Y: string = '59.2%';
 const PASS_BANNER_ACTION_WIDTH: string = '17.4%';
 const PASS_BANNER_ACTION_HEIGHT: string = '20.5%';
+const DRUM_INTRO_ASSET: string = 'comic/store/pro-drum-intro.png';
+const DRUM_INTRO_IMAGE_RATIO: number = 2 / 3;
+const DRUM_INTRO_SIDE_INSET: number = 12;
+const DRUM_INTRO_CLOSE_TOP: number = 8;
+const DRUM_INTRO_CLOSE_SIZE: number = 44;
+const DRUM_INTRO_CONTENT_GAP: number = 10;
 
 // The bubble hugs two five-character phrases instead of stretching with the viewport.
 const REDEMPTION_SPEECH_WIDTH: number = 168;
@@ -125,7 +132,8 @@ const REDEMPTION_HERO_HEIGHT: number = 266;
 const REDEMPTION_CHARACTER_WIDTH: number = 160;
 const REDEMPTION_CHARACTER_HEIGHT: number = 240;
 const REDEMPTION_CHARACTER_TOP: number = 14;
-const REDEMPTION_CHARACTER_RIGHT_BLEED: number = -20;
+const REDEMPTION_TEXT_WIDTH_RATIO: number = 0.46;
+const REDEMPTION_CHARACTER_X_OFFSET: number = 0;
 
 @Entry
 @Component
@@ -143,6 +151,7 @@ struct StorePage {
   @State passSource: string = '';
   @State passIapPurchaseAllowed: boolean = true;
   @State passBannerWidth: number = PASS_BANNER_DEFAULT_WIDTH;
+  @State redemptionHeroWidth: number = PASS_BANNER_DEFAULT_WIDTH;
   @State limitedFreeCharacters: string[] = [];
   @State limitedFreeScenes: string[] = [];
   @State passCharacters: string[] = [];
@@ -156,6 +165,7 @@ struct StorePage {
   @State redemptionSyncFailed: boolean = false;
   @State redemptionBusy: boolean = false;
   @State purchaseVisible: boolean = false;
+  @State drumIntroVisible: boolean = false;
   @State pendingType: string = '';
   @State pendingKey: string = '';
   @State pendingName: string = '';
@@ -193,6 +203,10 @@ struct StorePage {
   }
 
   onBackPress(): boolean {
+    if (this.purchaseVisible && this.drumIntroVisible) {
+      this.closeDrumIntro();
+      return true;
+    }
     if (this.purchaseVisible) {
       if (!this.purchaseBusy) {
         this.purchaseVisible = false;
@@ -413,6 +427,18 @@ struct StorePage {
     this.pendingProductId = PASS_PRODUCT_ID;
     this.resetPurchaseFeedback();
     this.purchaseVisible = true;
+  }
+
+  private openDrumIntro(): void {
+    if (!this.purchaseVisible || this.pendingType !== 'pass' ||
+      this.storeActionType === 'restore' || this.purchaseBusy) {
+      return;
+    }
+    this.drumIntroVisible = true;
+  }
+
+  private closeDrumIntro(): void {
+    this.drumIntroVisible = false;
   }
 
   private restorablePurchases(purchases: StorePurchaseSubmission[]): StorePurchaseSubmission[] {
@@ -900,6 +926,7 @@ struct StorePage {
   }
 
   private resetPurchaseFeedback(): void {
+    this.drumIntroVisible = false;
     this.storeActionType = 'purchase';
     this.storeActionStatus = '';
     this.storeActionRecovery = '';
@@ -1028,23 +1055,35 @@ struct StorePage {
       .rotate({ angle: -2 }).clip(false).position({ x: 0, y: 8 })
   }
 
+  private redemptionArtworkX(): number {
+    // Reserve the complete speech bubble as well as the proportional copy column.
+    // Keep the character at its original size when a narrow viewport overhangs it.
+    const textWidth = Math.max(REDEMPTION_SPEECH_WIDTH + 8,
+      this.redemptionHeroWidth * REDEMPTION_TEXT_WIDTH_RATIO);
+    return textWidth + (this.redemptionHeroWidth - textWidth - REDEMPTION_CHARACTER_WIDTH) / 2 +
+      REDEMPTION_CHARACTER_X_OFFSET;
+  }
+
   @Builder
   private redemptionHero() {
     Stack({ alignContent: Alignment.TopStart }) {
-      // Mirroring places the tickets towards the speech bubble. The pose has a
-      // transparent outer margin: the small overhang keeps its visible ink inside
-      // the page inset while clearing the bubble even on a 320vp screen.
+      // Mirror the existing pose so its tickets continue facing the speech bubble.
       ComicCharacter({ avatar: 'mismatch', pose: 'mismatch-ticket' })
         .width(REDEMPTION_CHARACTER_WIDTH).height(REDEMPTION_CHARACTER_HEIGHT)
         .scale({ x: -1, y: 1 })
-        .position({ x: '100%', y: REDEMPTION_CHARACTER_TOP })
-        .translate({ x: REDEMPTION_CHARACTER_RIGHT_BLEED - REDEMPTION_CHARACTER_WIDTH })
+        .position({ x: this.redemptionArtworkX(), y: REDEMPTION_CHARACTER_TOP })
         .hitTestBehavior(HitTestMode.None).accessibilityLevel('no')
       this.redemptionSpeechBubble()
       Text('有效口令会直接为当前账号送上一张畅游月卡。')
         .fontSize(13).fontWeight(FontWeight.Bold).lineHeight(20).fontColor('#5D574F')
-        .width('46%').maxLines(4).position({ x: 0, y: 184 })
+        .width(`${REDEMPTION_TEXT_WIDTH_RATIO * 100}%`).maxLines(4).position({ x: 0, y: 184 })
     }.width('100%').height(REDEMPTION_HERO_HEIGHT).clip(false)
+      .onAreaChange((_old: Area, area: Area) => {
+        const width = Number(area.width);
+        if (width > 0 && Math.abs(width - this.redemptionHeroWidth) > 0.1) {
+          this.redemptionHeroWidth = width;
+        }
+      })
   }
 
   @Builder
@@ -1216,6 +1255,8 @@ struct StorePage {
           .position({ x: 10, y: 7 }).rotate({ angle: -8 })
         if (item.mystery === true) {
           this.mysteryCharacterArt(item)
+        } else if (item.photoAsset !== undefined) {
+          Image($rawfile(item.photoAsset)).width('96%').height('96%').objectFit(ImageFit.Contain)
         } else {
           ComicCharacter({ avatar: item.asset, pose: item.asset }).width('96%').height('96%')
         }
@@ -1369,6 +1410,33 @@ struct StorePage {
   }
 
   @Builder
+  private drumIntroOverlay() {
+    // Block also suppresses child hit tests; the modal must keep its close and scroll controls interactive.
+    Stack({ alignContent: Alignment.TopStart }) {
+      Scroll() {
+        Image($rawfile(DRUM_INTRO_ASSET)).width('100%').aspectRatio(DRUM_INTRO_IMAGE_RATIO)
+          .objectFit(ImageFit.Contain).draggable(false)
+          .accessibilityText('PRO 定制鼓机介绍：12 种风格、10 种鼓声，选择节奏型与加花、点格子编写鼓点，试听并应用到队伍')
+      }.width('100%').height('100%').align(Alignment.TopStart)
+        .scrollable(ScrollDirection.Vertical).scrollBar(BarState.Off)
+        .padding({ left: DRUM_INTRO_SIDE_INSET, right: DRUM_INTRO_SIDE_INSET,
+          top: this.topSafeInset + DRUM_INTRO_CLOSE_TOP + DRUM_INTRO_CLOSE_SIZE + DRUM_INTRO_CONTENT_GAP,
+          bottom: this.bottomSafeInset + DRUM_INTRO_SIDE_INSET })
+      Row() {
+        Blank()
+        Button('×', { type: ButtonType.Normal }).width(DRUM_INTRO_CLOSE_SIZE).height(DRUM_INTRO_CLOSE_SIZE)
+          .padding(0).fontSize(29).fontWeight(FontWeight.Bold).fontColor(INK).backgroundColor(PAPER)
+          .border({ width: 1.5, color: INK }).borderRadius(DRUM_INTRO_CLOSE_SIZE / 2).shadow(CONTROL_SHADOW)
+          .id('drum-intro-close').accessibilityText('关闭鼓机介绍')
+          .onClick(() => this.closeDrumIntro())
+      }.width('100%').height(DRUM_INTRO_CLOSE_SIZE)
+        .padding({ right: DRUM_INTRO_SIDE_INSET })
+        .position({ x: 0, y: this.topSafeInset + DRUM_INTRO_CLOSE_TOP })
+    }.width('100%').height('100%').backgroundColor('#F2171B1F')
+      .hitTestBehavior(HitTestMode.Default).zIndex(110)
+  }
+
+  @Builder
   private purchaseDialog() {
     Stack({ alignContent: Alignment.Center }) {
       Column({ space: 12 }) {
@@ -1379,13 +1447,33 @@ struct StorePage {
         Text(this.storeActionType === 'restore' ? '恢复购买' : this.pendingName)
           .fontSize(27).fontWeight(900).fontStyle(FontStyle.Italic)
         if (this.storeActionType !== 'restore') {
-          Text(this.pendingType === 'pass' ? '开通后可使用当前及后续上架的所有角色、场景和 pro 鼓机。' :
-            '购买后会加入“我的”，可在小铺和队伍中使用。')
-            .fontSize(13).fontWeight(FontWeight.Bold).lineHeight(20).width('100%')
+          if (this.pendingType === 'pass') {
+            Text() {
+              Span('开通后可使用当前及后续上架的所有角色、场景和 ')
+              Span('PRO 定制鼓机').fontColor('#B63926')
+                .decoration({ type: TextDecorationType.Underline })
+                .onClick(() => this.openDrumIntro())
+              Span('。')
+            }.fontSize(13).fontWeight(FontWeight.Bold).lineHeight(20).width('100%')
+              .id('pass-benefits-description')
+          } else {
+            Text('购买后会加入“我的”，可在小铺和队伍中使用。')
+              .fontSize(13).fontWeight(FontWeight.Bold).lineHeight(20).width('100%')
+          }
           Text(this.pendingPrice).fontSize(22).fontWeight(900).fontColor(CORAL)
         }
         if (this.pendingType === 'pass' && this.storeActionType !== 'restore') {
-          Text(this.passDescription()).fontSize(12).fontWeight(FontWeight.Bold).width('100%')
+          Text() {
+            if (this.passDescription().includes('PRO 定制鼓机')) {
+              Span(this.passDescription().split('PRO 定制鼓机')[0])
+              Span('PRO 定制鼓机').fontColor('#B63926')
+                .decoration({ type: TextDecorationType.Underline })
+                .onClick(() => this.openDrumIntro())
+              Span(this.passDescription().split('PRO 定制鼓机')[1])
+            } else {
+              Span(this.passDescription())
+            }
+          }.fontSize(12).fontWeight(FontWeight.Bold).width('100%').id('pass-rights-description')
           Text(this.passActive && this.passSource === 'PASS_REDEMPTION' ? '赠送月卡到期后结束，不自动续费。' :
             '本方案按月自动续费，可在华为账号的订阅管理中取消；取消后本期仍可使用。')
             .fontSize(11).fontColor('#6B655D').lineHeight(17).width('100%')
@@ -1508,6 +1596,9 @@ struct StorePage {
       }
       if (this.purchaseVisible) {
         this.purchaseDialog()
+      }
+      if (this.purchaseVisible && this.drumIntroVisible) {
+        this.drumIntroOverlay()
       }
     }.width('100%').height('100%').backgroundColor(PAPER)
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])

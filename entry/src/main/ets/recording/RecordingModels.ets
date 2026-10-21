@@ -1,5 +1,7 @@
 export type RecordingState = 'idle' | 'preparing' | 'recording' | 'stopping' | 'failed';
 export type RecordingScope = 'solo' | 'team';
+/** The immutable MIC stem's processing contract; absent means legacy screen MIC. */
+export type RecordingMicCaptureMode = 'system-aec' | 'screen-mic';
 /** Coarse, completed I/O boundaries; these stages are not a time-based percentage. */
 export type RecordingSavePhase = 'finishing' | 'mixing' | 'indexing';
 
@@ -37,8 +39,10 @@ export interface RecordingClip {
   captureSyncValid?: boolean;
   captureMappingVersion?: number;
   videoTimestampDivisor?: number;
-  /** True when capture started on built-in speaker; mix applies echo bleed cancel. */
+  /** True on built-in speaker; only legacy screen MIC uses offline echo cancellation. */
   builtInSpeakerCapture?: boolean;
+  /** System AEC stems bypass the legacy offline echo fit and automatic MIC shift. */
+  micCaptureMode?: RecordingMicCaptureMode;
   /** Media-library URI produced by "save to album"; reused for sharing so the album copy is made only once. */
   albumUri?: string;
   /** renderedAt (or createdAt) of the content stored at albumUri; used to invalidate the URI after a re-render. */
@@ -55,6 +59,8 @@ export interface PendingRecordingCapture {
 /** Amplitude is a measured input peak in [0, 1], never a beat-driven or synthetic waveform. */
 export interface RecordingSnapshot {
   state: RecordingState;
+  /** True until native screen capture has finished releasing; save/result UI must stay out of the video. */
+  captureActive: boolean;
   elapsedMs: number;
   amplitude: number;
   error: string;

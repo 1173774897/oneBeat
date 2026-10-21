@@ -18,7 +18,8 @@ const heroHeight = constant('REDEMPTION_HERO_HEIGHT');
 const characterWidth = constant('REDEMPTION_CHARACTER_WIDTH');
 const characterHeight = constant('REDEMPTION_CHARACTER_HEIGHT');
 const characterTop = constant('REDEMPTION_CHARACTER_TOP');
-const rightBleed = constant('REDEMPTION_CHARACTER_RIGHT_BLEED');
+const textWidthRatio = constant('REDEMPTION_TEXT_WIDTH_RATIO');
+const characterXOffset = constant('REDEMPTION_CHARACTER_X_OFFSET');
 const bubble = source.slice(source.indexOf('private redemptionSpeechBubble()'), source.indexOf('private redemptionHero()'));
 const hero = source.slice(source.indexOf('private redemptionHero()'), source.indexOf('private redemptionPage()'));
 const page = source.slice(source.indexOf('private redemptionPage()'), source.indexOf('private limitedPrice('));
@@ -29,7 +30,8 @@ assert.match(contours[0], /H127L131 111L107 99/, 'Keep the tail within the share
 assert.match(asset, /transform="translate\(3 4\)"/);
 assert.match(asset, /fill="#FFFDF8"/);
 assert.doesNotMatch(asset, /<text\b/, 'Speech must remain live native text');
-assert.match(asset, new RegExp('viewBox="0 0 ' + (bubbleWidth + 8) + ' ' + (bodyHeight + tailHeight + 8) + '"'));
+// The native image stretches the SVG horizontally to fit the live five-character copy.
+assert.match(asset, new RegExp('viewBox="0 0 [0-9]+ ' + (bodyHeight + tailHeight + 8) + '"'));
 assert.match(bubble, /Text\('说出暗号，'\)/);
 assert.match(bubble, /Text\('节拍开门！'\)/);
 assert.equal((bubble.match(/\.maxLines\(1\)/g) || []).length, 2, 'Each complete phrase stays on its own line');
@@ -38,16 +40,21 @@ assert.match(bubble, /\.clip\(false\)/, 'The arrow shadow must not be clipped');
 assert.match(bubble, /\.position\(\{ x: 0, y: 8 \}\)/, 'Position the bubble root, not the void builder call');
 assert.match(hero, /pose: 'mismatch-ticket'/);
 assert.match(hero, /\.scale\(\{ x: -1, y: 1 \}\)/, 'Mirror only the editorial pose');
-assert.match(hero, /\.position\(\{ x: '100%', y: REDEMPTION_CHARACTER_TOP \}\)/);
-assert.match(hero, /REDEMPTION_CHARACTER_RIGHT_BLEED - REDEMPTION_CHARACTER_WIDTH/);
+assert.match(hero, /\.position\(\{ x: this\.redemptionArtworkX\(\), y: REDEMPTION_CHARACTER_TOP \}\)/);
+assert.match(hero, /this\.redemptionHeroWidth = width/);
 assert.ok(characterHeight > 194, 'Enlarge the selected concept\'s character');
 assert.ok(characterTop + characterHeight <= heroHeight, 'Reserve space before the redemption form');
-assert.ok(rightBleed < 32, 'Overhang must stay inside the pose\'s transparent trailing margin');
+const placement = source.match(/private redemptionArtworkX\(\): number \{([\s\S]*?)\n  \}/);
+assert.ok(placement, 'Use the runtime layout width for centering');
+const artworkX = new Function('REDEMPTION_SPEECH_WIDTH', 'REDEMPTION_TEXT_WIDTH_RATIO',
+  'REDEMPTION_CHARACTER_WIDTH', 'REDEMPTION_CHARACTER_X_OFFSET', placement[1]);
 for (const viewport of [320, 360, 390, 430]) {
   const contentWidth = viewport - 18 * 2;
-  const characterLeft = contentWidth - characterWidth + rightBleed;
-  assert.ok(characterLeft + 12 > bubbleWidth + 8, viewport + ': keep the mirrored ticket clear of the bubble');
-  assert.ok(characterLeft >= contentWidth * 0.46, viewport + ': keep explanatory text clear of the character');
+  const textWidth = Math.max(bubbleWidth + 8, contentWidth * textWidthRatio);
+  const characterLeft = artworkX.call({ redemptionHeroWidth: contentWidth },
+    bubbleWidth, textWidthRatio, characterWidth, characterXOffset);
+  assert.ok(Math.abs(characterLeft + characterWidth / 2 - (textWidth + contentWidth) / 2 - characterXOffset) < 1e-9,
+    viewport + ': center the original-size art in the space after the text region');
   assert.ok(bubbleWidth + 8 < contentWidth, viewport + ': keep the speech bubble inside the page');
 }
 assert.match(page, /this\.redemptionHero\(\)/);
@@ -55,4 +62,4 @@ assert.match(page, /this\.redemptionCard\(\)/);
 assert.match(source, /\.enabled\(!this\.redemptionBusy && this\.redemptionCode\.trim\(\)\.length > 0\)/);
 assert.match(source, /\.onClick\(\(\) => void this\.submitRedemption\(\)\)/);
 assert.ok(fs.existsSync(path.join(root, 'entry/src/main/resources/rawfile/comic/poses/mismatch-ticket.png')));
-console.log('PASS: compact live speech, unified arrow hard shadow, enlarged mirrored pose, 320–430vp clearance and existing redemption flow retained');
+console.log('PASS: compact live speech, unified arrow hard shadow, original-size mirrored pose centered after text at 320–430vp and existing redemption flow retained');

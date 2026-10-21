@@ -4,6 +4,8 @@ export interface NativeCaptureOptions {
   micPath: string;
   width: number;
   height: number;
+  /** ArkTS must verify API20 LIVE AEC support before opting in. No native source fallback. */
+  systemAecMic?: boolean;
 }
 export interface NativeCaptureResult {
   durationMs: number;
@@ -16,6 +18,11 @@ export interface NativeCaptureResult {
   videoLastPtsUs?: number;
   micFirstPtsUs?: number;
   innerFirstPtsUs?: number;
+  micCaptureMode?: 'system-aec' | 'screen-mic';
+  /** Records the verified LIVE capture selection, not measured acoustic cancellation quality. */
+  micAecApplied?: boolean;
+  micInputChannels?: number;
+  micHardwareTimestampKnown?: boolean;
 }
 export interface NativeCaptureStatus {
   stateCode: number;
@@ -42,6 +49,8 @@ export interface NativeMixOptions {
   processedMicPath: string;
   /** 0–4: ceiling for estimated speaker-to-mic gain; zero bypasses echo fitting. */
   speakerBleedCancel: number;
+  /** Quiet LIVE AEC input only: fixed MIC level compensation, never a playback gain or time edit. */
+  normalizeSystemMic?: boolean;
 }
 export interface NativeMixResult {
   autoMicShiftUs: number;

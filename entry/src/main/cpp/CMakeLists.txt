@@ -8,4 +8,4 @@ target_compile_options(onebeat_recording PRIVATE -Wall -Wextra -O2)
 target_link_libraries(onebeat_recording PUBLIC libace_napi.z.so libnative_avscreen_capture.so
   libnative_media_core.so libnative_media_venc.so libnative_media_acodec.so
   libnative_media_avmuxer.so libnative_media_avdemuxer.so libnative_media_avsource.so
-  libnative_media_codecbase.so libnative_window.so)
+  libnative_media_codecbase.so libnative_window.so libohaudio.so)

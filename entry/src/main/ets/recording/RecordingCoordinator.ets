@@ -1,20 +1,24 @@
 import { abilityAccessCtrl, Context, Permissions } from '@kit.AbilityKit';
 import { audio } from '@kit.AudioKit';
+import { deviceInfo } from '@kit.BasicServicesKit';
 import { display } from '@kit.ArkUI';
 import { fileIo } from '@kit.CoreFileKit';
 import * as recordingNative from 'libonebeat_recording.so';
 import { AudioOutputMonitor } from '../audio/AudioOutputMonitor';
+import { RecordingPlaybackObserver } from '../audio/RecordingPlaybackObserver';
+import { AppSession } from '../app/AppSession';
 import { MonotonicClock } from '../common/MonotonicClock';
 import { SessionBackgroundKeeper } from '../session/SessionBackgroundKeeper';
 import { RecordingClip, RecordingListener, RecordingScope, RecordingSnapshot, RecordingState, RecordingSavePhase } from './RecordingModels';
 import { RecordingRepository, RecordingTarget } from './RecordingRepository';
-import { RecordingMixer, RECORDING_MIX_VERSION } from './RecordingMixer';
+import { RecordingMixer } from './RecordingMixer';
 
 const INPUT_PEAK_INTERVAL_MS: number = 80;
 const CONSENT_FOREGROUND_GRACE_MS: number = 500;
 const MAX_FRAME_WIDTH_PX: number = 1080;
 const MICROPHONE_PERMISSION: Permissions = 'ohos.permission.MICROPHONE';
 const MIC_CAPTURE_INFO: audio.AudioCapturerInfo = { source: audio.SourceType.SOURCE_TYPE_MIC, capturerFlags: 0 };
+const AEC_CAPTURE_INFO: audio.AudioCapturerInfo = { source: audio.SourceType.SOURCE_TYPE_LIVE, capturerFlags: 0 };
 
 /** Capture observes the screen; its native workers never own playback, clocks or output calibration. */
 export class RecordingCoordinator {
@@ -37,6 +41,8 @@ export class RecordingCoordinator {
   private static savePhase: RecordingSavePhase = 'finishing';
   private static micMuted: boolean = false;
   private static builtInSpeakerCapture: boolean = false;
+  private static systemAecMic: boolean = false;
+  private static captureInfo: audio.AudioCapturerInfo = MIC_CAPTURE_INFO;
   private static lastClip: RecordingClip | undefined = undefined;
   private static pendingClip: RecordingClip | undefined = undefined;
   private static startedAtMonoMs: number = 0;
@@ -50,6 +56,7 @@ export class RecordingCoordinator {
   private static lastNativeState: number = -1;
   private static inputDevice: audio.AudioDeviceDescriptor | undefined = undefined;
   private static inputRouting: audio.AudioRoutingManager | undefined = undefined;
+  private static playbackObserver: RecordingPlaybackObserver | undefined = undefined;
   private static listeners: RecordingListener[] = [];
   private static foreground: boolean = true;
   private static readonly inputChangeListener = (devices: audio.AudioDeviceDescriptors): void => {
@@ -88,7 +95,8 @@ export class RecordingCoordinator {
   /** The waveform reads this snapshot only; raw PCM never crosses NAPI or enters UI timers. */
   static getSnapshot(): RecordingSnapshot {
     return {
-      state: RecordingCoordinator.state, elapsedMs: RecordingCoordinator.elapsedMs,
+      state: RecordingCoordinator.state, captureActive: RecordingCoordinator.nativeActive,
+      elapsedMs: RecordingCoordinator.elapsedMs,
       amplitude: RecordingCoordinator.amplitude, error: RecordingCoordinator.error,
       saveFailureDetail: RecordingCoordinator.saveFailureDetail,
       savePhase: RecordingCoordinator.savePhase,
@@ -192,7 +200,7 @@ export class RecordingCoordinator {
     }
     if (target === undefined || target.id !== clip.id) { throw new Error('无法确认待清理的录制文件'); }
     RecordingCoordinator.setState('stopping');
-    const processedMicPath = RecordingMixer.processedMicPath(RecordingCoordinator.micPath());
+    const processedMicPath = RecordingMixer.processedMicPath(RecordingCoordinator.micPath(), clip.micCaptureMode);
     const paths: string[] = [target.path, RecordingCoordinator.sourcePath(), RecordingCoordinator.innerPath(),
       RecordingCoordinator.micPath(), processedMicPath, `${processedMicPath}.tmp`,
       target.path.replace('.mp4', '.recovery.json')];
@@ -238,10 +246,13 @@ export class RecordingCoordinator {
         throw new Error('当前设备不支持画面与麦克风同时录制');
       }
       await RecordingCoordinator.ensureMicrophonePermission();
+      RecordingCoordinator.systemAecMic = RecordingCoordinator.supportsSystemAecMic();
+      RecordingCoordinator.captureInfo = RecordingCoordinator.systemAecMic ? AEC_CAPTURE_INFO : MIC_CAPTURE_INFO;
+      console.info(`[RecordingMic] mode=${RecordingCoordinator.systemAecMic ? 'system-aec' : 'screen-mic'}`);
       RecordingCoordinator.inputDevice = await RecordingCoordinator.requirePhoneMicrophone();
       RecordingCoordinator.inputRouting = audio.getAudioManager().getRoutingManager();
       RecordingCoordinator.inputRouting.on('preferredInputDeviceChangeForCapturerInfo',
-        MIC_CAPTURE_INFO, RecordingCoordinator.inputChangeListener);
+        RecordingCoordinator.captureInfo, RecordingCoordinator.inputChangeListener);
       const screen = display.getDefaultDisplaySync();
       const scale = Math.min(1, MAX_FRAME_WIDTH_PX / screen.width);
       RecordingCoordinator.frameWidth = Math.max(2, Math.floor(screen.width * scale / 2) * 2);
@@ -249,15 +260,18 @@ export class RecordingCoordinator {
       RecordingCoordinator.target = await RecordingRepository.createTarget();
       await SessionBackgroundKeeper.setRecordingActive(true);
       if (RecordingCoordinator.pendingStopReason.length === 0) {
+        RecordingCoordinator.beginPlaybackObservation();
         RecordingCoordinator.nativeActive = true;
         const operation = recordingNative.start({
           videoPath: RecordingCoordinator.sourcePath(), innerPath: RecordingCoordinator.innerPath(),
           micPath: RecordingCoordinator.micPath(), width: RecordingCoordinator.frameWidth,
-          height: RecordingCoordinator.frameHeight
+          height: RecordingCoordinator.frameHeight, systemAecMic: RecordingCoordinator.systemAecMic
         });
         RecordingCoordinator.schedulePeakRead();
         await operation;
         if (RecordingCoordinator.pendingStopReason.length === 0) {
+          const outputProblem = RecordingCoordinator.playbackObserver?.checkpoint('native-started') ?? '';
+          if (outputProblem.length > 0) { throw new Error(outputProblem); }
           RecordingCoordinator.markStarted();
           const input = await RecordingCoordinator.requirePhoneMicrophone();
           if (input.id !== RecordingCoordinator.inputDevice.id) { throw new Error('麦克风输入已切换，请重新录制'); }
@@ -298,6 +312,8 @@ export class RecordingCoordinator {
       ` micFirstUs=${result.micFirstPtsUs ?? -1} innerFirstUs=${result.innerFirstPtsUs ?? -1}` +
       ` micOffsetUs=${result.micOffsetUs} innerOffsetUs=${result.innerOffsetUs} innerLeadUs=${innerLeadUs}` +
       ` builtInSpeaker=${RecordingCoordinator.builtInSpeakerCapture}` +
+      ` micCaptureMode=${result.micCaptureMode ?? 'screen-mic'} micAecApplied=${result.micAecApplied === true}` +
+      ` micInputChannels=${result.micInputChannels ?? 0}` +
       ` durationMs=${result.durationMs} syncValid=${result.syncValid}`);
     const target = RecordingCoordinator.target;
     if (target === undefined || result.durationMs <= 0) {
@@ -308,6 +324,10 @@ export class RecordingCoordinator {
     }
     RecordingCoordinator.elapsedMs = result.durationMs;
     const reason = RecordingCoordinator.pendingStopReason || 'user';
+    const micModeMatches = RecordingCoordinator.systemAecMic ?
+      result.micCaptureMode === 'system-aec' && result.micAecApplied === true &&
+        result.timestampMappingVersion === 3 && result.micHardwareTimestampKnown === true :
+      result.micCaptureMode !== 'system-aec' && result.timestampMappingVersion === 2;
     const clip: RecordingClip = {
       id: target.id, path: target.path, createdAt: target.createdAt, durationMs: result.durationMs,
       width: RecordingCoordinator.frameWidth, height: RecordingCoordinator.frameHeight,
@@ -316,11 +336,12 @@ export class RecordingCoordinator {
       micPath: RecordingCoordinator.micPath(), micOffsetUs: result.micOffsetUs, innerOffsetUs: result.innerOffsetUs,
       audioSampleRate: 48000, audioChannels: 2, renderedGain: 1, renderedMicShiftUs: 0,
       renderedMixVersion: 0, renderedAt: Date.now(),
-      captureSyncValid: result.syncValid && result.timestampMappingVersion === 2 &&
+      captureSyncValid: result.syncValid && micModeMatches &&
         (result.videoTimestampDivisor === 1 || result.videoTimestampDivisor === 1000),
       captureMappingVersion: result.timestampMappingVersion ?? 0,
       videoTimestampDivisor: result.videoTimestampDivisor ?? 0,
-      builtInSpeakerCapture: RecordingCoordinator.builtInSpeakerCapture
+      builtInSpeakerCapture: RecordingCoordinator.builtInSpeakerCapture,
+      micCaptureMode: RecordingCoordinator.systemAecMic ? 'system-aec' : 'screen-mic'
     };
     RecordingCoordinator.pendingClip = clip;
     RecordingCoordinator.saveFailureDetail = '';
@@ -354,7 +375,7 @@ export class RecordingCoordinator {
     if (await fileIo.access(clip.path)) {
       const stat = await fileIo.stat(clip.path);
       rendered = stat.isFile() && stat.size > 0 &&
-        (clip.renderedMixVersion ?? 0) >= RECORDING_MIX_VERSION &&
+        (clip.renderedMixVersion ?? 0) >= RecordingMixer.mixVersion(clip) &&
         clip.autoMicShiftUs !== undefined && clip.autoMicShiftConfidence !== undefined &&
         clip.autoMicShiftReliable !== undefined;
     }
@@ -364,7 +385,7 @@ export class RecordingCoordinator {
         clip.autoMicShiftUs = mixResult.autoMicShiftUs;
         clip.autoMicShiftConfidence = mixResult.autoMicShiftConfidence;
         clip.autoMicShiftReliable = mixResult.autoMicShiftReliable;
-        clip.renderedMixVersion = RECORDING_MIX_VERSION;
+        clip.renderedMixVersion = RecordingMixer.mixVersion(clip);
         clip.renderedAt = Date.now();
         // A crash after export must restore the same automatic baseline instead
         // of fitting again against an already-created sidecar without metadata.
@@ -415,11 +436,47 @@ export class RecordingCoordinator {
   }
 
   private static async requirePhoneMicrophone(): Promise<audio.AudioDeviceDescriptor> {
-    const inputs = await audio.getAudioManager().getRoutingManager().getPreferredInputDeviceForCapturerInfo(MIC_CAPTURE_INFO);
+    const inputs = await audio.getAudioManager().getRoutingManager()
+      .getPreferredInputDeviceForCapturerInfo(RecordingCoordinator.captureInfo);
     if (inputs.length !== 1 || inputs[0].deviceType !== audio.DeviceType.MIC) {
       throw new Error('请使用手机麦克风录制；当前麦克风路由不可用');
     }
     return inputs[0];
+  }
+  private static supportsSystemAecMic(): boolean {
+    if (deviceInfo.sdkApiVersion < 20) { return false; }
+    try {
+      return audio.getAudioManager().getStreamManager()
+        .isAcousticEchoCancelerSupported(audio.SourceType.SOURCE_TYPE_LIVE);
+    } catch (_error) {
+      // Older/unsupported systems keep the existing screen MIC rather than
+      // forcing voice-call routing, which can change a team's headphone delay.
+      console.warn('[RecordingMic] LIVE AEC unavailable; retaining screen MIC');
+      return false;
+    }
+  }
+  private static beginPlaybackObservation(): void {
+    RecordingCoordinator.playbackObserver?.dispose();
+    const session = AppSession.get();
+    // Capture observes the original session only. It never acquires a new
+    // engine, reschedules transport, or changes saved headphone compensation.
+    const observer: RecordingPlaybackObserver = new RecordingPlaybackObserver(
+      (details: boolean) => session !== undefined && AppSession.get() === session ?
+        session.metronome.readMicExperimentPlaybackSnapshot(details) : undefined,
+      (): string => session !== undefined && AppSession.get() === session ? session.controller.state : 'idle',
+      (reason: string): void => {
+        if (RecordingCoordinator.playbackObserver !== observer) { return; }
+        RecordingCoordinator.error = reason;
+        if (RecordingCoordinator.pendingStopReason.length === 0 || RecordingCoordinator.pendingStopReason === 'user') {
+          RecordingCoordinator.pendingStopReason = 'playback-output-change';
+        }
+        if (RecordingCoordinator.state === 'preparing' || RecordingCoordinator.state === 'recording') {
+          void RecordingCoordinator.stop('playback-output-change');
+        }
+      });
+    RecordingCoordinator.playbackObserver = observer;
+    const problem = observer.start();
+    if (problem.length > 0) { throw new Error(problem); }
   }
   private static async ensureMicrophonePermission(): Promise<void> {
     const context = RecordingCoordinator.context;
@@ -482,12 +539,19 @@ export class RecordingCoordinator {
     RecordingCoordinator.amplitude = 0;
     let result: recordingNative.NativeCaptureResult = { durationMs: 0, micOffsetUs: 0, innerOffsetUs: 0, syncValid: true };
     if (RecordingCoordinator.nativeActive) {
+      RecordingCoordinator.playbackObserver?.checkpoint('before-native-stop');
       if (RecordingCoordinator.nativeStopOperation === undefined) { RecordingCoordinator.nativeStopOperation = recordingNative.stop(); }
       try { result = await RecordingCoordinator.nativeStopOperation; } catch (err) {
         RecordingCoordinator.error = (err as Error).message || '系统录制结束失败';
       }
       RecordingCoordinator.nativeActive = false;
+      RecordingCoordinator.playbackObserver?.checkpoint('after-native-stop');
+      // A stop request alone does not end video frames. Publish this boundary only
+      // after native stop/release resolves, so save UI cannot enter the captured tail.
+      RecordingCoordinator.notify();
     }
+    RecordingCoordinator.playbackObserver?.dispose();
+    RecordingCoordinator.playbackObserver = undefined;
     const routing = RecordingCoordinator.inputRouting;
     RecordingCoordinator.inputRouting = undefined;
     RecordingCoordinator.inputDevice = undefined;

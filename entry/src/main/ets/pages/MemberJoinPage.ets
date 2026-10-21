@@ -1,5 +1,5 @@
 import { common } from '@kit.AbilityKit';
-import { router } from '@kit.ArkUI';
+import { router, RectShape } from '@kit.ArkUI';
 import { scanCore, scanBarcode } from '@kit.ScanKit';
 import { AppSession, MemberJoinStage } from '../app/AppSession';
 import { isUserCancelled, logUserFailure, userErrorMessage } from '../common/UserFeedback';
@@ -18,10 +18,27 @@ import {
   teamNetworkPermissionDeniedHint,
   verifyTeamNetworkAccess
 } from '../network/join/TeamNetworkPermissions';
-import { ComicCharacter, PAPER, INK, CORAL, LILAC, TEAL, CARD_SHADOW, CONTROL_SHADOW } from '../components/ComicKit';
+import { ComicCharacter, PAPER, INK, CORAL, LILAC, WHITE, CONTROL_SHADOW } from '../components/ComicKit';
+import { TeamTicketBackdrop, TeamWifiFooter } from '../components/TeamEntryVisuals';
 
 const PLAYER_DISPLAY_NAME_KEY: string = 'playerDisplayName';
-const JOIN_HERO_HEIGHT: number = 162;
+const JOIN_PAGE_SIDE_INSET: number = 18;
+const JOIN_HEADER_HEIGHT: number = 36;
+const JOIN_HERO_HEIGHT: number = 180;
+const JOIN_HERO_TEXT_WIDTH_RATIO: number = 0.46;
+const JOIN_HERO_ILLUSTRATION_WIDTH: number = 246;
+const JOIN_HERO_ILLUSTRATION_X_OFFSET: number = 0;
+const JOIN_HERO_ART_WIDTH: number = 230;
+const JOIN_HERO_ART_HEIGHT: number = 276;
+const JOIN_HERO_ART_Y: number = -12;
+const JOIN_TICKET_HEIGHT: number = 360;
+const JOIN_SCAN_HEIGHT: number = 156;
+const JOIN_DIVIDER_HEIGHT: number = 24;
+const JOIN_CODE_HEIGHT: number = 180;
+const JOIN_CONTENT_INSET: number = 20;
+const JOIN_ACTION_HEIGHT: number = 46;
+const JOIN_DISABLED_OPACITY: number = 0.68;
+const JOIN_DISABLED_SHADOW_RADIUS: number = 1;
 
 @Entry
 @Component
@@ -34,6 +51,7 @@ struct MemberJoinPage {
   @State joining: boolean = false;
   @State scanning: boolean = false;
   @State wirelessSettingsAvailable: boolean = false;
+  @State private contentWidth: number = 360;
   private initializationToken: number = 0;
   private joinRequestToken: number = 0;
   private pageActive: boolean = true;
@@ -109,157 +127,22 @@ struct MemberJoinPage {
 
   build() {
     Scroll() {
-      Column({ space: 12 }) {
-        Row() {
-          Text('‹').fontSize(32).width(32).onClick(() => router.back())
-          Column({ space: 0 }) {
-            Text('加入队伍').fontSize(32).fontWeight(900).fontStyle(FontStyle.Italic).width('100%')
-            Text('SCAN OR ENTER THE CODE').fontSize(10).fontWeight(FontWeight.Bold).letterSpacing(1).width('100%')
-          }.layoutWeight(1)
-          Text('队员')
-            .fontSize(12)
-            .fontWeight(900)
-            .backgroundColor(LILAC)
-            .padding({ left: 9, right: 9, top: 6, bottom: 6 })
-            .border({ width: 1, color: INK })
-            .borderRadius(4)
+      Column() {
+        Row({ space: 2 }) {
+          Text('‹').fontSize(32).fontColor(INK).width(32).height(JOIN_HEADER_HEIGHT)
+            .accessibilityText('返回多人练习').onClick(() => router.back())
+          Text('加入队伍').fontSize(20).fontWeight(900).fontStyle(FontStyle.Italic).fontColor(INK).layoutWeight(1)
+          Text('队员').fontSize(13).fontWeight(900).fontColor(INK)
+            .padding({ left: 12, right: 12, top: 3, bottom: 3 }).backgroundColor(LILAC)
+            .border({ width: 1.4, color: INK }).borderRadius(4)
+            .rotate({ angle: 2 })
             .shadow(CONTROL_SHADOW)
-        }.width('100%')
-
-        Column() {
-          Stack({ alignContent: Alignment.BottomEnd }) {
-            Image($rawfile('comic/decor/join_invitation_paper.png'))
-              .width('100%')
-              .height('100%')
-              .objectFit(ImageFit.Cover)
-              .hitTestBehavior(HitTestMode.None)
-            ComicCharacter({ pose: 'lilroll' })
-              .width(JOIN_HERO_HEIGHT)
-              .height(JOIN_HERO_HEIGHT)
-              .margin({ right: 3, bottom: -8 })
-              .rotate({ angle: 5 })
-            Column({ space: 5 }) {
-              Text('拿到队长的邀请了吗？')
-                .fontSize(19)
-                .fontWeight(900)
-                .fontStyle(FontStyle.Italic)
-                .width('100%')
-              Text('扫二维码最快，\n也可以输入 6 位加入码。')
-                .fontSize(12)
-                .fontWeight(FontWeight.Bold)
-                .lineHeight(18)
-                .width('100%')
-            }
-            .width('100%')
-            .padding({ left: 14, right: 140, top: 6, bottom: 48 })
-          }
-          .width('100%')
-          .height(JOIN_HERO_HEIGHT)
-          .clip(true)
-        }
-        .width('100%')
-        .backgroundColor(TEAL)
-        .border({ width: 2, color: INK })
-        .borderRadius(8)
-        .shadow(CARD_SHADOW)
-
-        Column({ space: 10 }) {
-          Row() {
-            Column({ space: 2 }) {
-              Text('方式 A').fontSize(10).fontWeight(900).fontColor('#66615A').width('100%')
-              Text('扫描队长二维码').fontSize(19).fontWeight(900).fontStyle(FontStyle.Italic).width('100%')
-            }.layoutWeight(1)
-            Text('推荐')
-              .fontSize(10)
-              .fontWeight(900)
-              .backgroundColor(CORAL)
-              .padding({ left: 7, right: 7, top: 4, bottom: 4 })
-              .border({ width: 1, color: INK })
-              .borderRadius(3)
-              .shadow(CONTROL_SHADOW)
-              .rotate({ angle: 3 })
-          }.width('100%')
-          Text('扫码需要相机和 Wi-Fi')
-            .fontSize(12)
-            .fontColor('#66615A')
-            .width('100%')
-          Button(this.scanning ? '正在扫码…' : '打开相机扫码  ›')
-            .backgroundColor(CORAL)
-            .fontColor(INK)
-            .fontSize(18)
-            .fontWeight(900)
-            .border({ width: 1.5, color: INK })
-            .borderRadius(6)
-            .shadow(CONTROL_SHADOW)
-            .height(52)
-            .width('100%')
-            .enabled(!this.joining && !this.scanning)
-            .onClick(() => {
-              void this.scanJoin();
-            })
-        }
-        .width('100%')
-        .padding(12)
-        .backgroundColor('#FFFDF7')
-        .border({ width: 1.5, color: INK })
-        .borderRadius(7)
-        .shadow(CARD_SHADOW)
-
-        Row({ space: 10 }) {
-          Divider().color(INK).strokeWidth(1).layoutWeight(1)
-          Text('或者').fontSize(11).fontWeight(900)
-          Divider().color(INK).strokeWidth(1).layoutWeight(1)
-        }.width('100%')
-
-        Column({ space: 10 }) {
-          Text('方式 B').fontSize(10).fontWeight(900).fontColor('#66615A').width('100%')
-          Text('输入 6 位加入码').fontSize(19).fontWeight(900).fontStyle(FontStyle.Italic).width('100%')
-          Text('加入码需要蓝牙发现')
-            .fontSize(12)
-            .fontColor('#66615A')
-            .width('100%')
-          TextInput({ text: this.joinCode, placeholder: '例如 482913' })
-            .height(50)
-            .fontSize(24)
-            .fontWeight(900)
-            .letterSpacing(5)
-            .backgroundColor('#F1EBDF')
-            .border({ width: 1.5, color: INK })
-            .borderRadius(6)
-            .type(InputType.Number)
-            .maxLength(6)
-            .onChange((v: string) => {
-              this.joinCode = v.replace(/[^\d]/g, '').slice(0, 6);
-            })
-          Button(this.joining ? '正在连接…' : '用加入码进入  ›')
-            .backgroundColor(LILAC)
-            .fontColor(INK)
-            .fontSize(18)
-            .fontWeight(900)
-            .border({ width: 1.5, color: INK })
-            .borderRadius(6)
-            .shadow(CONTROL_SHADOW)
-            .height(52)
-            .width('100%')
-            .enabled(!this.joining && !this.scanning && this.joinCode.length === 6)
-            .onClick(() => {
-              void this.joinWithCode(this.joinCode);
-            })
-        }
-        .width('100%')
-        .padding(12)
-        .backgroundColor('#FFFDF7')
-        .border({ width: 1.5, color: INK })
-        .borderRadius(7)
-        .shadow(CARD_SHADOW)
-
+        }.width('100%').height(JOIN_HEADER_HEIGHT)
+        this.invitationHero()
+        this.joinTicket()
         if (this.status.length > 0) {
-          Text(this.status)
-            .fontSize(12)
-            .fontColor('#333333')
-            .fontWeight(FontWeight.Bold)
-            .width('100%')
-            .padding({ left: 2, right: 2, top: 2 })
+          Text(this.status).fontSize(12).fontColor('#333333').fontWeight(FontWeight.Bold)
+            .width('100%').lineHeight(18).margin({ top: 14 })
             .onClick(() => {
               if (this.wirelessSettingsAvailable) {
                 const ctx = getContext(this) as common.UIAbilityContext;
@@ -267,19 +150,167 @@ struct MemberJoinPage {
               }
             })
         }
-      }
-      .padding({
-        left: 20,
-        right: 20,
-        top: 12 + this.topSafeInset,
-        bottom: 28 + this.bottomSafeInset
+        TeamWifiFooter().margin({ top: 16 })
+      }.width('100%').padding({ left: JOIN_PAGE_SIDE_INSET, right: JOIN_PAGE_SIDE_INSET,
+        top: 8 + this.topSafeInset, bottom: 12 + this.bottomSafeInset })
+    }.width('100%').height('100%').backgroundColor(PAPER)
+      .onAreaChange((_old: Area, area: Area) => {
+        const width = Number(area.width) - JOIN_PAGE_SIDE_INSET * 2;
+        if (width > 0 && Math.abs(width - this.contentWidth) > 0.1) { this.contentWidth = width; }
       })
-      .width('100%')
+      .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
+  }
+
+  private invitationArtworkX(): number {
+    const textWidth = this.contentWidth * JOIN_HERO_TEXT_WIDTH_RATIO;
+    const remainingWidth = this.contentWidth - textWidth;
+    // The fixed-size scene includes the flower overhang beyond the character's
+    // 230vp box. Center its complete 246vp footprint in the remaining column.
+    return textWidth + (remainingWidth - JOIN_HERO_ILLUSTRATION_WIDTH) / 2 +
+      JOIN_HERO_ILLUSTRATION_X_OFFSET;
+  }
+
+  @Builder
+  private invitationHero() {
+    Stack({ alignContent: Alignment.TopStart }) {
+      Stack({ alignContent: Alignment.TopStart }) {
+        Image($rawfile('comic/decor/ticket-halftone-coral.svg')).width(142).height(227.2)
+          .position({ x: 8, y: -28 }).hitTestBehavior(HitTestMode.None)
+        Image($rawfile('comic/decor/ticket-halftone-ink-cloud.svg')).width(104).height(94.5)
+          .position({ x: 10, y: 5 }).hitTestBehavior(HitTestMode.None)
+        Image($rawfile('comic/decor/ticket-halftone-lilac-cloud.svg')).width(120).height(200)
+          .position({ x: 94, y: -8 }).hitTestBehavior(HitTestMode.None)
+        ComicCharacter({ avatar: 'cloud', pose: 'cloud-phone' }).width(JOIN_HERO_ART_WIDTH).height(JOIN_HERO_ART_HEIGHT)
+          .position({ x: 0, y: JOIN_HERO_ART_Y })
+          .hitTestBehavior(HitTestMode.None).accessibilityLevel('no')
+        Image($rawfile('vegetation/plant_06.png')).width(92).height(92).objectFit(ImageFit.Contain)
+          .position({ x: -20, y: JOIN_HERO_HEIGHT - 92 + 14 }).hitTestBehavior(HitTestMode.None)
+        Image($rawfile('vegetation/plant_11.png')).width(84).height(84).objectFit(ImageFit.Contain)
+          .position({ x: 145, y: JOIN_HERO_HEIGHT - 84 + 14 }).hitTestBehavior(HitTestMode.None)
+      }.width(JOIN_HERO_ILLUSTRATION_WIDTH).height(JOIN_HERO_HEIGHT)
+        .position({ x: this.invitationArtworkX(), y: 0 }).clip(false)
+        .hitTestBehavior(HitTestMode.None).accessibilityLevel('no')
+      Text('拿到队长的\n邀请了吗？').fontSize(27).minFontSize(24).maxFontSize(27)
+        .fontWeight(900).fontStyle(FontStyle.Italic).fontColor(INK).lineHeight(34).maxLines(2)
+        .width(this.contentWidth * JOIN_HERO_TEXT_WIDTH_RATIO).height(76)
+        .position({ x: 0, y: 14 })
+      Text('扫码，或输入 6 位加入码\n和大家一起出发。').fontSize(12).fontWeight(FontWeight.Bold)
+        .fontColor(INK).lineHeight(20).width(this.contentWidth * JOIN_HERO_TEXT_WIDTH_RATIO)
+        .height(50).position({ x: 0, y: 102 })
+    }.width('100%').height(JOIN_HERO_HEIGHT)
+      // Keep the original vertical crop, but allow the fixed-size centered art
+      // into the right page inset rather than cutting through the phone.
+      .clipShape(new RectShape({ width: this.contentWidth + JOIN_PAGE_SIDE_INSET, height: JOIN_HERO_HEIGHT }))
+  }
+
+  @Builder
+  private joinAction(scan: boolean) {
+    Stack({ alignContent: Alignment.TopStart }) {
+      Row().width('100%').height(JOIN_ACTION_HEIGHT).backgroundColor(INK).borderRadius(6)
+        .translate({ x: 2, y: 3 })
+        .opacity(!this.joining && !this.scanning && (scan || this.joinCode.length === 6) ? 1 : 0)
+        .hitTestBehavior(HitTestMode.None).accessibilityLevel('no')
+      // Read state inside this builder: primitive builder arguments are snapshots
+      // on supported runtimes and would leave the six-digit action disabled.
+      Button(scan ? (this.scanning ? '正在扫码…' : '打开相机扫码  ›') :
+        (this.joining ? '正在连接…' : '用加入码进入  ›'), { type: ButtonType.Normal })
+        .width('100%').height(JOIN_ACTION_HEIGHT).fontSize(18).fontWeight(900)
+        .fontColor(INK).backgroundColor(scan ? CORAL : LILAC)
+        .border({ width: 1.5, color: INK }).borderRadius(6)
+        .shadow(!this.joining && !this.scanning && (scan || this.joinCode.length === 6) ?
+          { radius: 0, color: '#00000000' } :
+          { radius: JOIN_DISABLED_SHADOW_RADIUS, offsetX: 6, offsetY: 7, color: INK })
+        // The wrapper disables the entire hit target without the native Button's
+        // extra disabled tint, so the shared 0.68 fade matches the PRO entry.
+        .focusable(!this.joining && !this.scanning && (scan || this.joinCode.length === 6))
+        .stateEffect(!this.joining && !this.scanning && (scan || this.joinCode.length === 6))
+        .onClick(() => {
+          if (this.joining || this.scanning || (!scan && this.joinCode.length !== 6)) {
+            return;
+          }
+          if (scan) { void this.scanJoin(); } else { void this.joinWithCode(this.joinCode); }
+        })
     }
     .width('100%')
-    .height('100%')
-    .backgroundColor(PAPER)
-    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
+    .height(JOIN_ACTION_HEIGHT)
+    .enabled(!this.joining && !this.scanning && (scan || this.joinCode.length === 6))
+    .opacity(!this.joining && !this.scanning && (scan || this.joinCode.length === 6) ? 1 : JOIN_DISABLED_OPACITY)
+  }
+
+  @Builder
+  private scanMethod() {
+    Column() {
+      Row({ space: 10 }) {
+        Column({ space: 3 }) {
+          Row({ space: 6 }) {
+            Text('扫描队长二维码').fontSize(19).minFontSize(15).maxFontSize(19)
+              .fontWeight(900).fontStyle(FontStyle.Italic).fontColor(INK).maxLines(1)
+            Text('推荐').fontSize(10).fontWeight(900).fontColor(WHITE).backgroundColor(CORAL)
+              .padding({ left: 7, right: 7, top: 3, bottom: 3 }).borderRadius(8)
+          }.width('100%')
+          Text('对准队长展示的二维码').fontSize(11).fontWeight(FontWeight.Bold).fontColor('#84868D')
+            .width('100%').maxLines(1)
+        }.layoutWeight(1).alignItems(HorizontalAlign.Start)
+        Stack({ alignContent: Alignment.TopEnd }) {
+          Image($rawfile('comic/icons/ticket-scan.svg')).width(44).height(44).objectFit(ImageFit.Contain)
+          Image($rawfile('comic/icons/ticket-beat-marks.svg')).width(20).height(18).rotate({ angle: 40 })
+            .translate({ x: 11, y: -8 })
+        }.width(48).height(44).hitTestBehavior(HitTestMode.None).accessibilityLevel('no')
+      }.width('100%').height(44)
+      Column() {
+        this.joinAction(true)
+      }.width('100%').margin({ top: 12 })
+      Text('扫码需要相机和 Wi-Fi').fontSize(11).fontWeight(FontWeight.Bold).fontColor('#84868D')
+        .width('100%').height(16).textAlign(TextAlign.Center).margin({ top: 8 })
+    }.width('100%').height(JOIN_SCAN_HEIGHT)
+      .padding({ left: JOIN_CONTENT_INSET, right: JOIN_CONTENT_INSET, top: 18, bottom: 12 })
+  }
+
+  @Builder
+  private codeMethod() {
+    Column() {
+      Text('输入 6 位加入码').fontSize(20).fontWeight(900).fontStyle(FontStyle.Italic)
+        .fontColor(INK).width('100%').height(24)
+      Stack() {
+        // Keep a single native numeric editor for paste, selection, deletion and
+        // accessibility; the six empty marks are decoration, never six focus targets.
+        TextInput({ text: this.joinCode, placeholder: '' }).height(46).width('100%').fontSize(24)
+          .fontWeight(900).fontColor(INK).letterSpacing(12).textAlign(TextAlign.Center)
+          .backgroundColor(PAPER).border({ width: 1.4, color: INK }).borderRadius(6)
+          .type(InputType.Number).maxLength(6).accessibilityText('输入六位数字加入码')
+          .onChange((value: string) => { this.joinCode = value.replace(/[^\d]/g, '').slice(0, 6); })
+        if (this.joinCode.length === 0) {
+          Row() {
+            ForEach([0, 1, 2, 3, 4, 5], (slot: number) => {
+              Text('—').fontSize(23).fontWeight(900).fontColor('#B2B3B8')
+            }, (slot: number): string => slot.toString())
+          }.width('100%').height(46).padding({ left: 16, right: 16 })
+            .justifyContent(FlexAlign.SpaceEvenly).hitTestBehavior(HitTestMode.None).accessibilityLevel('no')
+        }
+      }.width('100%').height(46).margin({ top: 8 })
+      Column() {
+        this.joinAction(false)
+      }.width('100%').margin({ top: 10 })
+      Text('加入码需要蓝牙发现').fontSize(11).fontWeight(FontWeight.Bold).fontColor('#84868D')
+        .width('100%').height(16).textAlign(TextAlign.Center).margin({ top: 8 })
+    }.width('100%').height(JOIN_CODE_HEIGHT)
+      .padding({ left: JOIN_CONTENT_INSET, right: JOIN_CONTENT_INSET, top: 8, bottom: 8 })
+  }
+
+  @Builder
+  private joinTicket() {
+    Stack({ alignContent: Alignment.TopStart }) {
+      TeamTicketBackdrop({ ticketHeight: JOIN_TICKET_HEIGHT, firstNotchY: 96,
+        tearY: JOIN_SCAN_HEIGHT + JOIN_DIVIDER_HEIGHT / 2, fill: '#FFFFFF', halftone: 'join' })
+      Column() {
+        this.scanMethod()
+        Row() {
+          Text('或者').fontSize(12).fontWeight(900).fontColor(INK).width(52).height(22)
+            .textAlign(TextAlign.Center).backgroundColor('#FFFFFF').border({ width: 1.1, color: INK }).borderRadius(4)
+        }.width('100%').height(JOIN_DIVIDER_HEIGHT).justifyContent(FlexAlign.Center).hitTestBehavior(HitTestMode.None)
+        this.codeMethod()
+      }.width('100%').height(JOIN_TICKET_HEIGHT)
+    }.width('100%').height(JOIN_TICKET_HEIGHT).clip(false)
   }
 
   private async ensureP2pReady(): Promise<boolean> {

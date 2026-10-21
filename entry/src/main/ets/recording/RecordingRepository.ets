@@ -7,7 +7,7 @@ import { util } from '@kit.ArkTS';
 import { readOptional, writeAtomic } from '../common/AtomicTextFile';
 import { RecordingCoverService } from './RecordingCoverService';
 import { PendingRecordingCapture, RecordingClip, RecordingScope } from './RecordingModels';
-import { MAX_MIC_SHIFT_US, RecordingMixer, RECORDING_MIX_VERSION } from './RecordingMixer';
+import { MAX_MIC_SHIFT_US, RecordingMixer } from './RecordingMixer';
 
 const LIBRARY_PREFERENCES: string = 'onebeat_recording_library';
 const LIBRARY_KEY: string = 'recordingLibraryV1';
@@ -156,6 +156,7 @@ export class RecordingRepository {
       renderedMixVersion: clip.renderedMixVersion,
       captureSyncValid: clip.captureSyncValid, captureMappingVersion: clip.captureMappingVersion,
       videoTimestampDivisor: clip.videoTimestampDivisor, builtInSpeakerCapture: clip.builtInSpeakerCapture,
+      micCaptureMode: clip.micCaptureMode,
       albumUri: clip.albumUri, albumContentAt: clip.albumContentAt
     };
   }
@@ -215,7 +216,9 @@ export class RecordingRepository {
         const capture = JSON.parse(await fs.readText(`${RecordingRepository.directory}/${file}`)) as PendingRecordingCapture;
         const clip = capture.clip;
         if (capture.version !== 2 || capture.finished !== true || clip === undefined ||
-          clip.captureMappingVersion !== 2 || typeof clip.captureSyncValid !== 'boolean' ||
+          (clip.captureMappingVersion !== 2 && clip.captureMappingVersion !== 3) ||
+          (clip.captureMappingVersion === 3) !== (clip.micCaptureMode === 'system-aec') ||
+          typeof clip.captureSyncValid !== 'boolean' ||
           !Number.isFinite(clip.durationMs) || clip.durationMs <= 0 ||
           RecordingRepository.pendingPath(clip) !== `${RecordingRepository.directory}/${file}`) { continue; }
         if (RecordingRepository.get(clip.id) !== undefined) {
@@ -253,7 +256,7 @@ export class RecordingRepository {
         stored.autoMicShiftConfidence !== undefined && stored.autoMicShiftReliable !== undefined;
       if (Math.abs((stored.renderedGain ?? 1) - desired) < 0.001 &&
         (stored.renderedMicShiftUs ?? 0) === desiredShiftUs &&
-        (((stored.renderedMixVersion ?? 0) >= RECORDING_MIX_VERSION && autoAlignmentKnown) ||
+        (((stored.renderedMixVersion ?? 0) >= RecordingMixer.mixVersion(stored) && autoAlignmentKnown) ||
           stored.sourcePath === undefined ||
           stored.innerPath === undefined || stored.micPath === undefined)) { return stored; }
       if (stored.sourcePath === undefined || stored.micPath === undefined || stored.innerPath === undefined) {
@@ -275,7 +278,7 @@ export class RecordingRepository {
         updated.autoMicShiftUs = mixResult.autoMicShiftUs;
         updated.autoMicShiftConfidence = mixResult.autoMicShiftConfidence;
         updated.autoMicShiftReliable = mixResult.autoMicShiftReliable;
-        updated.renderedMixVersion = RECORDING_MIX_VERSION;
+        updated.renderedMixVersion = RecordingMixer.mixVersion(stored);
         updated.renderedAt = Math.max(Date.now(), (stored.renderedAt ?? stored.createdAt) + 1);
         const recoveryPath = await RecordingRepository.writeRecovery(updated);
         const next = RecordingRepository.clips.map((entry: RecordingClip) => entry.id === updated.id ? updated : entry);
@@ -405,10 +408,15 @@ export class RecordingRepository {
       for (const path of [coverPath, `${coverPath}.tmp`]) {
         if (await fs.access(path)) { await fs.unlink(path); }
       }
-      const processedMic = clip.micPath === undefined ? '' : RecordingMixer.processedMicPath(clip.micPath);
+      const processedMic = clip.micPath === undefined ? '' : RecordingMixer.processedMicPath(clip.micPath, clip.micCaptureMode);
       const paths: string[] = [`${RecordingRepository.directory}/${clip.id}.mp4`, clip.path,
         clip.sourcePath ?? '', clip.micPath ?? '', clip.innerPath ?? '', processedMic,
         processedMic.length === 0 ? '' : `${processedMic}.tmp`];
+      if (clip.micCaptureMode === 'system-aec' && clip.micPath !== undefined) {
+        // Old, unnormalized AEC caches can coexist after a level upgrade. They
+        // are derived files too and must not survive deletion of their take.
+        paths.push(`${clip.micPath}.system-aec-v1.f32`, `${clip.micPath}.system-aec-v1.f32.tmp`);
+      }
       for (const name of await fs.listFile(RecordingRepository.directory)) {
         if (name.startsWith(`${clip.id}.mix-`) && name.endsWith('.mp4')) {
           paths.push(`${RecordingRepository.directory}/${name}`);

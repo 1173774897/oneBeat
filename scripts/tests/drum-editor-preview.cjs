@@ -1175,7 +1175,7 @@ async function testSongBehindEditor() {
       p.openEditor(0, mode);
       settleFillFocusScroll(h, mode);
       assert.equal(p.editorVisible, true);
-      assert.equal(p.editorPlayheadStep, -1, 'A fresh draft cannot borrow the whole-song playhead');
+      assert.equal(p.editorPlayheadStep(), -1, 'A fresh draft cannot borrow the whole-song playhead');
       assertSongUntouched();
       p.toggleStep(3, mode === 0 ? 5 : fillEditableStep(p.currentProgram(), p.sections[0], p.editorSubdivision));
       p.chooseEditorSubdivision(3);
@@ -1198,7 +1198,7 @@ async function testSongBehindEditor() {
       if (hardwareBack) assert.equal(p.onBackPress(), true);
       else p.closeEditor();
       assert.equal(p.editorVisible, false);
-      assert.equal(p.editorPlayheadStep, -1);
+      assert.equal(p.editorPlayheadStep(), -1);
       assertSongUntouched();
 
       p.openEditor(0, 1 - mode);
@@ -1208,7 +1208,7 @@ async function testSongBehindEditor() {
       p.seekEditorStep(4);
       p.openEditor(0, mode);
       settleFillFocusScroll(h, mode);
-      assert.equal(p.editorPlayheadStep, -1, 'Switching drafts must reset the selected editor origin');
+      assert.equal(p.editorPlayheadStep(), -1, 'Switching drafts must reset the selected editor origin');
       assert.deepEqual(plain(p.editorEvents), editorOpenEvents(p.currentProgram(), p.sections[0], mode),
       'Reopening a discarded draft cannot restore unsaved changes');
       assertSongUntouched();
@@ -1266,7 +1266,7 @@ async function testSongToEditorHandoff() {
       assert.equal(h.calls.length, 2, 'Closing a draft cannot automatically resume the old song');
       assert.equal(p.previewTarget, '');
       assert.equal(p.playingSongSection, -1);
-      assert.equal(p.editorPlayheadStep, -1);
+      assert.equal(p.editorPlayheadStep(), -1);
       assert.equal(h.timers.size, 0);
       assert.deepEqual(plain(p.sections), saved);
       for (const timer of h.archivedTimers.values()) timer.callback();
@@ -1310,7 +1310,7 @@ async function testPendingSongSurvivesDraftNavigation() {
         assert.deepEqual(h.toasts, fail ? [restarting ? '切换试听失败' : '试听启动失败'] : [],
           'A current song failure remains current even after its editor was opened and closed');
         assert.equal(p.editorVisible, true, 'Song preparation completion cannot dismiss the editor');
-        assert.equal(p.editorPlayheadStep, -1, 'Song preparation cannot create a draft cursor');
+        assert.equal(p.editorPlayheadStep(), -1, 'Song preparation cannot create a draft cursor');
         assert.equal(p.sectionPreviewRevision, songRevision);
         assert.equal(h.stopCount(), 0);
         assert.equal(h.calls.length, 1);
@@ -1376,7 +1376,7 @@ async function testDraftsAndLifecycle() {
     assert.equal(h.timers.get(initialTimer).delay, 32);
 
     h.tick({ mainPlayheadMs: 625 });
-    assert.equal(p.editorPlayheadStep, 5, 'The cursor must reflect the engine timeline');
+    assert.equal(p.editorPlayheadStep(), 5, 'The cursor must reflect the engine timeline');
     const playingEvents = plain(p.editorEvents);
     h.setSnapshot({ mainPlayheadMs: 687.5 });
     p.toggleStep(2, mode === 0 ? 7 : fillEditableStep(p.currentProgram(), p.sections[0], p.editorSubdivision) + 1);
@@ -1384,7 +1384,7 @@ async function testDraftsAndLifecycle() {
     assert.equal(h.calls.length, 2, 'Toggling a cell while auditioning must restart with the updated draft');
     assert.equal(h.calls[1].positionBeats, 1.375,
       'Live draft edits must continue from the latest fractional transport position');
-    assert.equal(p.editorPlayheadStep, 5.5, 'Live edits must keep the cursor while the revised draft is preparing');
+    assert.equal(p.editorPlayheadStep(), 5.5, 'Live edits must keep the cursor while the revised draft is preparing');
     assert.notDeepEqual(h.calls[1].program.sections[0].customPattern.events, playingEvents);
     assert.deepEqual(h.calls[1].program.sections[0].customPattern.events, plain(p.editorEvents));
     assert.deepEqual(audition.program.sections[0].customPattern.events, playingEvents,
@@ -1396,11 +1396,11 @@ async function testDraftsAndLifecycle() {
     await p.toggleEditorPreview();
     assert.equal(p.previewTarget, '');
     assert.equal(p.editorVisible, true, 'Stopping audition must keep the draft editor open');
-    assert.equal(p.editorPlayheadStep, 7, 'Explicit Stop must keep the last played position visible');
+    assert.equal(p.editorPlayheadStep(), 7, 'Explicit Stop must keep the last played position visible');
     assert.equal(h.timers.size, 0);
     p.closeEditor();
     assert.equal(p.editorVisible, false);
-    assert.equal(p.editorPlayheadStep, -1, 'Closing must clear a cursor retained by Stop');
+    assert.equal(p.editorPlayheadStep(), -1, 'Closing must clear a cursor retained by Stop');
     assert.deepEqual(plain(p.sections), original, 'Close must discard the draft without saving it');
 
     p.openEditor(0, mode);
@@ -1429,10 +1429,10 @@ async function testDraftsAndLifecycle() {
     close(h.page);
     assert.equal(h.stopCount(), stops + 1, 'Every editor exit must stop the audio audition');
     assert.equal(h.page.previewTarget, '');
-    assert.equal(h.page.editorPlayheadStep, -1);
+    assert.equal(h.page.editorPlayheadStep(), -1);
     assert.equal(h.timers.size, 0);
     for (const timer of h.archivedTimers.values()) timer.callback();
-    assert.equal(h.page.editorPlayheadStep, -1, 'A queued paint callback must not revive a closed audition');
+    assert.equal(h.page.editorPlayheadStep(), -1, 'A queued paint callback must not revive a closed audition');
   }
 
   const absent = harness();
@@ -1506,7 +1506,7 @@ async function testStoppedCursor() {
   p.updateEditorViewport(6 * CELL_WIDTH + PLAYHEAD_WIDTH);
   await p.toggleEditorPreview();
   h.tick({ mainPlayheadMs: 1050 });
-  assert.equal(p.editorPlayheadStep, 8.4);
+  assert.equal(p.editorPlayheadStep(), 8.4);
   const offset = p.editorScroller.offset;
   const scrollCalls = p.editorScroller.calls.length;
   const paint = h.archivedTimers.get(p.editorPreviewTimerId);
@@ -1514,43 +1514,43 @@ async function testStoppedCursor() {
   // cleanup destroys the engine snapshot, rather than freezing the prior paint.
   h.setSnapshot({ mainPlayheadMs: 1162.5 });
   await p.toggleEditorPreview();
-  assert.ok(Math.abs(p.editorPlayheadStep - 9.3) < 1e-9,
+  assert.ok(Math.abs(p.editorPlayheadStep() - 9.3) < 1e-9,
     'Stop must retain the precise current transport position without waiting for a paint tick');
   assert.equal(p.previewTarget, '');
   assert.equal(h.timers.size, 0);
   assert.equal(p.editorScroller.offset, offset, 'Stopping must retain the current scroll offset');
   assert.equal(p.editorScroller.calls.length, scrollCalls, 'Capturing a stopped position must not turn the page');
-  const frozenStep = p.editorPlayheadStep;
+  const frozenStep = p.editorPlayheadStep();
   paint.callback();
   p.updateEditorPreviewProgress();
   h.tick({ mainPlayheadMs: 1500 });
-  assert.equal(p.editorPlayheadStep, frozenStep, 'Queued paints and new engine snapshots cannot alter the stopped cursor');
+  assert.equal(p.editorPlayheadStep(), frozenStep, 'Queued paints and new engine snapshots cannot alter the stopped cursor');
   p.editorScroller.offset = CELL_WIDTH;
   p.updateEditorViewport(4 * CELL_WIDTH);
   p.toggleStep(0, 3);
   paint.callback();
-  assert.equal(p.editorPlayheadStep, frozenStep, 'Draft edits while stopped must keep the retained cursor');
+  assert.equal(p.editorPlayheadStep(), frozenStep, 'Draft edits while stopped must keep the retained cursor');
   assert.equal(p.editorScroller.offset, CELL_WIDTH,
     'Stopped editors must allow manual scrolling and viewport changes without following the old cursor');
   assert.equal(h.calls.length, 1, 'Stopped draft edits must not restart the audio');
 
   await p.toggleEditorPreview();
-  assert.equal(p.editorPlayheadStep, frozenStep, 'A resumed audition must keep its start cursor through preparation');
+  assert.equal(p.editorPlayheadStep(), frozenStep, 'A resumed audition must keep its start cursor through preparation');
   assert.ok(Math.abs(h.calls.at(-1).positionBeats - frozenStep / 4) < 1e-9,
     'Audition must forward the retained fractional cursor as its playback origin');
   assert.equal(h.timers.size, 1);
   h.tick({ mainPlayheadMs: -350 });
   h.tick({ countIn: true, mainPlayheadMs: 500 });
-  assert.equal(p.editorPlayheadStep, frozenStep, 'Preroll and count-in must not move or hide the retained start cursor');
+  assert.equal(p.editorPlayheadStep(), frozenStep, 'Preroll and count-in must not move or hide the retained start cursor');
   h.setSnapshot({ mainPlayheadMs: 1250 });
   paint.callback();
-  assert.equal(p.editorPlayheadStep, frozenStep, 'A queued paint from a superseded audition cannot paint the new transport');
+  assert.equal(p.editorPlayheadStep(), frozenStep, 'A queued paint from a superseded audition cannot paint the new transport');
   h.tick({ mainPlayheadMs: 1250 });
-  assert.equal(p.editorPlayheadStep, 10, 'The resumed cursor must advance from the engine sought position');
+  assert.equal(p.editorPlayheadStep(), 10, 'The resumed cursor must advance from the engine sought position');
   h.setSnapshot({ mainPlayheadMs: 2012.5 });
   const beforeLoopStop = p.editorScroller.calls.length;
   await p.toggleEditorPreview();
-  assert.ok(Math.abs(p.editorPlayheadStep - 0.1) < 1e-9, 'Stop must capture a loop boundary from the live transport');
+  assert.ok(Math.abs(p.editorPlayheadStep() - 0.1) < 1e-9, 'Stop must capture a loop boundary from the live transport');
   assert.equal(p.editorScroller.offset, 0, 'A loop boundary captured on Stop must reveal the exact final cursor once');
   assert.equal(p.editorScroller.calls.length, beforeLoopStop + 1);
 
@@ -1559,12 +1559,12 @@ async function testStoppedCursor() {
   boundary.page.updateEditorViewport(6 * CELL_WIDTH + PLAYHEAD_WIDTH);
   await boundary.page.toggleEditorPreview();
   boundary.tick({ mainPlayheadMs: 737.5 });
-  assert.equal(boundary.page.editorPlayheadStep, 5.9);
+  assert.equal(boundary.page.editorPlayheadStep(), 5.9);
   assert.equal(boundary.page.editorScroller.offset, 0);
   const beforeBoundaryStop = boundary.page.editorScroller.calls.length;
   boundary.setSnapshot({ mainPlayheadMs: 762.5 });
   await boundary.page.toggleEditorPreview();
-  assert.equal(boundary.page.editorPlayheadStep, 6.1, 'Stop must preserve exact progress crossing a screen between paints');
+  assert.equal(boundary.page.editorPlayheadStep(), 6.1, 'Stop must preserve exact progress crossing a screen between paints');
   assert.equal(boundary.page.editorScroller.offset, 6 * CELL_WIDTH,
     'Stop must reveal a newly crossed screen once so the retained cursor is visible');
   assert.equal(boundary.page.editorScroller.calls.length, beforeBoundaryStop + 1);
@@ -1586,13 +1586,13 @@ async function testStoppedCursor() {
     await next.page.toggleEditorPreview();
     next.tick({ mainPlayheadMs: 750 });
     await next.page.toggleEditorPreview();
-    assert.equal(next.page.editorPlayheadStep, 6);
+    assert.equal(next.page.editorPlayheadStep(), 6);
     reset(next.page);
-    assert.equal(next.page.editorPlayheadStep, -1, 'Leaving, applying or opening a new draft must clear the stopped cursor');
+    assert.equal(next.page.editorPlayheadStep(), -1, 'Leaving, applying or opening a new draft must clear the stopped cursor');
     assert.equal(next.page.previewTarget, '');
     assert.equal(next.timers.size, 0);
     for (const timer of next.archivedTimers.values()) timer.callback();
-    assert.equal(next.page.editorPlayheadStep, -1);
+    assert.equal(next.page.editorPlayheadStep(), -1);
   }
 
   for (const fail of [false, true]) {
@@ -1603,19 +1603,19 @@ async function testStoppedCursor() {
     const start = pending.page.toggleEditorPreview();
     pending.setSnapshot({ mainPlayheadMs: 1000 });
     await pending.page.toggleEditorPreview();
-    assert.equal(pending.page.editorPlayheadStep, -1,
+    assert.equal(pending.page.editorPlayheadStep(), -1,
       'Stopping pending preparation cannot invent a cursor from an unrelated engine snapshot');
     assert.equal(pending.timers.size, 0);
     if (fail) preparation.reject(new Error('Stopped before preparation finished'));
     else preparation.resolve();
     await start;
     assert.equal(pending.page.previewTarget, '');
-    assert.equal(pending.page.editorPlayheadStep, -1);
+    assert.equal(pending.page.editorPlayheadStep(), -1);
     assert.equal(pending.timers.size, 0);
     assert.deepEqual(pending.toasts, []);
     await pending.page.toggleEditorPreview();
     await pending.page.toggleEditorPreview();
-    assert.equal(pending.page.editorPlayheadStep, 0,
+    assert.equal(pending.page.editorPlayheadStep(), 0,
       'Stopping after preparation must retain the anchored bar-start cursor, not an unrelated engine snapshot');
     assert.equal(pending.timers.size, 0);
   }
@@ -1629,10 +1629,10 @@ async function testStoppedCursor() {
     const stalePreparation = deferred();
     resumed.responses.push(stalePreparation);
     const staleStart = resumed.page.toggleEditorPreview();
-    assert.equal(resumed.page.editorPlayheadStep, 6);
+    assert.equal(resumed.page.editorPlayheadStep(), 6);
     resumed.setSnapshot({ mainPlayheadMs: 1500 });
     await resumed.page.toggleEditorPreview();
-    assert.equal(resumed.page.editorPlayheadStep, 6,
+    assert.equal(resumed.page.editorPlayheadStep(), 6,
       'Stopping a pending resume cannot advance its retained start cursor');
     await resumed.page.toggleEditorPreview();
     assert.equal(resumed.calls.at(-1).positionBeats, 1.5);
@@ -1642,7 +1642,7 @@ async function testStoppedCursor() {
     else stalePreparation.resolve();
     await staleStart;
     assert.equal(resumed.page.previewTarget, 'editor');
-    assert.equal(resumed.page.editorPlayheadStep, 8, 'A superseded resume cannot move the current cursor');
+    assert.equal(resumed.page.editorPlayheadStep(), 8, 'A superseded resume cannot move the current cursor');
     assert.equal(resumed.page.editorPreviewTimerId, currentTimer);
     assert.equal(resumed.timers.size, 1);
     assert.deepEqual(resumed.toasts, []);
@@ -1659,7 +1659,7 @@ async function testStoppedCursor() {
   const retry = failedRetry.page.toggleEditorPreview();
   failedPreparation.reject(new Error('Retry unavailable'));
   await retry;
-  assert.equal(failedRetry.page.editorPlayheadStep, 6, 'A failed retry must keep the chosen start cursor available for another attempt');
+  assert.equal(failedRetry.page.editorPlayheadStep(), 6, 'A failed retry must keep the chosen start cursor available for another attempt');
   assert.equal(failedRetry.calls.at(-1).positionBeats, 1.5);
   assert.equal(failedRetry.page.previewTarget, '');
   assert.equal(failedRetry.timers.size, 0);
@@ -1680,7 +1680,7 @@ async function testCursorSeeking() {
     const draft = plain(p.editorEvents);
     const stoppedAudioCalls = h.stopCount();
     p.seekEditorStep(12);
-    assert.equal(p.editorPlayheadStep, 12);
+    assert.equal(p.editorPlayheadStep(), 12);
     if (mode === 0) {
       assert.equal(p.editorScroller.offset, p.editorGridWidth() - (6 * CELL_WIDTH + PLAYHEAD_WIDTH),
         'A stopped seek must reveal the chosen cursor once');
@@ -1690,22 +1690,22 @@ async function testCursorSeeking() {
     p.editorScroller.offset = 0;
     p.updateEditorViewport(6 * CELL_WIDTH + PLAYHEAD_WIDTH);
     h.tick({ mainPlayheadMs: 1000 });
-    assert.equal(p.editorPlayheadStep, 12);
+    assert.equal(p.editorPlayheadStep(), 12);
     assert.equal(p.editorScroller.offset, 0, 'After a stopped seek, manual scrolling must remain available');
     const invalid = [-1, p.editorStepCount(), 1.25, NaN, Infinity, -Infinity];
     for (const step of invalid) p.seekEditorStep(step);
-    assert.equal(p.editorPlayheadStep, 12, 'Out-of-range or noninteger seek values must be ignored');
+    assert.equal(p.editorPlayheadStep(), 12, 'Out-of-range or noninteger seek values must be ignored');
     assert.equal(h.calls.length, 0);
     assert.equal(h.timers.size, 0);
     p.seekEditorStep(2);
     await p.toggleEditorPreview();
     assert.equal(h.calls.at(-1).positionBeats, 0.5, 'The next audition must use the stopped seek position');
-    assert.equal(p.editorPlayheadStep, 2);
+    assert.equal(p.editorPlayheadStep(), 2);
     h.tick({ mainPlayheadMs: 312.5 });
-    assert.equal(p.editorPlayheadStep, 2.5);
+    assert.equal(p.editorPlayheadStep(), 2.5);
     h.setSnapshot({ mainPlayheadMs: 875 });
     p.seekEditorStep(10);
-    assert.equal(p.editorPlayheadStep, 10,
+    assert.equal(p.editorPlayheadStep(), 10,
       'An explicit playing seek must replace the old clock position rather than sampling it over the chosen target');
     assert.equal(h.calls.at(-1).positionBeats, 2.5, 'A playing seek must immediately request audio from the new cursor');
     await settle();
@@ -1716,7 +1716,7 @@ async function testCursorSeeking() {
     assert.equal(h.calls.length, callCount, 'Invalid seeks must not restart an active audition');
     assert.equal(p.editorPreviewTimerId, activeTimer);
     h.tick({ mainPlayheadMs: 1300 });
-    assert.equal(p.editorPlayheadStep, 10.4, 'The sought audition must advance from the new engine clock');
+    assert.equal(p.editorPlayheadStep(), 10.4, 'The sought audition must advance from the new engine clock');
     await p.toggleEditorPreview();
     p.seekEditorStep(15);
     assert.equal(h.calls.length, callCount, 'Moving the stopped cursor remains silent after a prior audition');
@@ -1727,7 +1727,7 @@ async function testCursorSeeking() {
     p.closeEditor();
     const closedCalls = h.calls.length;
     p.seekEditorStep(3);
-    assert.equal(p.editorPlayheadStep, -1, 'A hidden editor cannot retain a seek for the next draft');
+    assert.equal(p.editorPlayheadStep(), -1, 'A hidden editor cannot retain a seek for the next draft');
     assert.equal(h.calls.length, closedCalls);
   }
 
@@ -1750,7 +1750,7 @@ async function testCursorSeeking() {
   failedPreparation.reject(new Error('Seek renderer unavailable'));
   await settle();
   assert.equal(failedSeek.page.previewTarget, '');
-  assert.equal(failedSeek.page.editorPlayheadStep, 7, 'A failed seek must retain its chosen cursor for retry');
+  assert.equal(failedSeek.page.editorPlayheadStep(), 7, 'A failed seek must retain its chosen cursor for retry');
   assert.equal(failedSeek.timers.size, 0);
   assert.deepEqual(failedSeek.toasts, ['试听启动失败']);
   await failedSeek.page.toggleEditorPreview();
@@ -1769,7 +1769,7 @@ async function testCursorSeeking() {
     h.responses.push(old, fresh);
     p.seekEditorStep(4);
     p.seekEditorStep(12);
-    assert.equal(p.editorPlayheadStep, 12, 'A seek during pending preparation must immediately replace its target');
+    assert.equal(p.editorPlayheadStep(), 12, 'A seek during pending preparation must immediately replace its target');
     assert.deepEqual(h.calls.slice(-2).map(call => call.positionBeats), [1, 3]);
     fresh.resolve();
     await settle();
@@ -1779,7 +1779,7 @@ async function testCursorSeeking() {
     await settle();
     h.setSnapshot({ mainPlayheadMs: 500 });
     oldPaint.callback();
-    assert.equal(p.editorPlayheadStep, 12, 'A stale seek or paint cannot restore an earlier cursor');
+    assert.equal(p.editorPlayheadStep(), 12, 'A stale seek or paint cannot restore an earlier cursor');
     assert.equal(p.previewTarget, 'editor');
     assert.equal(p.editorPreviewTimerId, currentTimer);
     assert.equal(h.timers.size, 1, 'Several rapid seeks must leave only the current paint timer');
@@ -1825,7 +1825,7 @@ async function testSupersededArrangementPreview() {
       assert.equal(h.timers.size, 1, `${previous.name} must not add a stale section stop timer`);
       assert.deepEqual(h.toasts, [], `${previous.name} must not show a stale failure toast`);
       h.tick({ mainPlayheadMs: 625 });
-      assert.equal(h.page.editorPlayheadStep, 5, `${previous.name} must leave the new cursor active`);
+      assert.equal(h.page.editorPlayheadStep(), 5, `${previous.name} must leave the new cursor active`);
       h.page.aboutToDisappear();
     }
   }
@@ -1846,18 +1846,18 @@ async function testTransportAndScrolling() {
     { mainPlayheadMs: -1 }
   ]) {
     h.tick(unavailable);
-    assert.equal(p.editorPlayheadStep, 0,
+    assert.equal(p.editorPlayheadStep(), 0,
       'Stopped, count-in and predeadline snapshots keep the anchored bar-start cursor');
   }
   h.tick({ mainPlayheadMs: 0 });
-  assert.equal(p.editorPlayheadStep, 0);
+  assert.equal(p.editorPlayheadStep(), 0);
   assert.equal(p.editorScroller.offset, 0);
   h.tick({ mainPlayheadMs: 1187.5 });
-  assert.equal(p.editorPlayheadStep, 9.5);
+  assert.equal(p.editorPlayheadStep(), 9.5);
   assert.equal(p.editorPlayheadX(), 9.5 * CELL_WIDTH, 'The cursor should advance smoothly inside the active step');
   assert.equal(p.editorScroller.offset, 0, 'A wholly visible final cell must not turn the page early');
   h.tick({ mainPlayheadMs: 1250 });
-  assert.equal(p.editorPlayheadStep, 10);
+  assert.equal(p.editorPlayheadStep(), 10);
   assert.equal(p.editorScroller.offset, lastPageOffset, 'Reaching the next screen must scroll, clamped to the grid end');
   assert.equal(p.editorScroller.calls.at(-1).animation, false, 'A page turn must keep pace with audio');
   h.tick({ mainPlayheadMs: 1999.5 });
@@ -1868,7 +1868,7 @@ async function testTransportAndScrolling() {
   assert.equal(p.editorScroller.calls.length, lastStepScrollCount,
     'The grid edge must not cause repeated scroll requests during the final step');
   h.tick({ mainPlayheadMs: 2000 });
-  assert.equal(p.editorPlayheadStep, 0);
+  assert.equal(p.editorPlayheadStep(), 0);
   assert.equal(p.editorScroller.offset, 0, 'The next loop must return to the first screen');
 
   p.updateEditorViewport(10 * CELL_WIDTH);
@@ -1876,11 +1876,11 @@ async function testTransportAndScrolling() {
   assert.equal(p.editorScroller.offset, 6 * CELL_WIDTH, 'The cursor stroke needs room beyond the last full cell of a screen');
 
   h.tick({ mainPlayheadMs: 875 });
-  assert.equal(p.editorPlayheadStep, 7);
+  assert.equal(p.editorPlayheadStep(), 7);
   p.editorScroller.offset = 0;
   p.updateEditorViewport(6 * CELL_WIDTH);
   const stepVisible = () => {
-    const left = Math.floor(p.editorPlayheadStep) * CELL_WIDTH;
+    const left = Math.floor(p.editorPlayheadStep()) * CELL_WIDTH;
     assert.ok(left >= p.editorScroller.offset && left + CELL_WIDTH + PLAYHEAD_WIDTH <= p.editorScroller.offset + 6 * CELL_WIDTH,
       'The full active cell and cursor stroke must fit inside the viewport');
   };
@@ -1901,9 +1901,9 @@ async function testTransportAndScrolling() {
   p.bpm = 90;
   assert.equal(p.editorStepCount(), 28);
   h.tick({ mainPlayheadMs: 1000 });
-  assert.equal(p.editorPlayheadStep, 6, 'A meter change must keep the chosen four-way per-beat grid');
+  assert.equal(p.editorPlayheadStep(), 6, 'A meter change must keep the chosen four-way per-beat grid');
   h.tick({ mainPlayheadMs: 7 * 60000 / 90 + 500 });
-  assert.ok(Math.abs(p.editorPlayheadStep - 3) < 1e-9, 'The cursor must wrap after the selected meter, not a fixed four beats');
+  assert.ok(Math.abs(p.editorPlayheadStep() - 3) < 1e-9, 'The cursor must wrap after the selected meter, not a fixed four beats');
   await p.toggleEditorPreview();
   await p.toggleEditorPreview();
   assert.ok(Math.abs(h.calls.at(-1).positionBeats - 0.75) < 1e-9,
@@ -1927,7 +1927,7 @@ async function testSubdivisionDraftsAndSnapping() {
     assert.equal(p.editorSubdivision, division);
     assert.equal(p.editorStepCount(), 4 * division);
     assert.equal(p.editorPlayheadBeats, 1.25, 'Switching grids must keep the same chosen musical time');
-    assert.equal(p.editorPlayheadStep, 1.25 * division);
+    assert.equal(p.editorPlayheadStep(), 1.25 * division);
     assert.deepEqual(plain(p.editorEvents), seed.events, 'Switching grids must not quantize notes or rewrite their velocities');
     assert.deepEqual(plain(p.sections), saved, 'A grid switch is an unsaved draft action');
     assert.deepEqual(plain(p.contextStates), contexts, 'A grid switch cannot commit the context cache');
@@ -1943,16 +1943,16 @@ async function testSubdivisionDraftsAndSnapping() {
   h.setSnapshot({ mainPlayheadMs: 812.5 });
   p.chooseEditorSubdivision(3);
   assert.equal(p.editorPlayheadBeats, 1.625, 'A playing grid switch must capture the latest transport position');
-  assert.equal(p.editorPlayheadStep, 4.875);
+  assert.equal(p.editorPlayheadStep(), 4.875);
   assert.equal(h.calls.length, beforeSwitch, 'A display-only grid switch cannot restart sounding events');
   assert.equal(h.stopCount(), stopCount);
   assert.equal(p.editorPreviewTimerId, timer, 'A grid switch must keep the current paint lifecycle');
   h.tick({ mainPlayheadMs: 1000 });
-  assert.equal(p.editorPlayheadStep, 6);
+  assert.equal(p.editorPlayheadStep(), 6);
   await p.toggleEditorPreview();
   p.chooseEditorSubdivision(6);
   assert.equal(p.editorPlayheadBeats, 2);
-  assert.equal(p.editorPlayheadStep, 12, 'A stopped cursor must stay visible at the same beat on the new grid');
+  assert.equal(p.editorPlayheadStep(), 12, 'A stopped cursor must stay visible at the same beat on the new grid');
   await p.toggleEditorPreview();
   assert.equal(h.calls.at(-1).positionBeats, 2, 'Audition resumes from the canonical beat instead of reinterpreting an old step number');
   p.closeEditor();
@@ -2101,7 +2101,7 @@ async function testSubdivisionDraftsAndSnapping() {
     await page.toggleEditorPreview();
     assert.equal(triplet.calls.at(-1).positionBeats, (division + 1) / division);
     triplet.tick({ mainPlayheadMs: 625 });
-    assert.equal(page.editorPlayheadStep, 1.25 * division);
+    assert.equal(page.editorPlayheadStep(), 1.25 * division);
     triplet.setSnapshot({ mainPlayheadMs: 687.5 });
     await page.toggleEditorPreview();
     assert.equal(page.editorPlayheadBeats, 1.375);

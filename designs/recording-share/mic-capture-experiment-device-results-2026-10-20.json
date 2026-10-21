@@ -1,0 +1,386 @@
+{
+  "apiVersion": 26,
+  "capability": {
+    "apiVersion": 26,
+    "liveAvailable": true,
+    "liveAecSupported": true,
+    "micAecSupported": false,
+    "reason": ""
+  },
+  "mode": "mic-vs-live",
+  "outcome": "未发现可观测输出变化；仍需双机/耳机实测。请试听比较漏入的节拍与人声。",
+  "output": [
+    {
+      "phase": "baseline",
+      "streamId": 100294,
+      "physicalStartCount": 1,
+      "interruptCount": 0,
+      "underflowCount": 0,
+      "outputDevices": "2:1",
+      "audioScene": 0,
+      "latencyAllMs": 45,
+      "latencyHardwareMs": 40,
+      "latencySoftwareMs": 5
+    },
+    {
+      "phase": "mic-before",
+      "streamId": 100294,
+      "physicalStartCount": 1,
+      "interruptCount": 0,
+      "underflowCount": 0,
+      "outputDevices": "2:1",
+      "audioScene": 0,
+      "latencyAllMs": 45,
+      "latencyHardwareMs": 40,
+      "latencySoftwareMs": 5
+    },
+    {
+      "phase": "mic-active",
+      "streamId": 100294,
+      "physicalStartCount": 1,
+      "interruptCount": 0,
+      "underflowCount": 0,
+      "outputDevices": "2:1",
+      "audioScene": 0,
+      "latencyAllMs": 45,
+      "latencyHardwareMs": 40,
+      "latencySoftwareMs": 5
+    },
+    {
+      "phase": "mic-released",
+      "streamId": 100294,
+      "physicalStartCount": 1,
+      "interruptCount": 0,
+      "underflowCount": 0,
+      "outputDevices": "2:1",
+      "audioScene": 0,
+      "latencyAllMs": 45,
+      "latencyHardwareMs": 40,
+      "latencySoftwareMs": 5
+    },
+    {
+      "phase": "mic-restored",
+      "streamId": 100294,
+      "physicalStartCount": 1,
+      "interruptCount": 0,
+      "underflowCount": 0,
+      "outputDevices": "2:1",
+      "audioScene": 0,
+      "latencyAllMs": 45,
+      "latencyHardwareMs": 40,
+      "latencySoftwareMs": 5
+    },
+    {
+      "phase": "live-before",
+      "streamId": 100294,
+      "physicalStartCount": 1,
+      "interruptCount": 0,
+      "underflowCount": 0,
+      "outputDevices": "2:1",
+      "audioScene": 0,
+      "latencyAllMs": 45,
+      "latencyHardwareMs": 40,
+      "latencySoftwareMs": 5
+    },
+    {
+      "phase": "live-active",
+      "streamId": 100294,
+      "physicalStartCount": 1,
+      "interruptCount": 0,
+      "underflowCount": 0,
+      "outputDevices": "2:1",
+      "audioScene": 0,
+      "latencyAllMs": 45,
+      "latencyHardwareMs": 40,
+      "latencySoftwareMs": 5
+    },
+    {
+      "phase": "live-released",
+      "streamId": 100294,
+      "physicalStartCount": 1,
+      "interruptCount": 0,
+      "underflowCount": 0,
+      "outputDevices": "2:1",
+      "audioScene": 0,
+      "latencyAllMs": 45,
+      "latencyHardwareMs": 40,
+      "latencySoftwareMs": 5
+    },
+    {
+      "phase": "live-restored",
+      "streamId": 100294,
+      "physicalStartCount": 1,
+      "interruptCount": 0,
+      "underflowCount": 0,
+      "outputDevices": "2:1",
+      "audioScene": 0,
+      "latencyAllMs": 45,
+      "latencyHardwareMs": 40,
+      "latencySoftwareMs": 5
+    }
+  ],
+  "captures": {
+    "mic": {
+      "source": "mic",
+      "sampleRate": 48000,
+      "channels": 1,
+      "durationMs": 10000,
+      "totalFrames": 480000,
+      "devices": [
+        {
+          "type": 15,
+          "role": 1
+        }
+      ],
+      "aecSupported": false,
+      "peak": 0.42578125,
+      "clippedSamples": 0,
+      "timestampReadFailures": 0,
+      "overflowCount": 0,
+      "clockMetrics": {
+        "sampleRate": 48000,
+        "anchorCount": 101,
+        "warmupAnchorCount": 2,
+        "usableAnchorCount": 99,
+        "duplicateAnchorCount": 0,
+        "invalidAnchorCount": 0,
+        "discontinuityCount": 2,
+        "observedDurationMs": 9865.283906,
+        "estimatedSampleRate": 47993.4037838155,
+        "clockRateErrorPpm": -137.42117051041004,
+        "fitStartFrame": 6720,
+        "fitStartTimestampNs": 443028247044960.2,
+        "timestampFitResidualP95Ms": 3.845184083477974,
+        "timestampFitResidualMaxMs": 19.32774902002525,
+        "frameCursorOffsetMedianFrames": 0,
+        "frameCursorOffsetRangeFrames": 960,
+        "frameCursorVariationMs": 20,
+        "callbackBatchingSuspected": false,
+        "quality": "unstable",
+        "reason": "硬件时间戳存在跳变、较大残差或异常速率，本次不能作为可靠时钟比较"
+      }
+    },
+    "live": {
+      "source": "live",
+      "sampleRate": 48000,
+      "channels": 1,
+      "durationMs": 10000,
+      "totalFrames": 480000,
+      "devices": [
+        {
+          "type": 15,
+          "role": 1
+        }
+      ],
+      "aecSupported": true,
+      "peak": 0.2781982421875,
+      "clippedSamples": 0,
+      "timestampReadFailures": 0,
+      "overflowCount": 0,
+      "clockMetrics": {
+        "sampleRate": 48000,
+        "anchorCount": 102,
+        "warmupAnchorCount": 3,
+        "usableAnchorCount": 99,
+        "duplicateAnchorCount": 0,
+        "invalidAnchorCount": 0,
+        "discontinuityCount": 2,
+        "observedDurationMs": 9805.259375,
+        "estimatedSampleRate": 47990.15287615131,
+        "clockRateErrorPpm": -205.14841351437775,
+        "fitStartFrame": 9600,
+        "fitStartTimestampNs": 443040714455986.06,
+        "timestampFitResidualP95Ms": 7.542949098928869,
+        "timestampFitResidualMaxMs": 20.9776302459898,
+        "frameCursorOffsetMedianFrames": 0,
+        "frameCursorOffsetRangeFrames": 960,
+        "frameCursorVariationMs": 20,
+        "callbackBatchingSuspected": false,
+        "quality": "unstable",
+        "reason": "硬件时间戳存在跳变、较大残差或异常速率，本次不能作为可靠时钟比较"
+      }
+    }
+  },
+  "stageTimings": [
+    {
+      "source": "mic",
+      "stage": "capturer-stop",
+      "startedAtMonoMs": 446937381,
+      "durationMs": 17,
+      "beforeSnapshotIndex": 102,
+      "afterSnapshotIndex": 103,
+      "error": ""
+    },
+    {
+      "source": "mic",
+      "stage": "capturer-unsubscribe",
+      "startedAtMonoMs": 446937398,
+      "durationMs": 2,
+      "beforeSnapshotIndex": 104,
+      "afterSnapshotIndex": 105,
+      "error": ""
+    },
+    {
+      "source": "mic",
+      "stage": "capturer-release",
+      "startedAtMonoMs": 446937400,
+      "durationMs": 13,
+      "beforeSnapshotIndex": 106,
+      "afterSnapshotIndex": 107,
+      "error": ""
+    },
+    {
+      "source": "mic",
+      "stage": "clock-analysis",
+      "startedAtMonoMs": 446937413,
+      "durationMs": 24,
+      "beforeSnapshotIndex": 108,
+      "afterSnapshotIndex": 109,
+      "error": ""
+    },
+    {
+      "source": "mic",
+      "stage": "wav-pack",
+      "startedAtMonoMs": 446937437,
+      "durationMs": 3,
+      "beforeSnapshotIndex": 110,
+      "afterSnapshotIndex": 111,
+      "error": ""
+    },
+    {
+      "source": "mic",
+      "stage": "wav-write",
+      "startedAtMonoMs": 446937440,
+      "durationMs": 8,
+      "beforeSnapshotIndex": 112,
+      "afterSnapshotIndex": 113,
+      "error": ""
+    },
+    {
+      "source": "mic",
+      "stage": "report-encode",
+      "startedAtMonoMs": 446937448,
+      "durationMs": 2,
+      "beforeSnapshotIndex": 114,
+      "afterSnapshotIndex": 115,
+      "error": ""
+    },
+    {
+      "source": "mic",
+      "stage": "report-write",
+      "startedAtMonoMs": 446937450,
+      "durationMs": 5,
+      "beforeSnapshotIndex": 116,
+      "afterSnapshotIndex": 117,
+      "error": ""
+    },
+    {
+      "source": "mic",
+      "stage": "rename-wav",
+      "startedAtMonoMs": 446937455,
+      "durationMs": 2,
+      "beforeSnapshotIndex": 118,
+      "afterSnapshotIndex": 119,
+      "error": ""
+    },
+    {
+      "source": "mic",
+      "stage": "rename-report",
+      "startedAtMonoMs": 446937457,
+      "durationMs": 1,
+      "beforeSnapshotIndex": 120,
+      "afterSnapshotIndex": 121,
+      "error": ""
+    },
+    {
+      "source": "live",
+      "stage": "capturer-stop",
+      "startedAtMonoMs": 446949784,
+      "durationMs": 28,
+      "beforeSnapshotIndex": 103,
+      "afterSnapshotIndex": 104,
+      "error": ""
+    },
+    {
+      "source": "live",
+      "stage": "capturer-unsubscribe",
+      "startedAtMonoMs": 446949812,
+      "durationMs": 3,
+      "beforeSnapshotIndex": 105,
+      "afterSnapshotIndex": 106,
+      "error": ""
+    },
+    {
+      "source": "live",
+      "stage": "capturer-release",
+      "startedAtMonoMs": 446949816,
+      "durationMs": 50,
+      "beforeSnapshotIndex": 107,
+      "afterSnapshotIndex": 108,
+      "error": ""
+    },
+    {
+      "source": "live",
+      "stage": "clock-analysis",
+      "startedAtMonoMs": 446949866,
+      "durationMs": 34,
+      "beforeSnapshotIndex": 109,
+      "afterSnapshotIndex": 110,
+      "error": ""
+    },
+    {
+      "source": "live",
+      "stage": "wav-pack",
+      "startedAtMonoMs": 446949900,
+      "durationMs": 2,
+      "beforeSnapshotIndex": 111,
+      "afterSnapshotIndex": 112,
+      "error": ""
+    },
+    {
+      "source": "live",
+      "stage": "wav-write",
+      "startedAtMonoMs": 446949902,
+      "durationMs": 11,
+      "beforeSnapshotIndex": 113,
+      "afterSnapshotIndex": 114,
+      "error": ""
+    },
+    {
+      "source": "live",
+      "stage": "report-encode",
+      "startedAtMonoMs": 446949913,
+      "durationMs": 4,
+      "beforeSnapshotIndex": 115,
+      "afterSnapshotIndex": 116,
+      "error": ""
+    },
+    {
+      "source": "live",
+      "stage": "report-write",
+      "startedAtMonoMs": 446949917,
+      "durationMs": 6,
+      "beforeSnapshotIndex": 117,
+      "afterSnapshotIndex": 118,
+      "error": ""
+    },
+    {
+      "source": "live",
+      "stage": "rename-wav",
+      "startedAtMonoMs": 446949923,
+      "durationMs": 2,
+      "beforeSnapshotIndex": 119,
+      "afterSnapshotIndex": 120,
+      "error": ""
+    },
+    {
+      "source": "live",
+      "stage": "rename-report",
+      "startedAtMonoMs": 446949925,
+      "durationMs": 2,
+      "beforeSnapshotIndex": 121,
+      "afterSnapshotIndex": 122,
+      "error": ""
+    }
+  ]
+}

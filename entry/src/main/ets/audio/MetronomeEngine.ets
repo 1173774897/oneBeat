@@ -111,6 +111,38 @@ export interface CalibrationPlaybackReference {
   submittedFrames: number;
 }
 
+/** Read-only experiment evidence; none of these observations is a calibration value. */
+export interface MicExperimentPlaybackSnapshot {
+  sampledAtMonoMs: number;
+  rendererEpoch: number;
+  streamId: number;
+  physicalStartCount: number;
+  running: boolean;
+  started: boolean;
+  state: number;
+  writeCallbackCount: number;
+  submittedFrames: number;
+  lastWriteProgressMs: number;
+  interruptCount: number;
+  lastInterruptHint: number;
+  lastInterruptForce: number;
+  underflowCount: number;
+  outputDevices: string;
+  audioScene: number;
+  latencyAllMs: number;
+  latencyHardwareMs: number;
+  latencySoftwareMs: number;
+  rawFrame: number;
+  timestampMonoMs: number;
+  productionClockQueryMonoMs: number;
+  productionFrame: number;
+  transportStartLocalMs: number;
+  transportStartBeatIndex: number;
+  transportBpm: number;
+  transportOutputCompensationMs: number;
+  sharedClockOffsetMs: number;
+}
+
 /** A fresh sample may recover in the same epoch; callers must still verify stream identity. */
 export class MicPlaybackClockPendingError extends Error {
   readonly reason: string;
@@ -364,6 +396,9 @@ export class MetronomeEngine {
   private outputLatencyMs: number = 0;
   private recoveringAudio: boolean = false;
   private writeCallbackCount: number = 0;
+  private experimentInterruptCount: number = 0;
+  private experimentLastInterruptHint: number = -1;
+  private experimentLastInterruptForce: number = -1;
   private observedWriteCallbackCount: number = 0;
   private lastWriteProgressMs: number = 0;
   // A2DP 冷启动诊断：renderer.start() 之后、首个 writeData 回调之前的等待时间。
@@ -1358,6 +1393,11 @@ export class MetronomeEngine {
     });
     created.on('audioInterrupt', (event: audio.InterruptEvent) => {
       if (this.renderer !== created) { return; }
+      // A short interruption can resume before a polling observer sees it.
+      // Retain evidence without changing the existing focus/recovery policy.
+      this.experimentInterruptCount++;
+      this.experimentLastInterruptHint = event.hintType;
+      this.experimentLastInterruptForce = event.forceType;
       console.warn(`MetronomeEngine audio interrupt: hint=${event.hintType}, force=${event.forceType}, token=${this.runToken}`);
       // A forced pause must remain paused until the system grants focus back.
       // Restarting immediately would compete with calls or other audio owners.
@@ -2917,6 +2957,44 @@ export class MetronomeEngine {
   }
 
   /**
+   * The experiment reads existing production state; it must never prime/rebase
+   * that state to obtain a prettier result. Slow latency/route queries belong
+   * at phase boundaries, not in the audio callback or the 100ms observer.
+   */
+  readMicExperimentPlaybackSnapshot(includeOutputDetails: boolean = false): MicExperimentPlaybackSnapshot {
+    const renderer = this.renderer;
+    // Raw hardware coordinates remain observable even if the production frame
+    // origin is approximate. Reading them must not make that origin exact.
+    const clock = renderer === undefined ? undefined : this.readCalibrationClockSample(renderer, true, false);
+    let underflows = -1;
+    if (renderer !== undefined) {
+      try { underflows = renderer.getUnderflowCountSync(); } catch (_error) {}
+    }
+    const latency = renderer !== undefined && includeOutputDetails ?
+      MetronomeEngine.readOutputLatencySnapshot(renderer) : undefined;
+    return {
+      sampledAtMonoMs: MonotonicClock.nowMs(), rendererEpoch: this.rendererEpoch,
+      streamId: this.rendererStreamId, physicalStartCount: this.rendererPhysicalStartCount,
+      running: this.running, started: this.rendererStarted, state: renderer?.state ?? -1,
+      writeCallbackCount: this.writeCallbackCount, submittedFrames: this.audioSubmittedFrames,
+      lastWriteProgressMs: this.lastWriteProgressMs,
+      interruptCount: this.experimentInterruptCount, lastInterruptHint: this.experimentLastInterruptHint,
+      lastInterruptForce: this.experimentLastInterruptForce, underflowCount: underflows,
+      outputDevices: renderer !== undefined && includeOutputDetails ?
+        MetronomeEngine.describeOutputDevices(renderer) : '',
+      audioScene: includeOutputDetails ? MetronomeEngine.readAudioScene() : -1,
+      latencyAllMs: latency?.allMs ?? -1, latencyHardwareMs: latency?.hardwareMs ?? -1,
+      latencySoftwareMs: latency?.softwareMs ?? -1,
+      rawFrame: clock?.framePos ?? -1, timestampMonoMs: clock?.timestampMonoMs ?? -1,
+      productionClockQueryMonoMs: this.productionClockSample?.queryMonoMs ?? -1,
+      productionFrame: this.productionClockSample?.renderedFrame ?? -1,
+      transportStartLocalMs: this.transportStartLocalMs,
+      transportStartBeatIndex: this.transportStartBeatIndex, transportBpm: this.transportBpm,
+      transportOutputCompensationMs: this.audioTimelineOutputLatencyMs, sharedClockOffsetMs: this.offsetMs
+    };
+  }
+
+  /**
    * Bridge a mic result to the already-established production frame coordinate.
    * Do not prime or rebase that coordinate here: doing so would change the very
    * playback mapping being measured. Raw and legacy frames use one timestamp
@@ -3404,8 +3482,8 @@ export class MetronomeEngine {
    * clocks together so the timestamp's real age is preserved.
    */
   private readCalibrationClockSample(renderer: audio.AudioRenderer,
-    includeOutOfRangeAge: boolean = false): CalibrationClockSample | undefined {
-    if (!this.calibrationFrameOriginExact) {
+    includeOutOfRangeAge: boolean = false, requireExactOrigin: boolean = true): CalibrationClockSample | undefined {
+    if (requireExactOrigin && !this.calibrationFrameOriginExact) {
       return undefined;
     }
     try {

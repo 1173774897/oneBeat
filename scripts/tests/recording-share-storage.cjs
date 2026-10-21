@@ -99,7 +99,11 @@ function durableEnvironment() {
         }
       };
     } },
-    uniformTypeDescriptor: { UniformDataType: { VIDEO: 'video' } }
+    uniformTypeDescriptor: { UniformDataType: { VIDEO: 'video' },
+      getUniformDataTypeByFilenameExtension(extension, fallback) {
+        assert.equal(extension, '.mp4'); assert.equal(fallback, 'video');
+        return 'video.mp4';
+      } }
   };
   return { durable, files, failNames, failRenames, failUnlinks, failCopies, failCloses, failOpens, trace, fileIo, arkData,
     openDescriptorCount: () => descriptors.size,
@@ -146,7 +150,8 @@ async function testCoverExtraction() {
   environment.files.set(videoPath, Buffer.from('synthetic-h264-video'));
   await service.generate(videoPath, coverPath, 1080, 2340);
   const fetch = calls.find(item => item.action === 'fetch');
-  assert.deepEqual(fetch.params, { width: 442, height: 960 });
+  assert.deepEqual(fetch.params, { width: 1080, height: 2340 });
+  assert.deepEqual(calls.find(item => item.action === 'pack').options, { format: 'image/jpeg', quality: 95 });
   assert.equal(fetch.timeUs, 0); assert.equal(fetch.option, 'next-sync');
   assert.equal(environment.files.get(coverPath).toString(), 'jpeg-first-frame');
   assert.deepEqual(calls.filter(item => typeof item === 'string'),
@@ -157,9 +162,19 @@ async function testCoverExtraction() {
 }
 
 function services(environment = durableEnvironment()) {
-  const storage = new Map(), ledgerCalls = [], controllers = [], mixCalls = [], coverCalls = [];
+  const storage = new Map(), ledgerCalls = [], controllers = [], mixCalls = [], coverCalls = [], thumbnailCalls = [];
   const album = { destinations: ['content://album/video'], dialogError: undefined, releaseError: undefined,
     dialogs: [], releases: 0 };
+  const mediaLibraryKit = { photoAccessHelper: {
+    PhotoType: { VIDEO: 'video' },
+    getPhotoAccessHelper: () => ({ async showAssetsCreationDialog(uris, configs) {
+      album.dialogs.push({ uris: plain(uris), configs: plain(configs) });
+      if (album.dialogError) throw album.dialogError;
+      return [...album.destinations];
+    }, async release() {
+      album.releases++;
+      if (album.releaseError) throw album.releaseError;
+    } }) } };
   let now = environment.now ?? Date.now(), mono = 1000;
   environment.now = now;
   class ShareDate extends Date { static now() { return now; } }
@@ -188,27 +203,19 @@ function services(environment = durableEnvironment()) {
     } } },
     './RecordingMixer': { RECORDING_MIX_VERSION: 6, MAX_MIC_SHIFT_US: 300000,
       RecordingMixer: {
-      processedMicPath: micPath => `${micPath}.clean-v3.f32`,
+      mixVersion: clip => clip.micCaptureMode === 'system-aec' ? 7 : 6,
+      processedMicPath: (micPath, mode) => mode === 'system-aec' ? `${micPath}.system-aec-v2.f32` : `${micPath}.clean-v3.f32`,
       async exportMixed(clip, gain, output, micShiftUs) {
       mixCalls.push({ clip: plain(clip), gain, output, micShiftUs });
       environment.files.set(output, Buffer.from(
         `rendered-gain=${gain};shift=${micShiftUs};source=${clip.sourcePath}`));
       return {
-        autoMicShiftUs: clip.autoMicShiftUs ?? -1000,
-        autoMicShiftConfidence: clip.autoMicShiftConfidence ?? .8,
-        autoMicShiftReliable: clip.autoMicShiftReliable ?? true
+        autoMicShiftUs: clip.micCaptureMode === 'system-aec' ? 0 : clip.autoMicShiftUs ?? -1000,
+        autoMicShiftConfidence: clip.micCaptureMode === 'system-aec' ? 0 : clip.autoMicShiftConfidence ?? .8,
+        autoMicShiftReliable: clip.micCaptureMode === 'system-aec' ? false : clip.autoMicShiftReliable ?? true
       };
     } } },
-    '@kit.MediaLibraryKit': { photoAccessHelper: {
-      PhotoType: { VIDEO: 'video' },
-      getPhotoAccessHelper: () => ({ async showAssetsCreationDialog(uris, configs) {
-        album.dialogs.push({ uris: plain(uris), configs: plain(configs) });
-        if (album.dialogError) throw album.dialogError;
-        return [...album.destinations];
-      }, async release() {
-        album.releases++;
-        if (album.releaseError) throw album.releaseError;
-      } }) } }
+    '@kit.MediaLibraryKit': mediaLibraryKit
   }, globals).RecordingRepository;
   let showGate, showFailure = false, completionSupported = true;
   const shareDeviceInfo = { sdkApiVersion: 20 };
@@ -226,6 +233,25 @@ function services(environment = durableEnvironment()) {
   const share = load('sharing/RecordingShareService.ets', {
     '@kit.BasicServicesKit': { deviceInfo: shareDeviceInfo },
     '@kit.ArkData': environment.arkData, '@kit.CoreFileKit': environment.coreFile, '@kit.ArkTS': environment.arkTs,
+    '@kit.MediaLibraryKit': mediaLibraryKit,
+    '@kit.MediaKit': { media: {
+      AVImageQueryOptions: { AV_IMAGE_QUERY_NEXT_SYNC: 'next-sync' },
+      async createAVImageGenerator() {
+        return { fdSrc: undefined,
+          async fetchFrameByTime(timeUs, option, params) {
+            assert.equal(timeUs, 0); assert.equal(option, 'next-sync');
+            thumbnailCalls.push({ params: plain(params), source: plain(this.fdSrc) });
+            return { async release() { environment.trace.push('share-thumbnail-pixel-release'); } };
+          },
+          async release() { environment.trace.push('share-thumbnail-generator-release'); } };
+      }
+    } },
+    '@kit.ImageKit': { image: { createImagePacker() {
+      return { async packing(_pixelMap, options) {
+        assert.deepEqual(plain(options), { format: 'image/jpeg', quality: 80 });
+        return new TextEncoder().encode('share-thumbnail-jpeg').buffer;
+      }, async release() { environment.trace.push('share-thumbnail-packer-release'); } };
+    } } },
     '@kit.ShareKit': { systemShare: { SharedData: class { constructor(data) { this.data = data; } }, ShareController,
       SharePreviewMode: { DETAIL: 1 }, SelectionMode: { SINGLE: 1 } } },
     '../recording/RecordingRepository': { RecordingRepository: repository },
@@ -248,7 +274,7 @@ function services(environment = durableEnvironment()) {
     await repository.add(entry);
     return repository.get(entry.id);
   }
-  return { environment, storage, ledger, repository, share, ledgerCalls, controllers, mixCalls, coverCalls, album,
+  return { environment, storage, ledger, repository, share, ledgerCalls, controllers, mixCalls, coverCalls, thumbnailCalls, album,
     initialize, clip, atomic,
     gate(value) { showGate = value; }, failShow(value) { showFailure = value; },
     supportCompletion(value) { completionSupported = value; },
@@ -273,15 +299,26 @@ async function testExplicitShareConfirmation() {
   assert.equal(attempt.handedOff, false, 'Showing a chooser is not a target selection');
   assert.equal(h.ledger.getShareCheckInSummary().todayCompleted, false);
   const sharedUri = h.controllers.at(-1).data.data.uri;
-  assert.equal(sharedUri, `file://${attempt.sharedPath}`);
+  assert.equal(sharedUri, 'content://album/video', 'A receiver gets the authorized media-library URI');
+  assert.equal(h.repository.get(clip.id).albumUri, sharedUri, 'The authorized gallery destination is retained for this exact render');
+  assert.equal(h.controllers.at(-1).data.data.utd, 'video.mp4');
+  assert.equal(Buffer.from(h.controllers.at(-1).data.data.thumbnail).toString(), 'share-thumbnail-jpeg');
+  assert.deepEqual(h.thumbnailCalls[0].params, { width: 270, height: 480 }, 'Share thumbnails preserve the source aspect ratio');
+  assert.deepEqual(h.environment.trace.filter(value => value.startsWith('share-thumbnail-')),
+    ['share-thumbnail-pixel-release', 'share-thumbnail-packer-release', 'share-thumbnail-generator-release']);
+  assert.deepEqual(h.album.dialogs[0].uris, [`file://${attempt.sharedPath}`], 'Gallery export copies the immutable attempt snapshot');
+  assert.deepEqual(h.environment.files.get(sharedUri), h.environment.files.get(attempt.sharedPath));
   assert.deepEqual(h.environment.files.get(attempt.sharedPath), h.environment.files.get(clip.path));
+  assert.equal(h.environment.openDescriptorCount(), 0, 'Share thumbnail and gallery copy release all opened descriptors before showing the chooser');
   h.controllers.at(-1).dismiss(); await flush();
   assert.equal(h.share.getPendingListToday().length, 0, 'Closing without selecting a target never creates a todo');
   await h.handOff(h.controllers[0]);
   assert.equal(h.share.getPendingForClipToday(clip.id).id, attempt.id,
     'A completion arriving after dismiss still records the actual handoff');
   const second = await h.share.share(another, {}, 'rednote'); await h.handOff();
+  const dialogCount = h.album.dialogs.length;
   const third = await h.share.share(clip, {}, 'qq'); await h.handOff();
+  assert.equal(h.album.dialogs.length, dialogCount, 'Sharing an unchanged saved render reuses its gallery URI without another save dialog');
   assert.equal(h.share.getPendingListToday().length, 3, 'Multiple works and repeated attempts never lock each other');
   assert.equal(h.share.getPendingForClipToday(clip.id).id, third.id);
   const confirmation = await h.share.confirmPublished(second.id);
@@ -614,13 +651,13 @@ async function testLargeSnapshotsAndAtomicWrites() {
     'Existing works backfill a durable first-frame cover');
 }
 
-async function addStemClip(h, scope = 'team') {
+async function addStemClip(h, scope = 'team', extra = {}) {
   const target = await h.repository.createTarget();
   const base = target.path.substring(0, target.path.length - 4);
   const clip = { ...target, durationMs: 3000, width: 720, height: 1280, interrupted: false,
     stopReason: 'user', scope, sourcePath: `${base}.source.mp4`, micPath: `${base}.mic.pcm`,
     innerPath: `${base}.inner.pcm`, micOffsetUs: 300, innerOffsetUs: 100,
-    audioSampleRate: 44100, audioChannels: 2, renderedGain: 1 };
+    audioSampleRate: 44100, audioChannels: 2, renderedGain: 1, ...extra };
   h.environment.files.set(clip.path, Buffer.from('initial-gain=1'));
   h.environment.files.set(clip.sourcePath, Buffer.from('immutable-video'));
   h.environment.files.set(clip.micPath, Buffer.from('immutable-mic'));
@@ -677,8 +714,12 @@ async function testWorkScopeAndNonDestructiveGain() {
   assert.deepEqual(h.environment.files.get('content://album/video'), h.environment.files.get(muted.path),
     'Saving a stale UI clip reads the latest indexed render');
   await assert.rejects(h.repository.render(team, 1, 300001), /300 毫秒/);
+  const dialogsBeforeShare = h.album.dialogs.length;
   const attempt = await h.share.share(team, {});
-  assert.equal(h.controllers.at(-1).data.data.uri, `file://${attempt.sharedPath}`);
+  assert.equal(h.controllers.at(-1).data.data.uri, 'content://album/video');
+  assert.equal(h.album.dialogs.length, dialogsBeforeShare, 'Sharing the current saved mix reuses its approved gallery URI');
+  assert.deepEqual(h.environment.files.get(h.controllers.at(-1).data.data.uri), h.environment.files.get(muted.path),
+    'The receiver reads the current mix through the previously approved media-library copy');
   assert.deepEqual(h.environment.files.get(attempt.sharedPath), h.environment.files.get(muted.path),
     'System share snapshots the latest indexed render rather than a stale UI path');
   const sharedBytes = Buffer.from(h.environment.files.get(attempt.sharedPath));
@@ -717,6 +758,91 @@ async function testRenderedRecovery() {
   for (const path of [original.path, original.sourcePath, original.micPath, original.innerPath, render]) {
     assert.equal(h.environment.files.has(path), false);
   }
+}
+
+async function testSystemAecProvenanceAndRecovery() {
+  const h = services(); await h.initialize();
+  const oldAec = await addStemClip(h, 'team', { micCaptureMode: 'system-aec', captureSyncValid: true,
+    captureMappingVersion: 3, videoTimestampDivisor: 1000, audioSampleRate: 48000,
+    renderedMixVersion: 6, autoMicShiftUs: 0, autoMicShiftConfidence: 0, autoMicShiftReliable: false });
+  const aec = await h.repository.render(oldAec, 1);
+  assert.notEqual(aec.path, oldAec.path, 'Previously quiet AEC exports upgrade at the same user gain');
+  assert.equal(aec.renderedMixVersion, 7);
+  assert.equal(h.mixCalls.length, 1);
+  assert.equal(aec.micCaptureMode, 'system-aec', 'Indexing and public clip copies retain capture provenance');
+  assert.equal(h.repository.list('team')[0].micCaptureMode, 'system-aec');
+  const unchanged = await h.repository.render(aec, 1);
+  assert.equal(unchanged.path, aec.path);
+  assert.equal(h.mixCalls.length, 1, 'A current AEC render must not be rebuilt solely because its reliable-auto flag is false');
+  const immutable = new Map([aec.sourcePath, aec.innerPath, aec.micPath].map(name =>
+    [name, Buffer.from(h.environment.files.get(name))]));
+  const shifted = await h.repository.render(aec, .37, 87000);
+  assert.equal(shifted.micCaptureMode, 'system-aec');
+  assert.equal(shifted.renderedGain, .37);
+  assert.equal(shifted.renderedMicShiftUs, 87000);
+  assert.equal(shifted.autoMicShiftUs, 0);
+  assert.equal(shifted.autoMicShiftConfidence, 0);
+  assert.equal(shifted.autoMicShiftReliable, false);
+  assert.equal(h.mixCalls.at(-1).clip.micCaptureMode, 'system-aec');
+  assert.equal(h.mixCalls.at(-1).micShiftUs, 87000);
+  for (const [name, bytes] of immutable) assert.deepEqual(h.environment.files.get(name), bytes,
+    'An AEC manual edit leaves every captured stem immutable');
+  let restart = services(h.environment); await restart.initialize();
+  const restored = restart.repository.get(aec.id);
+  assert.equal(restored.micCaptureMode, 'system-aec', 'Capture mode must survive a full app restart');
+  assert.equal(restored.captureMappingVersion, 3);
+  assert.equal(restored.renderedMicShiftUs, 87000);
+  await restart.repository.render(restored, .37, 87000);
+  assert.equal(restart.mixCalls.length, 0);
+
+  h.environment.failRenames.add('/app/files/recordings/library-v1.json');
+  await assert.rejects(restart.repository.render(restored, .59, -43000), /声音处理未完成/);
+  const recoveryPath = restart.mixCalls.at(-1).output;
+  assert.equal(JSON.parse(h.environment.files.get(`${recoveryPath}.recovery.json`)).micCaptureMode, 'system-aec');
+  h.environment.failRenames.delete('/app/files/recordings/library-v1.json');
+  restart = services(h.environment); await restart.initialize();
+  const recovered = restart.repository.get(aec.id);
+  assert.equal(recovered.path, recoveryPath);
+  assert.equal(recovered.micCaptureMode, 'system-aec', 'Failed-index render recovery must not fall back to legacy FIR processing');
+  assert.equal(recovered.renderedMicShiftUs, -43000);
+  const processed = `${aec.micPath}.system-aec-v2.f32`;
+  h.environment.files.set(processed, Buffer.from('raw-system-aec-float-cache'));
+  h.environment.files.set(`${processed}.tmp`, Buffer.from('interrupted-aec-cache-write'));
+  const oldProcessed = `${aec.micPath}.system-aec-v1.f32`;
+  h.environment.files.set(oldProcessed, Buffer.from('old-aec-cache'));
+  await restart.repository.remove(aec.id);
+  assert.equal(h.environment.files.has(processed), false);
+  assert.equal(h.environment.files.has(`${processed}.tmp`), false);
+  assert.equal(h.environment.files.has(oldProcessed), false);
+
+  const pendingTarget = await restart.repository.createTarget();
+  const base = pendingTarget.path.substring(0, pendingTarget.path.length - 4);
+  const pending = { ...aec, ...pendingTarget, path: pendingTarget.path, sourcePath: `${base}-source.mp4`,
+    innerPath: `${base}-inner.pcm`, micPath: `${base}-mic.pcm` };
+  for (const name of [pending.sourcePath, pending.innerPath, pending.micPath]) {
+    h.environment.files.set(name, Buffer.from('unexported-captured-stem'));
+  }
+  await restart.repository.retainPendingCapture(pending);
+  const pendingRecordPath = `${base}.capture.json`;
+  const note = JSON.parse(h.environment.files.get(pendingRecordPath));
+  assert.equal(note.version, 2, 'The existing atomic capture container remains compatible');
+  assert.equal(note.clip.micCaptureMode, 'system-aec');
+  const pendingRestart = services(h.environment); await pendingRestart.initialize();
+  const recoverable = await pendingRestart.repository.loadPendingCapture();
+  assert.equal(recoverable.micCaptureMode, 'system-aec');
+  assert.equal(recoverable.captureMappingVersion, 3);
+  for (const invalid of [
+    { ...pending, captureMappingVersion: 2 },
+    { ...pending, micCaptureMode: 'screen-mic' },
+    { ...pending, micCaptureMode: undefined }
+  ]) {
+    await pendingRestart.repository.retainPendingCapture(invalid);
+    assert.equal(await pendingRestart.repository.loadPendingCapture(), undefined,
+      'A mismatched AEC/mapping provenance note must not authorize a recovered export');
+  }
+  await pendingRestart.repository.retainPendingCapture({ ...pending, micCaptureMode: 'screen-mic', captureMappingVersion: 2 });
+  assert.equal((await pendingRestart.repository.loadPendingCapture()).micCaptureMode, 'screen-mic',
+    'Legacy screen-MIC captures remain recoverable in the same container');
 }
 
 function backgroundHarness({ avFailures = 0 } = {}) {
@@ -853,6 +979,7 @@ function testLobbyToast() {
 (async () => {
   await testCoverExtraction(); await testExplicitShareConfirmation(); await testSystemOperationsAndCrossDay(); await testShareCrashReplay(); await testOldSystemSelfReport(); await testShareCopyCleanup(); await testSharePathBoundary(); await testLibraryRecovery(); await testAlbumSaveLifecycle();
   await testLargeSnapshotsAndAtomicWrites(); await testWorkScopeAndNonDestructiveGain(); await testRenderedRecovery();
+  await testSystemAecProvenanceAndRecovery();
   await testBackgroundOwners(); testLobbyToast(); testSharedCalendar();
   console.log('PASS recording share/storage: explicit publication only, durable pending and crash replay, failed-index MP4 recovery, album copy and background owner union/optional media card failure');
 })().catch(error => { console.error(error); process.exitCode = 1; });

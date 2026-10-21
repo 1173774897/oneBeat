@@ -8,6 +8,8 @@
 #include <multimedia/player_framework/native_avformat.h>
 #include <multimedia/player_framework/native_avbuffer.h>
 #include <native_window/external_window.h>
+#include <ohaudio/native_audiocapturer.h>
+#include <ohaudio/native_audiostreambuilder.h>
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -29,6 +31,8 @@
 #include <unistd.h>
 #include "recording_audio_math.h"
 #include "recording_echo_filter.h"
+#include "recording_system_mic.h"
+#include "recording_mic_level.h"
 
 namespace {
 constexpr int RATE = 48000;
@@ -38,6 +42,7 @@ constexpr int VIDEO_FRAME_RATE = 30;
 constexpr int64_t VIDEO_BITRATE = 8000000;
 constexpr size_t MAX_PCM_QUEUE_BYTES = RATE * FRAME_BYTES * 2;
 constexpr size_t MAX_VIDEO_QUEUE = 32;
+std::atomic<bool> systemMicReleaseBlocked{false};
 using namespace std::chrono_literals;
 
 void Check(bool valid, const char *message)
@@ -79,7 +84,12 @@ struct Buffer {
     ~Buffer() { OH_AVBuffer_Destroy(value); }
 };
 struct CodecBuffer { uint32_t index; OH_AVBuffer *buffer; };
-struct PcmChunk { bool microphone; int64_t timestampNs; std::vector<uint8_t> bytes; };
+struct PcmChunk {
+    bool microphone;
+    int64_t timestampNs;
+    std::vector<uint8_t> bytes;
+    int64_t systemMicFirstFrame = -1;
+};
 struct TrackWriter {
     int fd = -1;
     int64_t firstTimestampNs = -1;
@@ -113,6 +123,9 @@ public:
     int64_t micFirstPtsUs = -1, innerFirstPtsUs = -1;
     int videoTimestampDivisor = 0;
     bool syncValid = true;
+    bool systemAecMic = false;
+    int micInputChannels = CHANNELS;
+    std::atomic<bool> micHardwareTimestampKnown{false};
 
     std::string Error()
     {
@@ -122,8 +135,10 @@ public:
     void Fail(const std::string &message)
     {
         { std::lock_guard<std::mutex> lock(statusMutex); if (error.empty()) error = message; }
+        acceptingSystemMic.store(false);
         state.store(3);
         statusCv.notify_all();
+        micClockCv.notify_all();
     }
     void Cancel() { cancelled.store(true); statusCv.notify_all(); }
 
@@ -168,12 +183,14 @@ public:
                 "无法监听录屏服务错误");
             Check(OH_AVScreenCapture_SetDataCallback(capture, PcmAvailable, this) == AV_SCREEN_CAPTURE_ERR_OK,
                 "无法连接独立声音音轨");
-            Check(OH_AVScreenCapture_SetMicrophoneEnabled(capture, true) == AV_SCREEN_CAPTURE_ERR_OK,
-                "无法启用录制麦克风");
+            // ScreenCapture must not own a second MIC when LIVE owns the AEC
+            // input. Keeping both would duplicate capture and can alter focus.
+            Check(OH_AVScreenCapture_SetMicrophoneEnabled(capture, !systemAecMic) == AV_SCREEN_CAPTURE_ERR_OK,
+                "无法设置录制麦克风");
             OH_AVScreenCaptureConfig config{};
             config.captureMode = OH_CAPTURE_HOME_SCREEN;
             config.dataType = OH_ORIGINAL_STREAM;
-            config.audioInfo.micCapInfo = {RATE, CHANNELS, OH_MIC};
+            if (!systemAecMic) config.audioInfo.micCapInfo = {RATE, CHANNELS, OH_MIC};
             config.audioInfo.innerCapInfo = {RATE, CHANNELS, OH_APP_PLAYBACK};
             config.videoInfo.videoCapInfo.videoFrameWidth = width;
             config.videoInfo.videoCapInfo.videoFrameHeight = height;
@@ -195,6 +212,14 @@ public:
         std::unique_lock<std::mutex> lock(statusMutex);
         statusCv.wait(lock, [this] { return state.load() != -1 || cancelled.load(); });
         Check(!cancelled.load() && state.load() == 0, error.empty() ? "已取消录制" : error.c_str());
+        lock.unlock();
+        if (systemAecMic) {
+            // Consent may take arbitrarily long. Open the independent MIC only
+            // after the native granted state, never while the consent UI shows.
+            std::lock_guard<std::mutex> control(controlMutex);
+            Check(!stopped && !cancelled.load() && state.load() == 0, "已取消录制");
+            StartSystemMic();
+        }
     }
 
     void Stop()
@@ -203,6 +228,7 @@ public:
         std::lock_guard<std::mutex> lock(controlMutex);
         if (stopped) return;
         stopped = true;
+        StopSystemMic();
         if (capture != nullptr) {
             OH_AVScreenCapture_StopScreenCapture(capture);
             OH_AVScreenCapture_Release(capture);
@@ -245,6 +271,10 @@ public:
                 Fail("设备录屏时间戳不兼容，无法保证三路同步");
             }
         }
+        if (systemAecMic && !micHardwareTimestampKnown.load()) {
+            syncValid = false;
+            Fail("系统 AEC 麦克风没有有效采集时间戳，原始音轨已保留");
+        }
     }
     ~CaptureSession() { Stop(); }
 
@@ -266,10 +296,229 @@ private:
     std::deque<PcmChunk> pcmQueue;
     size_t queuedPcmBytes = 0;
     std::deque<CodecBuffer> videoQueue;
+    OH_AudioCapturer *systemMic = nullptr;
+    bool systemMicStarted = false;
+    std::atomic<bool> acceptingSystemMic{false};
+    std::mutex micClockMutex;
+    std::condition_variable micClockCv;
+    onebeat_recording::SystemMicTimeline micTimeline;
+    int64_t systemMicFrames = 0;
+
+    // The platform retains userData until Release succeeds. On an unexpected
+    // release failure detach the owner and retain only this tiny callback gate;
+    // no later platform callback may address a destroyed CaptureSession.
+    struct MicCallbackGate {
+        std::mutex mutex;
+        std::condition_variable cv;
+        CaptureSession *owner = nullptr;
+        int active = 0;
+    };
+    std::unique_ptr<MicCallbackGate> micCallbackGate;
+    struct MicCallbackLease {
+        MicCallbackGate *gate;
+        CaptureSession *owner = nullptr;
+        explicit MicCallbackLease(void *data) : gate(static_cast<MicCallbackGate *>(data))
+        {
+            std::lock_guard<std::mutex> lock(gate->mutex);
+            owner = gate->owner;
+            if (owner != nullptr) gate->active++;
+        }
+        ~MicCallbackLease()
+        {
+            if (owner == nullptr) return;
+            std::lock_guard<std::mutex> lock(gate->mutex);
+            gate->active--;
+            gate->cv.notify_all();
+        }
+    };
+
+    void FailFromCallback(const char *message) noexcept
+    {
+        try { Fail(message); }
+        catch (...) {
+            // Error text can allocate while the device is already short of
+            // memory. The C ABI must still return with a terminal state.
+            acceptingSystemMic.store(false);
+            state.store(3);
+            statusCv.notify_all();
+            micClockCv.notify_all();
+        }
+    }
+
+    static int32_t SystemMicData(OH_AudioCapturer *capturer, void *data, void *buffer, int32_t length) noexcept
+    {
+        try {
+            MicCallbackLease lease(data);
+            auto *self = lease.owner;
+            if (self == nullptr || !self->acceptingSystemMic.load()) return 0;
+            try {
+                const int channels = self->micInputChannels;
+                Check(buffer != nullptr && length > 0 && length % (channels * sizeof(int16_t)) == 0,
+                    "系统 AEC 返回了不完整的麦克风帧");
+                PcmChunk chunk{true, -1, {}};
+                Check(onebeat_recording::CopySystemMicStereo(buffer, length, channels, chunk.bytes),
+                    "系统 AEC 麦克风格式无效");
+                {
+                    std::lock_guard<std::mutex> lock(self->micClockMutex);
+                    chunk.systemMicFirstFrame = self->systemMicFrames;
+                    self->systemMicFrames += length / (channels * sizeof(int16_t));
+                    if (!self->micTimeline.Known()) {
+                        int64_t hardwareFrame = -1, hardwareNs = -1;
+                        // GetTimestamp is an API10 hardware observation in ns in
+                        // requested CLOCK_MONOTONIC. Callback/JS arrival time never
+                        // substitutes for this media timestamp.
+                        if (OH_AudioCapturer_GetTimestamp(capturer, CLOCK_MONOTONIC,
+                            &hardwareFrame, &hardwareNs) == AUDIOSTREAM_SUCCESS &&
+                            self->micTimeline.Anchor(hardwareFrame, hardwareNs, MonotonicNowUs() * 1000)) {
+                            self->micHardwareTimestampKnown.store(true);
+                            self->micClockCv.notify_all();
+                        }
+                        Check(self->micTimeline.Known() || self->systemMicFrames < RATE * 2,
+                            "系统 AEC 麦克风时间戳不可用，录制已结束");
+                    }
+                }
+                self->EnqueuePcm(std::move(chunk));
+            } catch (const std::exception &err) { self->FailFromCallback(err.what()); }
+            catch (...) { self->FailFromCallback("系统 AEC 麦克风缓冲区不足"); }
+        } catch (...) {
+            // A callback lease can fail before there is a safe owner reference.
+            // In that case no session memory may be accessed through userData.
+        }
+        return 0;
+    }
+    static int32_t SystemMicStreamEvent(OH_AudioCapturer *, void *data, OH_AudioStream_Event) noexcept
+    {
+        try {
+            MicCallbackLease lease(data);
+            if (lease.owner != nullptr && lease.owner->acceptingSystemMic.load())
+                lease.owner->FailFromCallback("麦克风输入设备发生变化，录制已结束");
+        } catch (...) {}
+        return 0;
+    }
+    static int32_t SystemMicInterrupt(OH_AudioCapturer *, void *data,
+        OH_AudioInterrupt_ForceType, OH_AudioInterrupt_Hint) noexcept
+    {
+        try {
+            MicCallbackLease lease(data);
+            if (lease.owner != nullptr && lease.owner->acceptingSystemMic.load())
+                lease.owner->FailFromCallback("麦克风被系统中断，录制已结束");
+        } catch (...) {}
+        return 0;
+    }
+    static int32_t SystemMicError(OH_AudioCapturer *, void *data, OH_AudioStream_Result) noexcept
+    {
+        try {
+            MicCallbackLease lease(data);
+            if (lease.owner != nullptr && lease.owner->acceptingSystemMic.load())
+                lease.owner->FailFromCallback("系统 AEC 麦克风采集异常，录制已结束");
+        } catch (...) {}
+        return 0;
+    }
+
+    void CreateSystemMic(int channels)
+    {
+        OH_AudioStreamBuilder *builder = nullptr;
+        Check(OH_AudioStreamBuilder_Create(&builder, AUDIOSTREAM_TYPE_CAPTURER) == AUDIOSTREAM_SUCCESS &&
+            builder != nullptr, "无法创建系统 AEC 麦克风");
+        try {
+            Check(OH_AudioStreamBuilder_SetSamplingRate(builder, RATE) == AUDIOSTREAM_SUCCESS &&
+                OH_AudioStreamBuilder_SetChannelCount(builder, channels) == AUDIOSTREAM_SUCCESS &&
+                OH_AudioStreamBuilder_SetSampleFormat(builder, AUDIOSTREAM_SAMPLE_S16LE) == AUDIOSTREAM_SUCCESS &&
+                OH_AudioStreamBuilder_SetEncodingType(builder, AUDIOSTREAM_ENCODING_TYPE_RAW) == AUDIOSTREAM_SUCCESS &&
+                OH_AudioStreamBuilder_SetLatencyMode(builder, AUDIOSTREAM_LATENCY_MODE_NORMAL) == AUDIOSTREAM_SUCCESS &&
+                OH_AudioStreamBuilder_SetCapturerInfo(builder,
+                    static_cast<OH_AudioStream_SourceType>(17)) == AUDIOSTREAM_SUCCESS,
+                "系统 AEC 麦克风参数不受支持");
+            OH_AudioCapturer_Callbacks callbacks{
+                SystemMicData, SystemMicStreamEvent, SystemMicInterrupt, SystemMicError};
+            Check(OH_AudioStreamBuilder_SetCapturerCallback(builder, callbacks, micCallbackGate.get()) ==
+                AUDIOSTREAM_SUCCESS, "无法监听系统 AEC 麦克风");
+            OH_AudioCapturer *created = nullptr;
+            const auto result = OH_AudioStreamBuilder_GenerateCapturer(builder, &created);
+            systemMic = created;
+            Check(result == AUDIOSTREAM_SUCCESS && created != nullptr, "无法初始化系统 AEC 麦克风");
+            OH_AudioStreamBuilder_Destroy(builder);
+        } catch (...) {
+            OH_AudioStreamBuilder_Destroy(builder);
+            throw;
+        }
+    }
+    void StartSystemMic()
+    {
+        Check(!systemMicReleaseBlocked.load(), "系统 AEC 麦克风尚未释放，请重启应用后再录制");
+        micCallbackGate = std::make_unique<MicCallbackGate>();
+        micCallbackGate->owner = this;
+        // Some LIVE sources expose only mono. This is a channel-only fallback;
+        // source/format/focus policy never fall back to MIC or VOIP.
+        try { CreateSystemMic(CHANNELS); }
+        catch (...) {
+            Check(systemMic == nullptr, "系统 AEC 麦克风初始化异常");
+            CreateSystemMic(1);
+        }
+        int32_t actualRate = 0, actualChannels = 0;
+        OH_AudioStream_SourceType actualSource{};
+        OH_AudioStream_SampleFormat actualFormat{};
+        OH_AudioStream_EncodingType actualEncoding{};
+        Check(OH_AudioCapturer_GetSamplingRate(systemMic, &actualRate) == AUDIOSTREAM_SUCCESS &&
+            OH_AudioCapturer_GetChannelCount(systemMic, &actualChannels) == AUDIOSTREAM_SUCCESS &&
+            OH_AudioCapturer_GetSampleFormat(systemMic, &actualFormat) == AUDIOSTREAM_SUCCESS &&
+            OH_AudioCapturer_GetEncodingType(systemMic, &actualEncoding) == AUDIOSTREAM_SUCCESS &&
+            OH_AudioCapturer_GetCapturerInfo(systemMic, &actualSource) == AUDIOSTREAM_SUCCESS &&
+            actualRate == RATE && (actualChannels == 1 || actualChannels == CHANNELS) &&
+            actualFormat == AUDIOSTREAM_SAMPLE_S16LE && actualEncoding == AUDIOSTREAM_ENCODING_TYPE_RAW &&
+            static_cast<int>(actualSource) == 17, "系统未提供请求的 LIVE AEC 麦克风格式");
+        micInputChannels = actualChannels;
+        acceptingSystemMic.store(true);
+        Check(OH_AudioCapturer_Start(systemMic) == AUDIOSTREAM_SUCCESS, "无法启动系统 AEC 麦克风");
+        systemMicStarted = true;
+        Check(!cancelled.load() && state.load() == 0, "系统 AEC 麦克风启动已中断");
+    }
+    void StopSystemMic()
+    {
+        acceptingSystemMic.store(false);
+        micClockCv.notify_all();
+        if (systemMic != nullptr) {
+            if (systemMicStarted && OH_AudioCapturer_Stop(systemMic) != AUDIOSTREAM_SUCCESS)
+                Fail("系统 AEC 麦克风停止异常");
+            systemMicStarted = false;
+            if (micCallbackGate != nullptr) {
+                std::unique_lock<std::mutex> lock(micCallbackGate->mutex);
+                micCallbackGate->owner = nullptr;
+                micCallbackGate->cv.wait(lock, [this] { return micCallbackGate->active == 0; });
+            }
+            const bool released = OH_AudioCapturer_Release(systemMic) == AUDIOSTREAM_SUCCESS;
+            systemMic = nullptr;
+            if (!released) {
+                micCallbackGate.release();
+                systemMicReleaseBlocked.store(true);
+                Fail("系统 AEC 麦克风释放异常，请重启应用后再录制");
+            }
+        }
+        micCallbackGate.reset();
+    }
+
+    void EnqueuePcm(PcmChunk chunk)
+    {
+        {
+            std::lock_guard<std::mutex> lock(pcmMutex);
+            if (!acceptingPcm.load()) return;
+            if (queuedPcmBytes + chunk.bytes.size() > MAX_PCM_QUEUE_BYTES) {
+                Fail("存储写入跟不上采集，录制已结束");
+                return;
+            }
+            queuedPcmBytes += chunk.bytes.size();
+            pcmQueue.push_back(std::move(chunk));
+        }
+        pcmCv.notify_one();
+    }
 
     static void StateChanged(OH_AVScreenCapture *, OH_AVScreenCaptureStateCode code, void *data)
     {
         auto *self = static_cast<CaptureSession *>(data);
+        // This ScreenCapture deliberately has no microphone in LIVE mode.
+        // Its MIC mute notifications say nothing about the independent source.
+        if (self->systemAecMic && (static_cast<int>(code) == 6 || static_cast<int>(code) == 7)) return;
+        if (self->state.load() == 3 && !self->Error().empty()) return;
         self->state.store(static_cast<int>(code));
         self->statusCv.notify_all();
     }
@@ -320,6 +569,7 @@ private:
         // audio buffers have been observed on some builds and must not be
         // folded into inner playback or the export sounds doubled/metallic.
         if (!isMic && !isInner) return;
+        if (isMic && self->systemAecMic) return;
         auto *address = OH_AVBuffer_GetAddr(buffer);
         int capacity = OH_AVBuffer_GetCapacity(buffer);
         // AVScreenCapture wraps each audio callback in an exact-size raw PCM
@@ -332,17 +582,11 @@ private:
         }
         const int size = capacity;
         try {
-            std::lock_guard<std::mutex> lock(self->pcmMutex);
-            if (self->queuedPcmBytes + size > MAX_PCM_QUEUE_BYTES) {
-                self->Fail("存储写入跟不上采集，录制已结束");
-                return;
-            }
             // The system frees this memory on callback return. Copy into a
             // bounded queue; no filesystem I/O, encoding, or JS callback here.
             PcmChunk chunk{isMic, timestampNs, {}};
             chunk.bytes.assign(address, address + size);
-            self->queuedPcmBytes += size;
-            self->pcmQueue.push_back(std::move(chunk));
+            self->EnqueuePcm(std::move(chunk));
         } catch (...) { self->Fail("录制缓冲区不足"); }
         self->pcmCv.notify_one();
     }
@@ -357,6 +601,14 @@ private:
                     if (pcmQueue.empty()) break;
                     chunk = std::move(pcmQueue.front()); pcmQueue.pop_front();
                     queuedPcmBytes -= chunk.bytes.size();
+                }
+                if (chunk.systemMicFirstFrame >= 0) {
+                    std::unique_lock<std::mutex> lock(micClockMutex);
+                    micClockCv.wait_for(lock, 2s, [this] {
+                        return micTimeline.Known() || !acceptingSystemMic.load() || state.load() == 3;
+                    });
+                    Check(micTimeline.Known(), "系统 AEC 麦克风时间戳不可用，原始音轨已保留");
+                    chunk.timestampNs = micTimeline.TimestampForFrame(chunk.systemMicFirstFrame);
                 }
                 if (chunk.microphone) {
                     const int16_t *samples = reinterpret_cast<const int16_t *>(chunk.bytes.data());
@@ -446,6 +698,7 @@ struct MixOptions {
     double autoMicShiftConfidence = 0;
     double gain = 1;
     double speakerBleedCancel = 0;
+    bool normalizeSystemMic = false;
 };
 class AudioEncoderQueue {
 public:
@@ -564,6 +817,21 @@ onebeat_recording::StereoEchoFirEstimate EstimateEchoAt(int innerFd, int micFd,
     return estimate;
 }
 
+double SystemMicLevelGain(int fd)
+{
+    onebeat_recording::SystemMicLevelMeter meter;
+    std::vector<int16_t> samples(4096 * CHANNELS);
+    int64_t offset = 0;
+    while (true) {
+        const ssize_t bytes = pread(fd, samples.data(), samples.size() * sizeof(int16_t), offset);
+        Check(bytes >= 0 && bytes % FRAME_BYTES == 0, "读取麦克风响度失败");
+        if (bytes == 0) break;
+        meter.Append(samples.data(), static_cast<size_t>(bytes) / FRAME_BYTES);
+        offset += bytes;
+    }
+    return meter.Gain();
+}
+
 /**
  * Echo fitting depends only on immutable capture stems and their measured offsets.
  * Persist its floating-point MIC residual once so gain/alignment edits avoid the
@@ -587,6 +855,9 @@ ProcessedMicInfo EnsureProcessedMic(const MixOptions &options, int innerFd, int 
         {
             Fd output(temporaryPath, true);
             const bool speakerMix = options.speakerBleedCancel > 0;
+            // The normalized cache is independent of the user's gain and manual
+            // alignment. Analyze raw frames, not offset-induced leading silence.
+            const double micLevelGain = options.normalizeSystemMic ? SystemMicLevelGain(micFd) : 1;
             constexpr int64_t ECHO_HOP_FRAMES = RATE;
             constexpr int PROCESS_BLOCK_FRAMES = 4096;
             int64_t echoAnchor = 0;
@@ -660,7 +931,7 @@ ProcessedMicInfo EnsureProcessedMic(const MixOptions &options, int innerFd, int 
                             }
                             const int index = (processed + frame) * CHANNELS + channel;
                             residual[index] = static_cast<float>(
-                                static_cast<double>(microphone[index]) - echo);
+                                (static_cast<double>(microphone[index]) - echo) * micLevelGain);
                         }
                     }
                     processed += count;
@@ -697,6 +968,8 @@ ProcessedMicInfo MixFile(const MixOptions &options)
         "自动人声对齐参数无效");
     Check(std::isfinite(options.speakerBleedCancel) && options.speakerBleedCancel >= 0 &&
         options.speakerBleedCancel <= 4, "外放泄漏补偿无效");
+    Check(!options.normalizeSystemMic || options.speakerBleedCancel == 0,
+        "系统 AEC 不可重复进行回声净化");
     Check(options.durationMs > 0 && options.durationMs < 24 * 3600000, "录制时长无效");
     Check(options.outputPath != options.sourcePath && options.outputPath != options.innerPath &&
         options.outputPath != options.micPath && options.outputPath != options.processedMicPath,
@@ -859,6 +1132,9 @@ std::string GetString(napi_env env, napi_value object, const char *key)
 double GetNumber(napi_env env, napi_value object, const char *key)
 { napi_value value; double result = 0; napi_get_named_property(env, object, key, &value);
   napi_get_value_double(env, value, &result); return result; }
+bool GetBoolean(napi_env env, napi_value object, const char *key)
+{ napi_value value; bool result = false; napi_get_named_property(env, object, key, &value);
+  napi_get_value_bool(env, value, &result); return result; }
 struct AsyncJob {
     napi_async_work work = nullptr;
     napi_deferred deferred = nullptr;
@@ -906,12 +1182,23 @@ void Complete(napi_env env, napi_status status, void *data)
             Set(env, value, "durationMs", Number(env, capture == nullptr ? 0 : capture->durationMs));
             Set(env, value, "micOffsetUs", Number(env, capture == nullptr ? 0 : capture->micOffsetUs));
             Set(env, value, "innerOffsetUs", Number(env, capture == nullptr ? 0 : capture->innerOffsetUs));
-            Set(env, value, "timestampMappingVersion", Number(env, 2));
+            Set(env, value, "timestampMappingVersion", Number(env, capture != nullptr && capture->systemAecMic ? 3 : 2));
             Set(env, value, "videoTimestampDivisor", Number(env, capture == nullptr ? 0 : capture->videoTimestampDivisor));
             Set(env, value, "videoFirstPtsUs", Number(env, capture == nullptr ? -1 : capture->firstVideoPtsUs));
             Set(env, value, "videoLastPtsUs", Number(env, capture == nullptr ? -1 : capture->lastVideoPtsUs));
             Set(env, value, "micFirstPtsUs", Number(env, capture == nullptr ? -1 : capture->micFirstPtsUs));
             Set(env, value, "innerFirstPtsUs", Number(env, capture == nullptr ? -1 : capture->innerFirstPtsUs));
+            Set(env, value, "micCaptureMode", String(env,
+                capture != nullptr && capture->systemAecMic ? "system-aec" : "screen-mic"));
+            napi_value micAecApplied;
+            napi_get_boolean(env, capture != nullptr && capture->systemAecMic &&
+                capture->micHardwareTimestampKnown.load(), &micAecApplied);
+            Set(env, value, "micAecApplied", micAecApplied);
+            Set(env, value, "micInputChannels", Number(env, capture == nullptr ? CHANNELS : capture->micInputChannels));
+            napi_value micHardwareTimestampKnown;
+            napi_get_boolean(env, capture != nullptr && capture->micHardwareTimestampKnown.load(),
+                &micHardwareTimestampKnown);
+            Set(env, value, "micHardwareTimestampKnown", micHardwareTimestampKnown);
             napi_value valid; napi_get_boolean(env, capture == nullptr || capture->syncValid, &valid);
             Set(env, value, "syncValid", valid);
         } else if (job->kind == 2) {
@@ -942,6 +1229,7 @@ napi_value Start(napi_env env, napi_callback_info info)
     capture->micPath = GetString(env, args[0], "micPath");
     capture->width = static_cast<int>(GetNumber(env, args[0], "width"));
     capture->height = static_cast<int>(GetNumber(env, args[0], "height"));
+    capture->systemAecMic = GetBoolean(env, args[0], "systemAecMic");
     { std::lock_guard<std::mutex> lock(globalMutex); session = capture; }
     auto *job = new AsyncJob(); job->capture = capture; return Queue(env, job);
 }
@@ -978,6 +1266,7 @@ napi_value Mix(napi_env env, napi_callback_info info)
     job->mix.autoMicShiftConfidence = GetNumber(env, args[0], "autoMicShiftConfidence");
     job->mix.gain = GetNumber(env, args[0], "gain");
     job->mix.speakerBleedCancel = GetNumber(env, args[0], "speakerBleedCancel");
+    job->mix.normalizeSystemMic = GetBoolean(env, args[0], "normalizeSystemMic");
     return Queue(env, job);
 }
 napi_value Chmod(napi_env env, napi_callback_info info)

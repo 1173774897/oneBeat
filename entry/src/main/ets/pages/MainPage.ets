@@ -25,7 +25,7 @@ import {
 } from '../audio/DrumMachineCatalog';
 import { RecordingCoordinator } from '../recording/RecordingCoordinator';
 import { RecordingClip, RecordingScope, RecordingState, RecordingSavePhase } from '../recording/RecordingModels';
-import { RecordingOverlay } from '../components/RecordingOverlay';
+import { RecordingOverlay, RECORD_PILL_HEIGHT, RECORD_STOP_BOTTOM } from '../components/RecordingOverlay';
 import { isProDrumMachineAccessible } from '../store/EntitlementStore';
 
 const COUNTDOWN_FONT_SIZE: number = 138;
@@ -46,8 +46,6 @@ const RECORD_SAVE_DIALOG_MAX_HEIGHT: string = '82%';
 const RECORD_SAVE_DIALOG_PADDING: number = 20;
 const RECORD_SAVE_ACTION_HEIGHT: number = 88;
 const RECORD_RESULT_Y_OFFSET: number = 0;
-const RECORD_STOP_PANEL_CLEARANCE: number = 140;
-const RECORD_STOP_DRAWER_CLEARANCE: number = 207;
 
 @Entry
 @Component
@@ -83,6 +81,7 @@ struct MainPage {
   @StorageLink('selectedSceneKey') sceneKey: string = 'sunset_coast';
   @State soloTeam: boolean = false;
   @State recordingState: RecordingState = 'idle';
+  @State recordingCaptureActive: boolean = false;
   @State recordingElapsedMs: number = 0;
   @State showRecordIntro: boolean = false;
   @State showRecordingSaved: boolean = false;
@@ -286,14 +285,15 @@ struct MainPage {
     const wasActive = this.isRecordingActive();
     const previousState = this.recordingState;
     if (this.recordingState !== snapshot.state) { this.recordingState = snapshot.state; }
+    this.recordingCaptureActive = snapshot.captureActive === true;
     if (this.recordingElapsedMs !== snapshot.elapsedMs) { this.recordingElapsedMs = snapshot.elapsedMs; }
     this.recordingSavePhase = snapshot.savePhase ?? 'finishing';
-    if (snapshot.state === 'stopping' && previousState !== 'stopping' && !this.showDiscardRecordingConfirm) {
+    if (snapshot.state === 'stopping' && !this.recordingCaptureActive && !this.showDiscardRecordingConfirm) {
       this.showRecordingSaving = true;
       this.showSaveRecovery = false;
       this.showRecordingSaved = false;
       this.showRecordingError = false;
-    } else if (snapshot.state !== 'stopping') {
+    } else if (snapshot.state !== 'stopping' || this.recordingCaptureActive) {
       this.showRecordingSaving = false;
     }
     if (this.recordingState === 'preparing' || (!wasActive && this.recordingState === 'recording')) {
@@ -451,7 +451,7 @@ struct MainPage {
 
   private async stopRecording(): Promise<void> {
     if (this.recordingState !== 'recording') { return; }
-    this.showRecordingSaving = true;
+    this.showRecordingSaving = false;
     this.showSaveRecovery = false;
     this.showRecordingSaved = false;
     this.recordingSavePhase = 'finishing';
@@ -499,7 +499,7 @@ struct MainPage {
     const snapshot = RecordingCoordinator.getSnapshot();
     const pending = snapshot.pendingClip;
     if (snapshot.state === 'stopping') {
-      this.showRecordingSaving = true;
+      this.showRecordingSaving = snapshot.captureActive !== true;
       this.showRecordingSaved = false;
       this.showSaveRecovery = false;
       this.showRecordingError = false;
@@ -1204,30 +1204,37 @@ struct MainPage {
       .height('100%')
       .hitTestBehavior(HitTestMode.Transparent)
       .zIndex(50)
-      if (this.recordingState === 'recording' || this.recordingState === 'stopping') {
+      if (this.recordingState === 'recording' ||
+        (this.recordingState === 'stopping' && this.recordingCaptureActive)) {
         RecordingOverlay({
           elapsedMs: this.recordingElapsedMs,
           stopping: this.recordingState === 'stopping',
+          chromeVisible: this.chromeVisible,
+          topSafeInset: this.topSafeInset,
           bottomSafeInset: this.bottomSafeInset,
-          panelClearance: this.chromeVisible ?
-            (this.showStyles ? RECORD_STOP_DRAWER_CLEARANCE : RECORD_STOP_PANEL_CLEARANCE) : 0,
           onStop: (): void => { void this.stopRecording(); }
         })
       }
       if (this.recordingState === 'preparing') {
-        Row({ space: 10 }) {
-          Text('正在准备录制…').fontSize(12).fontWeight(FontWeight.Bold).fontColor(PAPER)
-          Button('取消', { type: ButtonType.Normal }).height(30).fontSize(11).fontWeight(900)
-            .fontColor(INK).backgroundColor(PAPER).borderRadius(15)
-            .onClick(() => { void this.cancelRecordingPreparation(); })
-        }.padding({ left: 14, right: 6, top: 6, bottom: 6 })
-          .backgroundColor('#D9171B1F').borderRadius(24).align(Alignment.Bottom)
-          .margin({ bottom: 24 + this.bottomSafeInset }).zIndex(60)
+        Column() {
+          Blank().hitTestBehavior(HitTestMode.None)
+          Row() {
+            Row({ space: 10 }) {
+              Text('正在准备录制…').fontSize(12).fontWeight(FontWeight.Bold).fontColor(PAPER)
+              Button('取消', { type: ButtonType.Normal }).height(30).fontSize(11).fontWeight(900)
+                .fontColor(INK).backgroundColor(PAPER).borderRadius(15)
+                .onClick(() => { void this.cancelRecordingPreparation(); })
+            }.height(RECORD_PILL_HEIGHT).padding({ left: 14, right: 6, top: 6, bottom: 6 })
+              .backgroundColor('#D9171B1F').borderRadius(24).id('recording-prepare-pill')
+          }.width('100%').justifyContent(FlexAlign.Center)
+            .padding({ bottom: RECORD_STOP_BOTTOM + this.bottomSafeInset })
+            .hitTestBehavior(HitTestMode.Transparent)
+        }.width('100%').height('100%').hitTestBehavior(HitTestMode.Transparent).zIndex(60)
       }
       if (this.showRecordIntro) {
         this.recordingIntroOverlay()
       }
-      if (!this.showDiscardRecordingConfirm &&
+      if (!this.recordingCaptureActive && !this.showDiscardRecordingConfirm &&
         (this.showRecordingSaving || this.showRecordingSaved || this.showSaveRecovery)) {
         this.recordingSaveOverlay()
       }

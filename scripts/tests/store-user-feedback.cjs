@@ -134,6 +134,28 @@ function harness(options = {}) {
 }
 
 (async () => {
+  const intro = harness();
+  intro.page.openDrumIntro();
+  assert.equal(intro.page.drumIntroVisible, false, 'Feature preview only opens from a visible pass plan');
+  intro.page.openPassPurchase();
+  const plan = [intro.page.pendingProductId, intro.page.pendingPrice];
+  intro.page.openDrumIntro();
+  assert.equal(intro.page.drumIntroVisible, true);
+  assert.equal(intro.page.onBackPress(), true);
+  assert.equal(intro.page.drumIntroVisible, false, 'First Back closes the comic, not its underlying purchase plan');
+  assert.equal(intro.page.purchaseVisible, true);
+  assert.deepEqual([intro.page.pendingProductId, intro.page.pendingPrice], plan, 'Preview preserves plan context');
+  intro.page.openDrumIntro();
+  intro.page.closeDrumIntro();
+  assert.equal(intro.page.purchaseVisible, true, 'The close control returns to the same plan');
+  intro.page.purchaseBusy = true;
+  intro.page.openDrumIntro();
+  assert.equal(intro.page.drumIntroVisible, false, 'Do not overlay an in-flight checkout');
+  intro.page.purchaseBusy = false;
+  assert.equal(intro.page.onBackPress(), true);
+  assert.equal(intro.page.purchaseVisible, false, 'Second Back retains ordinary plan dismissal');
+  assert.equal(intro.trace.length, 0, 'Viewing comic art never starts login, checkout or store API calls');
+
   const selection = harness();
   selection.page.selectScene(scene);
   assert.equal(selection.page.selectedSceneKey, scene.key);
@@ -345,5 +367,5 @@ function harness(options = {}) {
   await assert.rejects(account.exports.ensureStoreSession({}, true), error => error === nativeCancel,
     'The login adapter must preserve the native cancellation object and code');
 
-  console.log('PASS: actual store methods preserve checkout/verification, immediate committed redemption results, isolated follow-up refresh/retry, input callback safety, silent SDK cancellation, retry identity and lifetime guards');
+  console.log('PASS: nested drum-comic preview preserves the pass plan and Back priority; actual store methods preserve checkout/verification, immediate committed redemption results, isolated follow-up refresh/retry, input callback safety, silent SDK cancellation, retry identity and lifetime guards');
 })().catch(error => { console.error(error); process.exitCode = 1; });

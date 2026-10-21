@@ -706,11 +706,13 @@ struct DrumMachinePage {
 
   // The grid is a projection of musical time. Keeping the cursor in beats
   // prevents a 4/3/6 view switch from moving a held or running audition.
-  private get editorPlayheadStep(): number {
+  // ArkUI drops custom accessors declared on @Component structs during lowering.
+  // Use methods so the emitted UI keeps this projection and its @State dependency.
+  private editorPlayheadStep(): number {
     return this.editorPlayheadBeats < 0 ? -1 : this.editorPlayheadBeats * this.editorSubdivision;
   }
 
-  private set editorPlayheadStep(step: number) {
+  private setEditorPlayheadStep(step: number): void {
     this.editorPlayheadBeats = step < 0 ? -1 : step / this.editorSubdivision;
   }
 
@@ -1081,7 +1083,7 @@ struct DrumMachinePage {
       void this.restartEditorPreview(step);
       return;
     }
-    this.editorPlayheadStep = step;
+    this.setEditorPlayheadStep(step);
     this.editorPreviewCycle = 0;
     this.keepEditorPlayheadVisible(true);
   }
@@ -1111,7 +1113,7 @@ struct DrumMachinePage {
       this.editorPreviewTimerId = -1;
     }
     if (!keepPlayhead) {
-      this.editorPlayheadStep = -1;
+      this.setEditorPlayheadStep(-1);
       this.editorPreviewCycle = -1;
     }
   }
@@ -1129,7 +1131,7 @@ struct DrumMachinePage {
     // refreshes instead sample it so editing does not jump back in the bar.
     this.stopActivePreview(startStep === undefined);
     if (startStep !== undefined) {
-      this.editorPlayheadStep = startStep;
+      this.setEditorPlayheadStep(startStep);
       this.keepEditorPlayheadVisible(true);
     }
     if (!this.editorVisible || AppSession.get() === undefined) {
@@ -1171,7 +1173,7 @@ struct DrumMachinePage {
 
   private editorPlayheadX(): number {
     return Math.max(0, Math.min(this.editorGridWidth() - DRUM_EDITOR_PLAYHEAD_WIDTH,
-      this.editorPlayheadStep * DRUM_EDITOR_CELL_WIDTH));
+      this.editorPlayheadStep() * DRUM_EDITOR_CELL_WIDTH));
   }
 
   private updateEditorViewport(width: number): void {
@@ -1180,10 +1182,10 @@ struct DrumMachinePage {
   }
 
   private keepEditorPlayheadVisible(forceReveal: boolean = false): void {
-    if ((!forceReveal && this.previewTarget !== 'editor') || this.editorPlayheadStep < 0 || this.editorViewportWidth <= 0) {
+    if ((!forceReveal && this.previewTarget !== 'editor') || this.editorPlayheadStep() < 0 || this.editorViewportWidth <= 0) {
       return;
     }
-    const left = Math.floor(this.editorPlayheadStep) * DRUM_EDITOR_CELL_WIDTH;
+    const left = Math.floor(this.editorPlayheadStep()) * DRUM_EDITOR_CELL_WIDTH;
     const right = Math.min(this.editorGridWidth(), left + DRUM_EDITOR_CELL_WIDTH + DRUM_EDITOR_PLAYHEAD_WIDTH);
     const offset = this.editorScroller.currentOffset().xOffset;
     const maxOffset = Math.max(0, this.editorGridWidth() - this.editorViewportWidth);
@@ -2122,12 +2124,12 @@ struct DrumMachinePage {
                     }.width(this.editorGridWidth())
                     Rect().width(DRUM_EDITOR_PLAYHEAD_WIDTH).height(this.editorTracksHeight())
                       .fill(CORAL).position({ x: this.editorPlayheadX(), y: DRUM_EDITOR_HEADER_HEIGHT })
-                      .visibility(this.editorPlayheadStep >= 0 ? Visibility.Visible : Visibility.Hidden)
+                      .visibility(this.editorPlayheadStep() >= 0 ? Visibility.Visible : Visibility.Hidden)
                       .zIndex(10).hitTestBehavior(HitTestMode.None)
                     Polygon().width(DRUM_EDITOR_PLAYHEAD_CAP_WIDTH).height(7)
                       .points([[0, 0], [DRUM_EDITOR_PLAYHEAD_CAP_WIDTH, 0], [DRUM_EDITOR_PLAYHEAD_CAP_WIDTH / 2, 7]])
                       .fill(CORAL).position({ x: this.editorPlayheadCapX(), y: DRUM_EDITOR_BEAT_HEIGHT - 7 })
-                      .visibility(this.editorPlayheadStep >= 0 ? Visibility.Visible : Visibility.Hidden)
+                      .visibility(this.editorPlayheadStep() >= 0 ? Visibility.Visible : Visibility.Hidden)
                       .zIndex(10).hitTestBehavior(HitTestMode.None)
                   }.width(this.editorGridWidth()).height(this.editorGridHeight())
                 }

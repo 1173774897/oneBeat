@@ -1,0 +1,25 @@
+{
+  "styles": 12,
+  "instrumentTracks": 10,
+  "subdivisions": [
+    4,
+    3,
+    6
+  ],
+  "maximumSections": 8,
+  "features": [
+    "style selection",
+    "meter and BPM",
+    "step grid editor",
+    "section repeat count",
+    "fill frequency",
+    "whole-song audition",
+    "save arrangement",
+    "apply to team"
+  ],
+  "sourceFiles": [
+    "entry/src/main/ets/audio/DrumMachineCatalog.ets",
+    "entry/src/main/ets/pages/DrumMachinePage.ets",
+    "entry/src/main/ets/pages/StorePage.ets"
+  ]
+}

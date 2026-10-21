@@ -4,7 +4,7 @@ import { fileUri } from '@kit.CoreFileKit';
 import { AppSession } from '../app/AppSession';
 import { RecordingClip, RecordingScope } from '../recording/RecordingModels';
 import { RecordingRepository } from '../recording/RecordingRepository';
-import { MAX_MIC_SHIFT_US, RECORDING_MIX_VERSION } from '../recording/RecordingMixer';
+import { MAX_MIC_SHIFT_US, RecordingMixer } from '../recording/RecordingMixer';
 import { RecordingShareService } from '../sharing/RecordingShareService';
 import { logUserFailure, showUserNotice, userErrorMessage } from '../common/UserFeedback';
 import { ComicButton, PAPER, INK, CORAL, LILAC, WHITE, CONTROL_SHADOW, CARD_SHADOW } from '../components/ComicKit';
@@ -338,7 +338,7 @@ struct RecordingLibraryPage {
     const clip = this.selectedClip();
     if (clip === undefined || !this.active || this.busy || this.renderingAudio || this.practicePlaying() ||
       !this.hasSeparateAudio() ||
-      (clip.renderedMixVersion ?? 0) >= RECORDING_MIX_VERSION) { return; }
+      (clip.renderedMixVersion ?? 0) >= RecordingMixer.mixVersion(clip)) { return; }
     void this.renderSelectedAudio();
   }
 
@@ -375,7 +375,7 @@ struct RecordingLibraryPage {
   private renderMatches(clip: RecordingClip, gain: number, micShiftUs: number): boolean {
     return Math.abs((clip.renderedGain ?? 1) - gain) < 0.001 &&
       (clip.renderedMicShiftUs ?? 0) === micShiftUs &&
-      ((clip.renderedMixVersion ?? 0) >= RECORDING_MIX_VERSION || !this.clipHasSeparateAudio(clip));
+      ((clip.renderedMixVersion ?? 0) >= RecordingMixer.mixVersion(clip) || !this.clipHasSeparateAudio(clip));
   }
 
   private renderSelectedAudio(): Promise<RecordingClip | undefined> {
@@ -705,6 +705,7 @@ struct RecordingLibraryPage {
       }.width('100%')
         .backgroundColor(this.selectedId === clip.id ? '#FFF0D1' : WHITE)
         .border({ width: this.selectedId === clip.id ? 2 : 1, color: INK }).borderRadius(7)
+        .shadow(this.selectedId === clip.id ? CARD_SHADOW : CONTROL_SHADOW)
       // Keep deletion separate from the preview hit area so removing a work never selects it.
       Button('×', { type: ButtonType.Normal }).width(LIBRARY_CARD_DELETE_SIZE).height(LIBRARY_CARD_DELETE_SIZE)
         .padding(0).fontSize(20).fontWeight(900).fontColor('#A34530').backgroundColor('#FFF1E8')
@@ -722,6 +723,7 @@ struct RecordingLibraryPage {
         .objectFit(ImageFit.Contain).accessibilityLevel('no')
     }.width(compact ? CALENDAR_ENTRY_WIDTH : '100%').height(CALENDAR_ENTRY_HEIGHT).padding(0)
       .backgroundColor(compact ? PAPER : '#EEE6FA').border({ width: 1, color: INK }).borderRadius(5)
+      .shadow(CONTROL_SHADOW)
       .enabled(!this.busy && !this.renderingAudio).accessibilityText('打开打卡日历')
       .onClick(() => this.calendarVisible = true)
   }
@@ -784,31 +786,36 @@ struct RecordingLibraryPage {
             ComicButton({ label: '返回首页', fill: LILAC, action: () => router.back() })
           } else {
             Column({ space: 10 }) {
+              // Keep video cropping inside this frame so the outer paper shadow
+              // can extend beyond the preview without being clipped away.
               Stack() {
-                if (this.practiceActive) {
-                  // A muted Video can still request system audio focus. Do not
-                  // create its player while the shared practice is running.
-                  Column({ space: 13 }) {
-                    Image($rawfile('comic/decor/recording_share_hero.png'))
-                      .width('86%').height(112).objectFit(ImageFit.Contain)
-                    Text('练习仍在进行，先收好这一拍')
-                      .fontSize(12).fontWeight(900).fontColor(PAPER)
-                    if (!this.renderingAudio) {
-                      Button('暂停练习后预览', { type: ButtonType.Normal })
-                        .height(34).fontSize(12).fontWeight(900).fontColor(INK).backgroundColor(LILAC)
-                        .border({ width: 1, color: PAPER }).borderRadius(5)
-                        .onClick(() => this.requestPreview())
+                Stack() {
+                  if (this.practiceActive) {
+                    // A muted Video can still request system audio focus. Do not
+                    // create its player while the shared practice is running.
+                    Column({ space: 13 }) {
+                      Image($rawfile('comic/decor/recording_share_hero.png'))
+                        .width('86%').height(112).objectFit(ImageFit.Contain)
+                      Text('练习仍在进行，先收好这一拍')
+                        .fontSize(12).fontWeight(900).fontColor(PAPER)
+                      if (!this.renderingAudio) {
+                        Button('暂停练习后预览', { type: ButtonType.Normal })
+                          .height(34).fontSize(12).fontWeight(900).fontColor(INK).backgroundColor(LILAC)
+                          .border({ width: 1, color: PAPER }).borderRadius(5)
+                          .onClick(() => this.requestPreview())
+                      }
+                    }.width('100%')
+                  } else {
+                    this.previewVideo()
+                    if (this.selectedClip()?.coverPath !== undefined &&
+                      (this.previewCoverVisible || this.previewLoading)) {
+                      this.previewCover()
                     }
-                  }.width('100%')
-                } else {
-                  this.previewVideo()
-                  if (this.selectedClip()?.coverPath !== undefined &&
-                    (this.previewCoverVisible || this.previewLoading)) {
-                    this.previewCover()
                   }
-                }
+                }.width('100%').height(VIDEO_PREVIEW_HEIGHT).backgroundColor(INK)
+                  .border({ width: 2, color: INK }).borderRadius(8).clip(true)
               }.width('100%').height(VIDEO_PREVIEW_HEIGHT).backgroundColor(INK)
-                .border({ width: 2, color: INK }).borderRadius(8).clip(true)
+                .borderRadius(8).shadow(CARD_SHADOW)
               Row() {
                 Text('已保存在本机').fontSize(11).fontWeight(900).fontColor('#467A70')
                 Blank()
@@ -888,6 +895,7 @@ struct RecordingLibraryPage {
                     .fontSize(10).fontColor('#625C54').lineHeight(17).width('100%')
                 }
               }.width('100%').padding(12).backgroundColor('#E8F2EB').border({ width: 1, color: INK }).borderRadius(7)
+                .shadow(CONTROL_SHADOW)
               Row({ space: 10 }) {
                 Button({ type: ButtonType.Normal }) {
                   Row({ space: ALBUM_SAVE_LABEL_GAP }) {
@@ -899,6 +907,7 @@ struct RecordingLibraryPage {
                 }.layoutWeight(1).height(ALBUM_SAVE_BUTTON_HEIGHT)
                   .padding({ left: ALBUM_SAVE_HORIZONTAL_PADDING, right: ALBUM_SAVE_HORIZONTAL_PADDING })
                   .backgroundColor(WHITE).border({ width: 1.5, color: INK }).borderRadius(5)
+                  .shadow(CONTROL_SHADOW)
                   .opacity(this.busy || this.renderingAudio ? 0.55 : 1)
                   .accessibilityText(this.savingToAlbum ? '正在保存到相册' : '保存到相册')
                   .enabled(!this.busy && !this.renderingAudio)

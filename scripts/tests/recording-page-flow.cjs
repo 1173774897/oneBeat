@@ -39,7 +39,7 @@ function harness(options = {}) {
   const trace = [], routes = [], notices = [];
   const timeouts = new Map();
   let timeoutId = 0;
-  let snapshot = { state: 'idle', elapsedMs: 0, amplitude: 0, error: '', saveFailureDetail: '', micMuted: false };
+  let snapshot = { state: 'idle', captureActive: false, elapsedMs: 0, amplitude: 0, error: '', saveFailureDetail: '', micMuted: false };
   let pending = [];
   let todayCompleted = false;
   let storedClips = [clip];
@@ -49,7 +49,8 @@ function harness(options = {}) {
   const context = {
     exports: {}, Map, Date,
     beijingDayKey: now => new Date(now + 8 * 3600000).toISOString().substring(0, 10), SHARE_CHECK_IN_DAY_MS: 86400000,
-    getShareCheckInSummary: () => ({ todayCompleted }), RECORDING_MIX_VERSION: 6, MAX_MIC_SHIFT_US: 300000,
+    getShareCheckInSummary: () => ({ todayCompleted }), MAX_MIC_SHIFT_US: 300000,
+    RecordingMixer: { mixVersion: clip => clip.micCaptureMode === 'system-aec' ? 7 : 6 },
     RenderingContextSettings: class {},
     CanvasRenderingContext2D: class {
       clearRect() {} beginPath() {} moveTo() {} lineTo() {} stroke() {}
@@ -85,7 +86,14 @@ function harness(options = {}) {
         const state = view ?? snapshot;
         return state.saveFailureDetail ? `${state.error}（${state.saveFailureDetail}）` : state.error;
       },
-      async stop(reason) { trace.push(`stop:${reason}`); snapshot = { ...snapshot, state: 'idle' }; },
+      async stop(reason) {
+        trace.push(`stop:${reason}`);
+        if (options.stopGate) {
+          snapshot = { ...snapshot, state: 'stopping', captureActive: true };
+          await options.stopGate.promise;
+        }
+        snapshot = { ...snapshot, state: 'idle', captureActive: false };
+      },
       async retrySave() { trace.push('retry-save'); snapshot = { ...snapshot, state: 'idle',
         error: '', saveFailureDetail: '', pendingClip: undefined, lastClip: clip }; return clip; },
       async discardPending() { trace.push('discard-pending'); snapshot = { ...snapshot, state: 'idle', pendingClip: undefined }; },
@@ -156,6 +164,25 @@ function harness(options = {}) {
   stopped.setSnapshot({ state: 'recording' }); recorder.recordingState = 'recording';
   await recorder.stopRecording();
   assert.deepEqual(stopped.trace, ['stop:user'], 'Stop only ends local capture without pausing practice or touching the renderer');
+
+  let releaseNative;
+  const stopGate = { promise: new Promise(resolve => { releaseNative = resolve; }) };
+  const stopping = harness({ stopGate });
+  const tail = loadPage('MainPage', stopping.context);
+  stopping.setSnapshot({ state: 'recording', captureActive: true });
+  tail.refreshRecordingState();
+  const pendingStop = tail.stopRecording();
+  await flush();
+  assert.equal(tail.recordingState, 'stopping');
+  assert.equal(tail.showRecordingSaving, false, 'No save modal while native capture is still stopping');
+  tail.refreshRecordingState();
+  assert.equal(tail.showRecordingSaving, false, 'Polling cannot expose saving UI before release');
+  stopping.setSnapshot({ state: 'stopping', captureActive: false, savePhase: 'finishing' });
+  tail.refreshRecordingState();
+  assert.equal(tail.showRecordingSaving, true, 'Native release opens saving UI without waiting for export completion');
+  releaseNative();
+  await pendingStop;
+  assert.deepEqual(stopping.trace, ['stop:user'], 'Closing capture never pauses or reschedules practice');
 
   const finished = harness();
   const walking = loadPage('MainPage', finished.context);

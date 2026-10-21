@@ -2,14 +2,14 @@ import { fileIo as fs } from '@kit.CoreFileKit';
 import { image } from '@kit.ImageKit';
 import { media } from '@kit.MediaKit';
 
-const COVER_MAX_WIDTH_PX: number = 540;
-const COVER_MAX_HEIGHT_PX: number = 960;
-const COVER_JPEG_QUALITY: number = 90;
+const COVER_JPEG_QUALITY: number = 95;
 
-/** Creates one durable cover without retaining decoder or PixelMap resources. */
+/** Creates one durable cover at the recording's resolution, releasing decoder/PixelMap resources. */
 export class RecordingCoverService {
   static async generate(videoPath: string, coverPath: string,
     sourceWidth: number, sourceHeight: number): Promise<void> {
+    // Existing covers stay immutable; higher resolution applies only to new
+    // extraction, without upgrading or invalidating previously generated files.
     if (await fs.access(coverPath) && (await fs.stat(coverPath)).size > 0) { return; }
     const temporaryPath = `${coverPath}.tmp`;
     let committed = false;
@@ -21,11 +21,10 @@ export class RecordingCoverService {
         const generator = await media.createAVImageGenerator();
         try {
           generator.fdSrc = { fd: sourceFile.fd, offset: 0, length: videoStat.size };
-          const scale = Math.min(1,
-            COVER_MAX_WIDTH_PX / Math.max(1, sourceWidth),
-            COVER_MAX_HEIGHT_PX / Math.max(1, sourceHeight));
-          const width = Math.max(2, Math.floor(Math.max(2, sourceWidth) * scale / 2) * 2);
-          const height = Math.max(2, Math.floor(Math.max(2, sourceHeight) * scale / 2) * 2);
+          // Capture already bounds video width to 1080px. Keep its native
+          // detail so high-density tickets do not enlarge a 430–540px image.
+          const width = Math.max(2, Math.floor(Math.max(2, sourceWidth) / 2) * 2);
+          const height = Math.max(2, Math.floor(Math.max(2, sourceHeight) / 2) * 2);
           const pixelMap = await generator.fetchFrameByTime(
             0, media.AVImageQueryOptions.AV_IMAGE_QUERY_NEXT_SYNC, { width: width, height: height });
           try {
