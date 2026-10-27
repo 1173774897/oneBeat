@@ -1,4 +1,5 @@
 import { RecordingCoordinator } from '../recording/RecordingCoordinator';
+import { ActionButton } from './ActionButton';
 import { CORAL, PAPER } from './ComicKit';
 
 export const WAVEFORM_TOP: string = '27%';
@@ -131,7 +132,12 @@ export struct RecordingOverlay {
       Column() {
         Blank().hitTestBehavior(HitTestMode.None)
         Row() {
-          Button({ type: ButtonType.Normal }) {
+          ActionButton({ label: this.stopping ? '正在结束…' : '停止录制', active: !this.stopping,
+            controlWidth: 'auto', controlHeight: RECORD_PILL_HEIGHT, fill: '#E6171B1F',
+            cornerRadius: 23, lineWidth: 1, lineColor: '#9CFFF9EE', contentPadding: { left: 16, right: 16 },
+            buttonId: 'recording-stop-pill', accessibilityLabel: '停止本机视频录制，练习继续',
+            action: () => this.onStop()
+          }) {
             Row({ space: 9 }) {
               Rect().width(11).height(11).radius(2).fill(CORAL)
               Text(this.stopping ? '正在结束…' : '停止录制')
@@ -139,10 +145,6 @@ export struct RecordingOverlay {
               Text(this.durationLabel()).fontSize(12).fontWeight(FontWeight.Bold).fontColor('#BDEAE3')
             }.padding({ left: 18, right: 18 })
           }
-          .height(RECORD_PILL_HEIGHT).backgroundColor('#E6171B1F').border({ width: 1, color: '#9CFFF9EE' }).borderRadius(23)
-          .id('recording-stop-pill')
-          .enabled(!this.stopping).hitTestBehavior(HitTestMode.Default).onClick(this.onStop)
-          .accessibilityText('停止本机视频录制，练习继续')
         }.width('100%').justifyContent(FlexAlign.Center)
           .padding({ bottom: RECORD_STOP_BOTTOM + this.bottomSafeInset })
           .hitTestBehavior(HitTestMode.Transparent)

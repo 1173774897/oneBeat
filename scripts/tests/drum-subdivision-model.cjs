@@ -242,12 +242,12 @@ function testRenderedTimeline() {
 function testProtocolCompatibility() {
   const constants = load('common/Constants.ets');
   const invitations = load('network/p2p/P2pInvitation.ets');
-  assert.ok(constants.PROTOCOL_VERSION > 5, 'Expanded kits cannot be shared with peers that do not know ride/shaker or the recompiled presets');
+  assert.ok(constants.PROTOCOL_VERSION > 6, 'Per-section styles cannot be shared with peers that silently discard them');
   const valid = { v: invitations.P2P_INVITATION_FORMAT_VERSION, role: 'join', code: '123456',
     roomId: 'test-room-identifier', authToken: 'a'.repeat(32), groupName: 'DIRECT-test', passphrase: 'test-password',
     protocolVersion: constants.PROTOCOL_VERSION, expiresAt: Date.now() + 100000, port: 9527 };
   assert.doesNotThrow(() => invitations.parseP2pRoomInvitation(JSON.stringify(valid)));
-  for (const oldVersion of [4, 5]) {
+  for (const oldVersion of [4, 5, 6]) {
     assert.throws(() => invitations.parseP2pRoomInvitation(JSON.stringify({ ...valid, protocolVersion: oldVersion })), /双方版本不一致/,
       'Old peers must be rejected visibly instead of silently playing missing voices or a different rhythm');
   }

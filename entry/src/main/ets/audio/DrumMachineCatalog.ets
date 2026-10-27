@@ -35,6 +35,8 @@ export interface DrumCustomPattern {
 
 export interface DrumSection {
   id: string;
+  /** Missing on legacy programs: inherit the program's original style without rewriting its events. */
+  styleKey?: string;
   patternIndex: number;
   repeats: number;
   fillIndex: number;
@@ -47,6 +49,7 @@ export interface DrumSection {
 }
 
 export interface DrumProgram {
+  /** Legacy fallback and the default for a newly added section; existing sections resolve independently. */
   styleKey: string;
   beatsPerBar: number;
   beatUnit: number;
@@ -206,6 +209,18 @@ export function parseDrumProgram(raw: string): DrumProgram {
       !Array.isArray(parsed.sections)) {
       return defaultDrumProgram();
     }
+    if (typeof parsed.styleKey !== 'string') {
+      // Section-only imports use their first known style as the new-section
+      // default; all explicitly assigned sections keep their own musical data.
+      for (let i = 0; i < parsed.sections.length; i++) {
+        const candidate = parsed.sections[i];
+        if (candidate !== null && candidate !== undefined && typeof candidate.styleKey === 'string' &&
+          styleByKey(candidate.styleKey).key === candidate.styleKey) {
+          parsed.styleKey = candidate.styleKey;
+          break;
+        }
+      }
+    }
     const sections: DrumSection[] = [];
     for (let i = 0; i < parsed.sections.length; i++) {
       const section = parsed.sections[i];
@@ -214,6 +229,7 @@ export function parseDrumProgram(raw: string): DrumProgram {
       }
       sections.push({
         id: typeof section.id === 'string' ? section.id : String.fromCharCode(65 + i),
+        styleKey: typeof section.styleKey === 'string' ? drumSectionStyleKey(parsed, section) : undefined,
         patternIndex: savedPatternIndex(section.patternIndex),
         repeats: Number.isInteger(section.repeats) && section.repeats > 0 ? section.repeats : 1,
         fillIndex: savedPatternIndex(section.fillIndex),
@@ -246,6 +262,44 @@ export function styleByKey(key: string): DrumStyle {
     }
   }
   return DRUM_STYLES[0];
+}
+
+/** A section owns its kit and presets; old and invalid section keys inherit the validated program style. */
+export function drumSectionStyleKey(program: DrumProgram, section: DrumSection): string {
+  for (let i = 0; i < DRUM_STYLES.length; i++) {
+    if (DRUM_STYLES[i].key === section.styleKey) {
+      return DRUM_STYLES[i].key;
+    }
+  }
+  return styleByKey(program.styleKey).key;
+}
+
+/** First-use order is shared by the editor, lobby, saved cards and audio-kit preloading. */
+export function drumProgramStyleKeys(program: DrumProgram): string[] {
+  const keys: string[] = [];
+  for (let i = 0; i < program.sections.length; i++) {
+    const key = drumSectionStyleKey(program, program.sections[i]);
+    if (keys.indexOf(key) < 0) {
+      keys.push(key);
+    }
+  }
+  if (keys.length === 0) {
+    keys.push(styleByKey(program.styleKey).key);
+  }
+  return keys;
+}
+
+export function drumProgramStyleSummary(program: DrumProgram, limit: number = 2): string {
+  const keys = drumProgramStyleKeys(program);
+  const visible = Math.max(0, Math.floor(limit));
+  const names: string[] = [];
+  for (let i = 0; i < keys.length && i < visible; i++) {
+    names.push(styleByKey(keys[i]).name);
+  }
+  if (keys.length > visible) {
+    names.push('…');
+  }
+  return names.join(' · ');
 }
 
 function pushEvent(events: SequencerEvent[], step: number, stepsPerBeat: number,
@@ -313,7 +367,7 @@ export function presetFillStartBeat(styleKey: string, fillIndex: number, beatsPe
 /** First beat of the audible fill window for phrase UI, preview boundaries and the fill grid editor. */
 export function sectionFillStartBeat(program: DrumProgram, section: DrumSection): number {
   return section.fillIndex < 0 ? program.beatsPerBar :
-    presetFillStartBeat(program.styleKey, section.fillIndex, program.beatsPerBar);
+    presetFillStartBeat(drumSectionStyleKey(program, section), section.fillIndex, program.beatsPerBar);
 }
 
 /** Resolve a full audible bar without converting its events through the editor's visible grid. */
@@ -330,7 +384,7 @@ export function buildSectionPattern(program: DrumProgram, section: DrumSection,
     return customPattern(section.customFillRows, program.beatsPerBar, program.beatUnit);
   }
   const main = cloneDrumCustomPattern(section.customPattern);
-  return buildDrumPattern(program.styleKey, section.patternIndex, program.beatsPerBar,
+  return buildDrumPattern(drumSectionStyleKey(program, section), section.patternIndex, program.beatsPerBar,
     program.beatUnit, withFill ? section.fillIndex : -1, section.customRows,
     main === undefined ? undefined : main.events);
 }

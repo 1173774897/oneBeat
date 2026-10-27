@@ -47,6 +47,7 @@ function harness() {
       this.lobbyDeparted = false;
     }
     setUiListener(listener) { this.uiListener = listener; }
+    setTransportPreparationHandler(handler) { this.prepareAudio = handler; }
     async disconnect() { await cleanup('new:controller'); }
   }
   class MockMetronome {

@@ -110,7 +110,7 @@ function harness(options = {}) {
       const systemAecCache = nativeOptions?.systemAecMic ??
         [...pendingCaptures.values()][0]?.micCaptureMode === 'system-aec';
       assert.equal(args.processedMicPath, systemAecCache ?
-        `${args.micPath}.system-aec-v2.f32` : `${args.micPath}.clean-v3.f32`);
+        `${args.micPath}.system-aec-v3.f32` : `${args.micPath}.clean-v3.f32`);
       assert.ok(args.autoMicShiftKnown === 0 || args.autoMicShiftKnown === 1);
       calls.mixes.push(args);
       if (options.mixFailures > 0) { options.mixFailures--; throw new Error('encode failed'); }
@@ -417,7 +417,7 @@ function harness(options = {}) {
   assert.equal(aecClip.autoMicShiftReliable, false);
   assert.equal(aec.calls.mixes[0].speakerBleedCancel, 0);
   assert.equal(aec.calls.mixes[0].autoMicShiftKnown, 1);
-  assert.equal(aec.calls.mixes[0].processedMicPath, `${aecClip.micPath}.system-aec-v2.f32`);
+  assert.equal(aec.calls.mixes[0].processedMicPath, `${aecClip.micPath}.system-aec-v3.f32`);
   assert.deepEqual(aec.calls.tasks, [true, false]);
   assert.equal(aec.timers.size, 0);
   assert.deepEqual(aec.calls.playbackMutations, [], 'Starting and ending AEC never touches the existing team transport or calibration');

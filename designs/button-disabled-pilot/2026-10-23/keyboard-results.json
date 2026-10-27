@@ -1,0 +1,4 @@
+[
+  "disabled native buttons skipped by Tab focus",
+  "enabled native Button accepts Tab focus and Enter triggers exactly once"
+]

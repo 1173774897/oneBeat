@@ -1,3 +1,4 @@
+import { ActionButton } from './ActionButton';
 import { isRandomAvatar, isRandomPoolCharacter, rosterKeysForLobby } from '../assets/CharacterCatalog';
 
 export const PAPER: string = '#FFF9EE';
@@ -55,6 +56,9 @@ export function revealedAvatarAsset(
 export struct ComicCharacter {
   @Prop avatar: string = 'lamp';
   @Prop portrait: boolean = false;
+  // Interactive roster slots own their long-press sorting. Those callers must
+  // disable native Image dragging without changing artwork elsewhere.
+  @Prop allowNativeDrag: boolean = true;
   // Only pass a controller-confirmed lobby silhouette here, never a color slot.
   @Prop mysteryAvatar: string = '';
   // Pose artwork is only for static editorial scenes; walking sprites and
@@ -66,6 +70,7 @@ export struct ComicCharacter {
       if (isRandomPoolCharacter(this.mysteryAvatar)) {
         Image($rawfile(`comic/mystery/${this.mysteryAvatar}.png`))
           .width('100%').height('100%').objectFit(this.objectFit)
+          .draggable(this.allowNativeDrag)
       } else {
         Stack() {
           Text('?').fontSize(this.portrait ? 34 : 92).fontWeight(900).fontColor(INK)
@@ -76,6 +81,7 @@ export struct ComicCharacter {
       Image($rawfile(this.portrait ? `comic/avatars/${this.avatar}.png` :
         this.pose.length > 0 ? `comic/poses/${this.pose}.png` : `comic/characters/${this.avatar}.png`))
         .width('100%').height('100%').objectFit(this.objectFit)
+        .draggable(this.allowNativeDrag)
     }
   }
 }
@@ -93,56 +99,30 @@ export struct ComicButton {
   @Prop hardShadow: ComicHardShadowOptions | undefined = undefined;
   action: () => void = () => {};
 
-  @Builder
-  private buttonFace() {
-    Button({ type: ButtonType.Normal }) {
+  build() {
+    ActionButton({
+      label: this.label, active: this.active, fill: this.fill,
+      controlHeight: COMIC_BUTTON_HEIGHT, cornerRadius: COMIC_BUTTON_RADIUS,
+      lineWidth: 1.5, lineColor: INK, contentPadding: { left: 16, right: 14 },
+      hardShadow: this.hardShadow, inkShadow: this.inkShadow,
+      accessibilityLabel: this.badgeLabel.length > 0 && this.badgeIcon.length > 0 ?
+        `${this.label}，${this.badgeLabel}` : this.label,
+      action: () => this.action()
+    }) {
       Row() {
         Text(this.label).fontSize(22).fontWeight(900).fontStyle(FontStyle.Italic).fontColor(INK)
         Blank()
         if (this.badgeLabel.length > 0 && this.badgeIcon.length > 0) {
           Row({ space: 5 }) {
-            Image($rawfile(this.badgeIcon))
-              .width(22)
-              .height(22)
-              .objectFit(ImageFit.Contain)
-            Text(this.badgeLabel)
-              .fontSize(9)
-              .fontWeight(900)
-              .fontColor(INK)
-              .letterSpacing(0.7)
+            Image($rawfile(this.badgeIcon)).width(22).height(22).objectFit(ImageFit.Contain)
+            Text(this.badgeLabel).fontSize(9).fontWeight(900).fontColor(INK).letterSpacing(0.7)
           }
-          .width(92)
-          .height(30)
-          .justifyContent(FlexAlign.Center)
-          .backgroundColor(this.badgeFill)
-          .border({ width: 1.2, color: INK })
-          .borderRadius(4)
-          .rotate({ angle: -2 })
-          .margin({ right: 9 })
+          .width(92).height(30).justifyContent(FlexAlign.Center)
+          .backgroundColor(this.badgeFill).border({ width: 1.2, color: INK }).borderRadius(4)
+          .rotate({ angle: -2 }).margin({ right: 9 })
         }
         Text('›').fontSize(30).fontColor(INK)
-      }.width('100%').padding({ left: 16, right: 14 })
-    }.width('100%').height(COMIC_BUTTON_HEIGHT).backgroundColor(this.fill)
-      .border({ width: 1.5, color: INK }).borderRadius(COMIC_BUTTON_RADIUS)
-      .shadow(this.hardShadow !== undefined ? { radius: 0, color: '#00000000' } : this.inkShadow)
-      .enabled(this.active).opacity(this.active ? 1 : 0.5).onClick(this.action)
-  }
-
-  build() {
-    if (this.hardShadow !== undefined) {
-      // Older supported runtimes suppress zero-radius shadows. Use a solid backing
-      // instead; translation must not enlarge layout or intercept button taps.
-      Stack({ alignContent: Alignment.TopStart }) {
-        Row()
-          .width('100%').height(COMIC_BUTTON_HEIGHT)
-          .backgroundColor(this.hardShadow?.color ?? INK).borderRadius(COMIC_BUTTON_RADIUS)
-          .translate({ x: this.hardShadow?.offsetX ?? 0, y: this.hardShadow?.offsetY ?? 0 })
-          .opacity(this.active ? 1 : 0.5)
-          .hitTestBehavior(HitTestMode.None).accessibilityLevel('no')
-        this.buttonFace()
-      }.width('100%').height(COMIC_BUTTON_HEIGHT).clip(false)
-    } else {
-      this.buttonFace()
+      }.width('100%').alignItems(VerticalAlign.Center)
     }
   }
 }

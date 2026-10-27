@@ -3,7 +3,7 @@ import { RecordingClip, RecordingMicCaptureMode } from './RecordingModels';
 
 // Retained stems let same-gain legacy exports adopt the current DSP once.
 export const RECORDING_MIX_VERSION: number = 6;
-const SYSTEM_AEC_MIX_VERSION: number = 7;
+const SYSTEM_AEC_MIX_VERSION: number = 8;
 export const MAX_MIC_SHIFT_US: number = 300000;
 const PROCESSED_MIC_VERSION: number = 3;
 const BUILT_IN_SPEAKER_BLEED_LIMIT: number = 4;
@@ -25,7 +25,7 @@ export class RecordingMixer {
   static processedMicPath(micPath: string, mode?: RecordingMicCaptureMode): string {
     if (micPath.length === 0) { throw new Error('麦克风原轨路径无效'); }
     // A system-processed stem must never reuse a legacy FIR residual cache.
-    if (mode === 'system-aec') { return `${micPath}.system-aec-v2.f32`; }
+    if (mode === 'system-aec') { return `${micPath}.system-aec-v3.f32`; }
     return `${micPath}.clean-v${PROCESSED_MIC_VERSION}.f32`;
   }
 

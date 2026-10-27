@@ -138,7 +138,8 @@ async function main() {
     const loads = new Map();
     h = harness({ moduleMocks: {
       './DrumMachineCatalog': {
-        parseDrumProgram: raw => ({ styleKey: raw }),
+        parseDrumProgram: raw => ({ styleKey: raw, sections: [] }),
+        drumProgramStyleKeys: program => [program.styleKey],
         buildProgramSequence: () => [h.engine.pattern]
       },
       './DrumSampleBank': { DrumSampleBank: {

@@ -101,6 +101,7 @@ function harness(initialWireless = true, leader = true) {
     transportCommands = [];
     constructor(_id, isLeader) { this.isLeader = isLeader; }
     setUiListener() {}
+    setTransportPreparationHandler(handler) { this.prepareAudio = handler; }
     getOffsetMs() { return 12; }
     async disconnect() {}
     async startTransport() { this.transportCommands.push('start'); }

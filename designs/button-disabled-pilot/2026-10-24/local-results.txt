@@ -1,0 +1,17 @@
+action-button-disabled: PASS ActionButton: native state, original click event, late-disable guard, measured intrinsic growth/shrink/zero, auto height and shadow bounds
+comic-button-disabled: PASS ComicButton wrapper: live availability/labels, original badge and face geometry, unchanged native/solid shadow API and one shared rendering policy
+comic-shadow-policy: PASS comic shadow policy: 112 solid surfaces, 38 native and 9 sharp text calls; hard/legacy-compatible ink, transparent off, isolated cyan glow and rejection cases
+member-join-critical-path: PASS: actual member join skips optional BLE waits, preserves readiness gates and cancels feedback on failure/shutdown
+member-join-session-reset: [UserFeedback] scope=join-prepare code=0
+[UserFeedback] scope=join-prepare code=0
+[UserFeedback] scope=join-scan code=1000500001
+[UserFeedback] scope=join-scan code=0
+[UserFeedback] scope=join-scan code=0
+[UserFeedback] scope=join-scan code=0
+[UserFeedback] scope=join-scan code=0
+[UserFeedback] scope=join-code code=0
+[UserFeedback] scope=join-invitation code=0
+[UserFeedback] scope=join-code code=0
+PASS: member joins retain reset barriers and progress, remove headset gates, map failures, silence documented scanner cancellation and reject departed-page callbacks
+drum-lobby-editor-settings: PASS drum lobby/editor settings: actual cached and live tempo/meter mutations, reopen, field isolation, bounds, arrangement retention and running configuration order
+editable-bpm-feedback: PASS editable BPM feedback: scoped validation, committed-value recovery, native focus revisions and cleanup, stopEditing reentrancy, fitted digits/caret, resize, normalization, single commit and display-button editability

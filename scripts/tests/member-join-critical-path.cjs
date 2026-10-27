@@ -52,6 +52,8 @@ function harness(options = {}) {
     '../common/MonotonicClock': { MonotonicClock: { nowMs: () => 1000 + trace.length * 10 } },
     '../common/MeterModel': {},
     '../session/SessionBackgroundKeeper': { SessionBackgroundKeeper: background },
+    '../common/UserFeedback': { showUserNotice() {}, logUserFailure() {} },
+    '../store/EntitlementStore': { isProDrumMachineAccessible: () => true },
     '@kit.ArkUI': {}
   };
   const context = {

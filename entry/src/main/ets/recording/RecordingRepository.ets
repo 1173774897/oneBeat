@@ -413,9 +413,11 @@ export class RecordingRepository {
         clip.sourcePath ?? '', clip.micPath ?? '', clip.innerPath ?? '', processedMic,
         processedMic.length === 0 ? '' : `${processedMic}.tmp`];
       if (clip.micCaptureMode === 'system-aec' && clip.micPath !== undefined) {
-        // Old, unnormalized AEC caches can coexist after a level upgrade. They
-        // are derived files too and must not survive deletion of their take.
-        paths.push(`${clip.micPath}.system-aec-v1.f32`, `${clip.micPath}.system-aec-v1.f32.tmp`);
+        // Derived caches from earlier level algorithms can coexist after an
+        // upgrade; deleting a take must remove those obsolete copies too.
+        for (const version of [1, 2]) {
+          paths.push(`${clip.micPath}.system-aec-v${version}.f32`, `${clip.micPath}.system-aec-v${version}.f32.tmp`);
+        }
       }
       for (const name of await fs.listFile(RecordingRepository.directory)) {
         if (name.startsWith(`${clip.id}.mix-`) && name.endsWith('.mp4')) {

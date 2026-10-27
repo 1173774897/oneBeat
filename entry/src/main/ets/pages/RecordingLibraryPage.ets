@@ -1,3 +1,5 @@
+import { COMIC_CARD_INK_OFFSET, COMIC_CONTROL_INK_OFFSET } from '../components/ComicInkSurface';
+import { DrumPaper } from '../components/DrumPaper';
 import { common } from '@kit.AbilityKit';
 import { router } from '@kit.ArkUI';
 import { fileUri } from '@kit.CoreFileKit';
@@ -7,8 +9,9 @@ import { RecordingRepository } from '../recording/RecordingRepository';
 import { MAX_MIC_SHIFT_US, RecordingMixer } from '../recording/RecordingMixer';
 import { RecordingShareService } from '../sharing/RecordingShareService';
 import { logUserFailure, showUserNotice, userErrorMessage } from '../common/UserFeedback';
-import { ComicButton, PAPER, INK, CORAL, LILAC, WHITE, CONTROL_SHADOW, CARD_SHADOW } from '../components/ComicKit';
+import { ComicButton, PAPER, INK, CORAL, LILAC, WHITE } from '../components/ComicKit';
 import { ShareCalendarSheet } from '../components/ShareCalendarSheet';
+import { ActionButton } from '../components/ActionButton';
 
 const LIBRARY_SIDE_INSET: number = 20;
 const LIBRARY_HERO_HEIGHT: number = 154;
@@ -18,9 +21,26 @@ const SHARE_SHEET_MAX_HEIGHT: string = '88%';
 const CALENDAR_ENTRY_HEIGHT: number = 42;
 const CALENDAR_ENTRY_WIDTH: number = 72;
 const CALENDAR_ENTRY_ICON_SIZE: number = 22;
-const LIBRARY_CARD_DELETE_SIZE: number = 28;
-const LIBRARY_CARD_DELETE_INSET: number = 8;
-const LIBRARY_CARD_ACTION_RIGHT_INSET: number = 46;
+const LIBRARY_GRID_GAP: number = 12;
+const LIBRARY_CARD_COVER_HEIGHT: number = 84;
+// Image must exceed the clip frame height so Cover crop can anchor on the top; keep
+// LIBRARY_CARD_COVER_IMAGE_HEIGHT >= LIBRARY_CARD_COVER_HEIGHT * LIBRARY_CARD_COVER_IMAGE_SCALE.
+const LIBRARY_CARD_COVER_IMAGE_SCALE: number = 1.54;
+const LIBRARY_CARD_COVER_IMAGE_HEIGHT: number = 219;
+// Negative Y shifts the crop window downward on the source frame (shows more lower body/scene).
+const LIBRARY_CARD_COVER_FOCUS_OFFSET_Y: number = -124;
+const LIBRARY_CARD_INFO_HEIGHT: number = 44;
+const LIBRARY_CARD_INFO_SPACE: number = 2;
+const LIBRARY_CARD_INFO_PADDING_TOP: number = 4;
+const LIBRARY_CARD_INFO_PADDING_BOTTOM: number = 3;
+const LIBRARY_CARD_DATE_HEIGHT: number = 15;
+const LIBRARY_CARD_META_ROW_HEIGHT: number = 18;
+const LIBRARY_CARD_PREVIEW_BADGE_WIDTH: number = 54;
+const LIBRARY_CARD_PREVIEW_BADGE_HEIGHT: number = 20;
+const LIBRARY_CARD_DELETE_SIZE: number = 14;
+const LIBRARY_CARD_CONTROL_HIT_SIZE: number = 44;
+const LIBRARY_MANAGEMENT_BAR_HEIGHT: number = 64;
+const LIBRARY_MIC_NUDGE_SIZE: number = 38;
 const ALBUM_SAVE_BUTTON_HEIGHT: number = 42;
 const ALBUM_SAVE_ICON_SIZE: number = 16;
 const ALBUM_SAVE_LABEL_GAP: number = 6;
@@ -68,7 +88,14 @@ struct RecordingLibraryPage {
   @State deleteConfirmVisible: boolean = false;
   @State practiceActive: boolean = false;
   @State pauseAction: string = 'share';
-  @State deleteClipId: string = '';
+  @State managing: boolean = false;
+  @State managementSelection: string[] = [];
+  @State deleteClipIds: string[] = [];
+  @State deleteIsBatch: boolean = false;
+  private readonly pageScroller: Scroller = new Scroller();
+  private managementPreview: PreviewContinuation | undefined = undefined;
+  private managementScrollY: number = 0;
+  private pendingScrollY: number | undefined = undefined;
   private videoController: VideoController = new VideoController();
   private active: boolean = true;
   private audioRenderSequence: number = 0;
@@ -119,6 +146,7 @@ struct RecordingLibraryPage {
     if (this.calendarVisible) { this.calendarVisible = false; return true; }
     if (this.pauseConfirmVisible) { this.pauseConfirmVisible = false; return true; }
     if (this.deleteConfirmVisible) { this.deleteConfirmVisible = false; return true; }
+    if (this.managing) { this.exitManagement(); return true; }
     return false;
   }
 
@@ -133,9 +161,12 @@ struct RecordingLibraryPage {
     // projection so the live player can bookmark its latest position first.
     if (this.renderingAudio) { return; }
     this.clips = RecordingRepository.list(this.scope);
+    this.managementSelection = this.managementSelection.filter((id: string) =>
+      this.clips.some((clip: RecordingClip) => clip.id === id));
     if (!this.clips.some((clip: RecordingClip) => clip.id === this.selectedId)) {
       this.selectedId = this.clips.length > 0 ? this.clips[0].id : '';
     }
+    if (this.managing && this.clips.length === 0 && !this.busy) { this.exitManagement(); return; }
     if (!this.renderingAudio) {
       this.micGain = this.selectedClip()?.renderedGain ?? 1;
       this.micShiftMs = Math.round((this.selectedClip()?.renderedMicShiftUs ?? 0) / 1000);
@@ -183,7 +214,101 @@ struct RecordingLibraryPage {
 
   private dateLabel(timeMs: number): string {
     const time = new Date(timeMs);
-    return `${time.getMonth() + 1}月${time.getDate()}日 ${time.getHours().toString().padStart(2, '0')}:${time.getMinutes().toString().padStart(2, '0')}`;
+    return `${time.getFullYear()}年${time.getMonth() + 1}月${time.getDate()}日`;
+  }
+
+  private timeLabel(timeMs: number): string {
+    const time = new Date(timeMs);
+    return `${time.getHours().toString().padStart(2, '0')}:${time.getMinutes().toString().padStart(2, '0')}`;
+  }
+
+  private clipRows(): RecordingClip[][] {
+    const rows: RecordingClip[][] = [];
+    for (let index = 0; index < this.clips.length; index += 2) { rows.push(this.clips.slice(index, index + 2)); }
+    return rows;
+  }
+
+  private enterManagement(): void {
+    if (this.busy || this.renderingAudio || this.clips.length === 0 || this.managing) { return; }
+    const clip = this.selectedClip();
+    this.managementScrollY = this.pageScroller.currentOffset().yOffset;
+    this.managementPreview = clip === undefined ? undefined : {
+      clipId: clip.id, path: clip.path, timeSeconds: Math.floor(this.previewTimeSeconds), playing: false, prepared: false
+    };
+    this.stopPreview();
+    this.previewReady = false;
+    this.alignmentCanvasReady = false;
+    this.managementSelection = [];
+    this.managing = true;
+    this.pendingScrollY = 0;
+  }
+
+  private exitManagement(): void {
+    if (this.busy || !this.managing) { return; }
+    const bookmark = this.managementPreview;
+    this.managing = false;
+    this.managementSelection = [];
+    this.deleteConfirmVisible = false;
+    this.deleteClipIds = [];
+    this.managementPreview = undefined;
+    this.refresh();
+    this.videoController = new VideoController();
+    this.previewReady = false;
+    this.previewCoverVisible = true;
+    const clip = this.selectedClip();
+    // The Video was unmounted during management. Restore its position after
+    // prepare, but never resume sound automatically when finishing deletion.
+    if (clip !== undefined && bookmark?.clipId === clip.id && !this.practicePlaying()) {
+      this.previewTimeSeconds = Math.floor(Math.min(bookmark.timeSeconds, Math.max(0, clip.durationMs / 1000 - 0.05)));
+      this.previewContinuation = { clipId: clip.id, path: clip.path,
+        timeSeconds: this.previewTimeSeconds, playing: false, prepared: false };
+      this.previewLoading = true;
+      this.watchPreviewLoad(clip.id, clip.path);
+    } else { this.previewTimeSeconds = 0; }
+    this.pendingScrollY = this.managementScrollY;
+    this.prepareSelectedPreview();
+  }
+
+  private restorePendingScroll(): void {
+    if (this.pendingScrollY === undefined) { return; }
+    const y = this.pendingScrollY;
+    this.pendingScrollY = undefined;
+    this.pageScroller.scrollTo({ xOffset: 0, yOffset: y, animation: false });
+  }
+
+  private scrollToPreview(): void {
+    if (this.managing || this.busy) { return; }
+    this.pendingScrollY = undefined;
+    this.pageScroller.scrollTo({ xOffset: 0, yOffset: 0, animation: true });
+  }
+
+  private isManagementSelected(id: string): boolean { return this.managementSelection.includes(id); }
+
+  private toggleManagementSelection(id: string): void {
+    if (!this.managing || this.busy || this.deleteConfirmVisible || !this.clips.some((clip: RecordingClip) => clip.id === id)) { return; }
+    this.managementSelection = this.isManagementSelected(id) ?
+      this.managementSelection.filter((selected: string) => selected !== id) : this.managementSelection.concat(id);
+  }
+
+  private allManagementSelected(): boolean {
+    return this.clips.length > 0 && this.managementSelection.length === this.clips.length;
+  }
+
+  private toggleSelectAll(): void {
+    if (!this.managing || this.busy || this.deleteConfirmVisible) { return; }
+    this.managementSelection = this.allManagementSelected() ? [] : this.clips.map((clip: RecordingClip) => clip.id);
+  }
+
+  private activateClipCard(clip: RecordingClip): void {
+    if (this.managing) { this.toggleManagementSelection(clip.id); }
+    else { this.selectClip(clip); }
+  }
+
+  private requestBatchDelete(): void {
+    if (!this.managing || this.busy || this.renderingAudio || this.deleteConfirmVisible || this.managementSelection.length === 0) { return; }
+    this.deleteClipIds = this.managementSelection.slice();
+    this.deleteIsBatch = true;
+    this.deleteConfirmVisible = true;
   }
 
   private practicePlaying(): boolean {
@@ -237,7 +362,7 @@ struct RecordingLibraryPage {
   }
 
   private previewSourceMatches(id: string, path: string): boolean {
-    return this.active && this.selectedId === id && this.selectedClip()?.path === path;
+    return this.active && !this.managing && this.selectedId === id && this.selectedClip()?.path === path;
   }
 
   private previewProgress(id: string, path: string, time: number): void {
@@ -316,7 +441,7 @@ struct RecordingLibraryPage {
   }
 
   private selectClip(clip: RecordingClip): void {
-    if (this.busy || this.renderingAudio || this.selectedId === clip.id) { return; }
+    if (this.managing || this.busy || this.renderingAudio || this.selectedId === clip.id) { return; }
     this.stopPreview();
     this.videoController = new VideoController();
     this.previewReady = false;
@@ -332,11 +457,12 @@ struct RecordingLibraryPage {
     this.drawMicAlignmentRuler();
     this.previewMuted = false;
     this.prepareSelectedPreview();
+    this.scrollToPreview();
   }
 
   private prepareSelectedPreview(): void {
     const clip = this.selectedClip();
-    if (clip === undefined || !this.active || this.busy || this.renderingAudio || this.practicePlaying() ||
+    if (clip === undefined || !this.active || this.managing || this.busy || this.renderingAudio || this.practicePlaying() ||
       !this.hasSeparateAudio() ||
       (clip.renderedMixVersion ?? 0) >= RecordingMixer.mixVersion(clip)) { return; }
     void this.renderSelectedAudio();
@@ -590,28 +716,40 @@ struct RecordingLibraryPage {
   }
 
   private requestDeleteClip(clipId: string): void {
-    if (this.busy || this.renderingAudio) { return; }
-    this.deleteClipId = clipId;
+    if (!this.managing || this.busy || this.renderingAudio || this.deleteConfirmVisible ||
+      !this.clips.some((clip: RecordingClip) => clip.id === clipId)) { return; }
+    this.deleteClipIds = [clipId];
+    this.deleteIsBatch = false;
     this.deleteConfirmVisible = true;
   }
 
   private async deleteSelected(): Promise<void> {
-    if (this.busy || this.renderingAudio || this.deleteClipId.length === 0) { return; }
-    const clipId = this.deleteClipId;
-    if (clipId === this.selectedId) { this.stopPreview(); }
+    if (!this.managing || this.busy || this.renderingAudio || !this.deleteConfirmVisible || this.deleteClipIds.length === 0) { return; }
+    const targets = this.deleteClipIds.slice();
     this.busy = true;
+    const failed: string[] = [];
+    const removed: string[] = [];
     try {
-      await RecordingRepository.remove(clipId);
-      // Keep unfinished shares on file-deletion failure; service ownership checks hide stale shares after removal.
-      try { await RecordingShareService.dismissForClip(clipId); }
-      catch (error) { logUserFailure('recording-delete-share-cleanup', error); }
+      for (const clipId of targets) {
+        try { await RecordingRepository.remove(clipId); }
+        catch (error) {
+          logUserFailure('recording-delete', error);
+          // The repository commits its index before file cleanup. An orphaned
+          // derived file must not make an already-removed item look retryable.
+          if (RecordingRepository.get(clipId) !== undefined) { failed.push(clipId); continue; }
+        }
+        removed.push(clipId);
+        try { await RecordingShareService.dismissForClip(clipId); }
+        catch (error) { logUserFailure('recording-delete-share-cleanup', error); }
+      }
       this.deleteConfirmVisible = false;
-      this.deleteClipId = '';
+      this.deleteClipIds = [];
       this.refresh();
-    } catch (error) {
-      logUserFailure('recording-delete', error);
-      showUserNotice('删除未完成，请稍后重试', 'recording-delete');
+      this.managementSelection = this.deleteIsBatch ? failed : this.managementSelection.filter((id: string) => !removed.includes(id));
+      showUserNotice(failed.length > 0 ? (removed.length > 0 ? `已删除 ${removed.length} 段，${failed.length} 段未完成，可重试` :
+        '删除未完成，请稍后重试') : `已删除 ${removed.length} 段作品`, 'recording-delete');
     } finally { this.busy = false; }
+    if (this.clips.length === 0 && this.active) { this.exitManagement(); }
   }
 
   private selectedCoverSource(): string {
@@ -620,7 +758,7 @@ struct RecordingLibraryPage {
   }
 
   private startPreviewFromCover(): void {
-    if (this.previewLoading || this.busy) { return; }
+    if (this.managing || this.previewLoading || this.busy) { return; }
     if (this.practicePlaying()) {
       this.requestPreview();
       return;
@@ -634,21 +772,25 @@ struct RecordingLibraryPage {
 
   @Builder
   private previewCover() {
-    Stack({ alignContent: Alignment.Center }) {
-      Image(this.selectedCoverSource()).width('100%').height('100%')
-        .objectFit(ImageFit.Contain).interpolation(ImageInterpolation.High)
-      Column({ space: 7 }) {
-        Stack({ alignContent: Alignment.Center }) {
-          Circle().width(48).height(48).fill('#D9FFF9EE').stroke(PAPER).strokeWidth(1.5)
-          Image($rawfile('comic/icons/play.svg')).width(19).height(19)
-        }.width(48).height(48)
-        if (this.previewLoading) {
-          Text('正在准备预览…').fontSize(10).fontWeight(900).fontColor(PAPER)
+    ActionButton({
+      active: !this.previewLoading && !this.busy, controlHeight: VIDEO_PREVIEW_HEIGHT, fill: INK,
+      cornerRadius: 0, accessibilityLabel: this.previewLoading ? '正在准备预览' : '播放作品预览',
+      action: () => this.startPreviewFromCover()
+    }) {
+      Stack({ alignContent: Alignment.Center }) {
+        Image(this.selectedCoverSource()).width('100%').height('100%')
+          .objectFit(ImageFit.Contain).interpolation(ImageInterpolation.High)
+        Column({ space: 7 }) {
+          Stack({ alignContent: Alignment.Center }) {
+            Circle().width(48).height(48).fill('#D9FFF9EE').stroke(PAPER).strokeWidth(1.5)
+            Image($rawfile('comic/icons/play.svg')).width(19).height(19)
+          }.width(48).height(48)
+          if (this.previewLoading) {
+            Text('正在准备预览…').fontSize(10).fontWeight(900).fontColor(PAPER)
+          }
         }
-      }
-    }.width('100%').height('100%').backgroundColor(INK)
-      .enabled(!this.previewLoading && !this.busy)
-      .onClick(() => this.startPreviewFromCover())
+      }.width('100%').height('100%')
+    }
   }
 
   @Builder
@@ -680,101 +822,247 @@ struct RecordingLibraryPage {
   @Builder
   private clipCard(clip: RecordingClip) {
     Stack({ alignContent: Alignment.TopEnd }) {
-      Column() {
-        Row({ space: 12 }) {
+      DrumPaper({
+        fill: this.managing ? (this.isManagementSelected(clip.id) ? '#EEE6FA' : WHITE) :
+          (this.selectedId === clip.id ? '#FFF0D1' : WHITE),
+        paperWidth: '100%',
+        cornerRadius: 6,
+        clipContent: true,
+        paperLineWidth: 1,
+        offsetX: COMIC_CARD_INK_OFFSET,
+        offsetY: COMIC_CARD_INK_OFFSET
+      }) {
+        Column() {
+          Stack({ alignContent: Alignment.TopStart }) {
+            Stack({ alignContent: Alignment.TopStart }) {
+              if (clip.coverPath !== undefined) {
+                Image(fileUri.getUriFromPath(clip.coverPath)).width('100%').height(LIBRARY_CARD_COVER_IMAGE_HEIGHT)
+                  .objectFit(ImageFit.Cover).interpolation(ImageInterpolation.High)
+                  .translate({ x: 0, y: LIBRARY_CARD_COVER_FOCUS_OFFSET_Y })
+              } else {
+                Image($rawfile('comic/decor/recording_share_hero.png')).width('82%').height(76).objectFit(ImageFit.Contain)
+                  .margin({ top: 18 })
+              }
+            }.width('100%').height(LIBRARY_CARD_COVER_HEIGHT).backgroundColor('#E4F2EB').clip(true)
+            Stack({ alignContent: Alignment.BottomEnd }) {
+              Text(this.durationLabel(clip.durationMs)).fontSize(10).fontWeight(900).fontColor(WHITE)
+                .padding({ left: 5, right: 5, top: 2, bottom: 2 }).backgroundColor(INK).borderRadius(3)
+            }.width('100%').height(LIBRARY_CARD_COVER_HEIGHT).padding({ right: 6, bottom: 6 })
+              .hitTestBehavior(HitTestMode.None)
+          }.width('100%').height(LIBRARY_CARD_COVER_HEIGHT)
+          Column({ space: LIBRARY_CARD_INFO_SPACE }) {
+            Text(this.dateLabel(clip.createdAt)).fontSize(11).fontWeight(900).fontColor(INK).width('100%')
+              .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+              .height(LIBRARY_CARD_DATE_HEIGHT).lineHeight(LIBRARY_CARD_DATE_HEIGHT)
+            Row({ space: 3 }) {
+              Text(`${this.timeLabel(clip.createdAt)}${clip.interrupted ? ' · 中断' : ''}`)
+                .fontSize(10).fontColor('#625C54').layoutWeight(1).maxLines(1)
+                .height(LIBRARY_CARD_META_ROW_HEIGHT).lineHeight(LIBRARY_CARD_META_ROW_HEIGHT)
+              Stack({ alignContent: Alignment.Center }) {
+                if (!this.managing && this.selectedId === clip.id) {
+                  Button('正在预览', { type: ButtonType.Normal }).fontSize(9).fontWeight(900).fontColor(INK)
+                    .width(LIBRARY_CARD_PREVIEW_BADGE_WIDTH).height(LIBRARY_CARD_PREVIEW_BADGE_HEIGHT)
+                    .padding(0).backgroundColor(LILAC).borderRadius(4)
+                    .accessibilityText('正在预览，返回页面顶部视频区域')
+                    .onClick(() => this.scrollToPreview())
+                }
+              }.width(LIBRARY_CARD_PREVIEW_BADGE_WIDTH).height(LIBRARY_CARD_META_ROW_HEIGHT)
+            }.width('100%').height(LIBRARY_CARD_META_ROW_HEIGHT)
+          }.width('100%').height(LIBRARY_CARD_INFO_HEIGHT)
+            .padding({
+              left: 7, right: 7, top: LIBRARY_CARD_INFO_PADDING_TOP, bottom: LIBRARY_CARD_INFO_PADDING_BOTTOM
+            })
+        }.width('100%').onClick(() => this.activateClipCard(clip))
+      }
+      if (this.managing) {
+        Stack() {
+          ActionButton({
+            active: !this.busy, controlWidth: LIBRARY_CARD_CONTROL_HIT_SIZE,
+            controlHeight: LIBRARY_CARD_CONTROL_HIT_SIZE, fill: '#00000000',
+            accessibilityLabel: this.isManagementSelected(clip.id) ? '取消选择这段作品' : '选择这段作品',
+            action: () => this.toggleManagementSelection(clip.id)
+          }) {
+            Stack() {
+              Circle().width(20).height(20).fill(this.isManagementSelected(clip.id) ? LILAC : WHITE)
+                .stroke(INK).strokeWidth(1.2)
+              if (this.isManagementSelected(clip.id)) { Text('✓').fontSize(14).fontWeight(900).fontColor(WHITE) }
+            }.width(20).height(20)
+          }
+        }.position({ x: 0, y: 0 })
+        // A small visual cross retains a full finger target, separate from selection/preview.
+        ActionButton({
+          active: !this.busy, controlWidth: LIBRARY_CARD_CONTROL_HIT_SIZE,
+          controlHeight: LIBRARY_CARD_CONTROL_HIT_SIZE, fill: '#00000000',
+          accessibilityLabel: '删除这段作品', action: () => this.requestDeleteClip(clip.id)
+        }) {
+          DrumPaper({ fill: '#FFF1E8', paperWidth: 'auto', cornerRadius: 3, paperLineWidth: 1,
+            offsetX: COMIC_CONTROL_INK_OFFSET, offsetY: COMIC_CONTROL_INK_OFFSET }) {
+            Text('×').width(LIBRARY_CARD_DELETE_SIZE).height(LIBRARY_CARD_DELETE_SIZE).textAlign(TextAlign.Center)
+              .fontSize(12).fontWeight(900).fontColor('#A34530')
+          }
+        }
+      }
+    }.width('100%').clip(false)
+  }
+
+  @Builder
+  private managementButton(label: string, action: () => void) {
+    ActionButton({
+      label, active: !this.busy && !this.renderingAudio, controlWidth: 'auto', controlHeight: 32,
+      contentPadding: { left: 12, right: 12 }, labelSize: 12, labelWeight: 900, labelColor: INK,
+      fill: LILAC, cornerRadius: 5, lineWidth: 1, lineColor: INK,
+      hardShadow: { offsetX: COMIC_CONTROL_INK_OFFSET, offsetY: COMIC_CONTROL_INK_OFFSET, color: INK }, action
+    })
+  }
+
+  @Builder
+  private managementBar() {
+    Row({ space: 8 }) {
+      ActionButton({
+        active: !this.busy, controlWidth: 86, controlHeight: 40, fill: '#00000000',
+        accessibilityLabel: this.allManagementSelected() ? '取消全选' : '全选作品',
+        action: () => this.toggleSelectAll()
+      }) {
+        Row({ space: 5 }) {
           Stack() {
-            if (clip.coverPath !== undefined) {
-              Image(fileUri.getUriFromPath(clip.coverPath)).width('100%').height('100%')
-                .objectFit(ImageFit.Cover).interpolation(ImageInterpolation.High)
-            } else {
-              Image($rawfile('comic/decor/recording_share_hero.png')).width(68).height(48).objectFit(ImageFit.Contain)
-            }
-            Circle().width(28).height(28).fill('#E6FFF9EE').stroke(INK).strokeWidth(1)
-            Image($rawfile('comic/icons/play.svg')).width(14).height(14)
-          }.width(76).height(58).backgroundColor(this.selectedId === clip.id ? LILAC : '#E4F2EB')
-            .border({ width: 1, color: INK }).borderRadius(5).clip(true)
-          Column({ space: 5 }) {
-            Text(this.dateLabel(clip.createdAt)).fontSize(14).fontWeight(900).fontColor(INK).width('100%')
-            Text(`${this.durationLabel(clip.durationMs)} · ${clip.interrupted ? '中断后已保留' : '画面 / 节奏 / MIC'}`)
-              .fontSize(10).fontColor('#625C54').width('100%')
-          }.layoutWeight(1)
-          Text(this.selectedId === clip.id ? '正在预览' : '›').fontSize(this.selectedId === clip.id ? 10 : 25)
-            .fontWeight(900).fontColor(INK)
-        }.width('100%').padding({ left: 11, right: LIBRARY_CARD_ACTION_RIGHT_INSET, top: 11, bottom: 11 })
-          .onClick(() => this.selectClip(clip))
-      }.width('100%')
-        .backgroundColor(this.selectedId === clip.id ? '#FFF0D1' : WHITE)
-        .border({ width: this.selectedId === clip.id ? 2 : 1, color: INK }).borderRadius(7)
-        .shadow(this.selectedId === clip.id ? CARD_SHADOW : CONTROL_SHADOW)
-      // Keep deletion separate from the preview hit area so removing a work never selects it.
-      Button('×', { type: ButtonType.Normal }).width(LIBRARY_CARD_DELETE_SIZE).height(LIBRARY_CARD_DELETE_SIZE)
-        .padding(0).fontSize(20).fontWeight(900).fontColor('#A34530').backgroundColor('#FFF1E8')
-        .border({ width: 1, color: INK }).borderRadius(6)
-        .margin({ top: LIBRARY_CARD_DELETE_INSET, right: LIBRARY_CARD_DELETE_INSET })
-        .enabled(!this.busy && !this.renderingAudio).accessibilityText('删除这段作品')
-        .onClick(() => this.requestDeleteClip(clip.id))
-    }.width('100%')
+            Circle().width(18).height(18).fill(this.allManagementSelected() ? LILAC : WHITE).stroke(INK).strokeWidth(1)
+            if (this.allManagementSelected()) { Text('✓').fontSize(12).fontWeight(900).fontColor(WHITE) }
+          }.width(18).height(18)
+          Text(this.allManagementSelected() ? '取消全选' : '全选').fontSize(11).fontWeight(900).fontColor(INK)
+        }
+      }
+      Text(`已选 ${this.managementSelection.length} 项`).fontSize(10).fontWeight(900).fontColor(INK).width(64)
+      Column() {
+        ActionButton({
+          label: this.busy ? '正在删除…' : `删除所选 (${this.managementSelection.length})`,
+          active: !this.busy && this.managementSelection.length > 0, controlHeight: 40,
+          labelSize: 12, labelWeight: 900, labelColor: INK,
+          fill: this.managementSelection.length > 0 ? CORAL : '#DED8CF', cornerRadius: 6,
+          lineWidth: 1.5, lineColor: INK,
+          hardShadow: { offsetX: COMIC_CONTROL_INK_OFFSET, offsetY: COMIC_CONTROL_INK_OFFSET, color: INK },
+          action: () => this.requestBatchDelete()
+        })
+      }.layoutWeight(1)
+    }.width('100%').height(LIBRARY_MANAGEMENT_BAR_HEIGHT)
+      .padding({
+        left: LIBRARY_SIDE_INSET, right: LIBRARY_SIDE_INSET,
+        top: 10, bottom: 10
+      }).backgroundColor(PAPER)
+      .border({ width: { top: 1 }, color: INK })
   }
 
   @Builder
   private calendarEntry(compact: boolean) {
-    Button({ type: ButtonType.Normal }) {
-      Image($rawfile('comic/icons/calendar.svg')).width(CALENDAR_ENTRY_ICON_SIZE).height(CALENDAR_ENTRY_ICON_SIZE)
-        .objectFit(ImageFit.Contain).accessibilityLevel('no')
-    }.width(compact ? CALENDAR_ENTRY_WIDTH : '100%').height(CALENDAR_ENTRY_HEIGHT).padding(0)
-      .backgroundColor(compact ? PAPER : '#EEE6FA').border({ width: 1, color: INK }).borderRadius(5)
-      .shadow(CONTROL_SHADOW)
-      .enabled(!this.busy && !this.renderingAudio).accessibilityText('打开打卡日历')
-      .onClick(() => this.calendarVisible = true)
+    Column() {
+      ActionButton({
+        active: !this.busy && !this.renderingAudio, controlHeight: CALENDAR_ENTRY_HEIGHT,
+        fill: compact ? PAPER : '#EEE6FA', cornerRadius: 5, lineWidth: 1, lineColor: INK,
+        hardShadow: { offsetX: COMIC_CARD_INK_OFFSET, offsetY: COMIC_CARD_INK_OFFSET, color: INK },
+        accessibilityLabel: '打开打卡日历', action: () => this.calendarVisible = true
+      }) {
+          Image($rawfile('comic/icons/calendar.svg')).width(CALENDAR_ENTRY_ICON_SIZE).height(CALENDAR_ENTRY_ICON_SIZE)
+            .objectFit(ImageFit.Contain).accessibilityLevel('no')
+      }
+    }.width(compact ? CALENDAR_ENTRY_WIDTH : '100%')
   }
 
   @Builder
   private pauseConfirm() {
     Stack({ alignContent: Alignment.Center }) {
-      Column({ space: 14 }) {
-        Text('先让练习停一拍').fontSize(24).fontWeight(900).fontStyle(FontStyle.Italic).width('100%')
-        Text('先暂停全队练习，再打开视频预览，避免播放器影响现场声音。视频已经保存在本机。')
-          .fontSize(13).fontColor('#625C54').lineHeight(21).width('100%')
-        Button('暂停练习并预览', { type: ButtonType.Normal })
-          .width('100%').height(48).fontSize(16).fontWeight(900).fontColor(INK).backgroundColor(CORAL)
-          .border({ width: 1.5, color: INK }).borderRadius(6).shadow(CONTROL_SHADOW)
-          .enabled(!this.busy && !this.renderingAudio).onClick(() => { void this.pauseAndContinue(); })
-        Text('继续练习，稍后再看').fontSize(12).fontWeight(900).padding(6)
-          .enabled(!this.busy && !this.renderingAudio).onClick(() => this.pauseConfirmVisible = false)
-      }.width(SHARE_SHEET_WIDTH).padding(20).backgroundColor(PAPER).border({ width: 2, color: INK })
-        .borderRadius(9).shadow(CARD_SHADOW)
+      Column() {
+        DrumPaper({
+          fill: PAPER,
+          paperWidth: '100%',
+          cornerRadius: 9,
+          paperLineWidth: 2,
+          offsetX: COMIC_CARD_INK_OFFSET,
+          offsetY: COMIC_CARD_INK_OFFSET
+        }) {
+          Column({ space: 14 }) {
+            Text('先让练习停一拍').fontSize(24).fontWeight(900).fontStyle(FontStyle.Italic).width('100%')
+            Text('先暂停全队练习，再打开视频预览，避免播放器影响现场声音。视频已经保存在本机。')
+              .fontSize(13).fontColor('#625C54').lineHeight(21).width('100%')
+            Column() {
+              ActionButton({
+                label: '暂停练习并预览', active: !this.busy && !this.renderingAudio, controlHeight: 48,
+                labelSize: 16, labelWeight: 900, labelColor: INK, fill: CORAL,
+                cornerRadius: 6, lineWidth: 1.5, lineColor: INK,
+                hardShadow: { offsetX: COMIC_CARD_INK_OFFSET, offsetY: COMIC_CARD_INK_OFFSET, color: INK },
+                action: () => { void this.pauseAndContinue(); }
+              })
+            }.width('100%')
+            ActionButton({
+              label: '继续练习，稍后再看', active: !this.busy && !this.renderingAudio,
+              controlWidth: 'auto', controlHeight: 'auto', contentPadding: 6,
+              labelSize: 12, labelWeight: 900, fill: Color.Transparent,
+              action: () => this.pauseConfirmVisible = false
+            })
+          }.width('100%').padding(20)
+        }
+      }.width(SHARE_SHEET_WIDTH)
     }.width('100%').height('100%').backgroundColor('#82000000').zIndex(110)
+      .padding({ right: COMIC_CARD_INK_OFFSET, bottom: COMIC_CARD_INK_OFFSET })
   }
 
   @Builder
   private deleteConfirm() {
     Stack({ alignContent: Alignment.Center }) {
-      Column({ space: 14 }) {
-        Text('删除这段视频？').fontSize(23).fontWeight(900).fontStyle(FontStyle.Italic).width('100%')
-        Text('将从本机作品中移除，已经保存到相册的副本不受影响。').fontSize(13).fontColor('#625C54').lineHeight(21)
-        Row({ space: 10 }) {
-          Button('留下', { type: ButtonType.Normal }).layoutWeight(1).height(46).fontColor(INK).fontWeight(900)
-            .backgroundColor(WHITE).border({ width: 1.5, color: INK }).borderRadius(6)
-            .enabled(!this.busy && !this.renderingAudio).onClick(() => this.deleteConfirmVisible = false)
-          Button('删除视频', { type: ButtonType.Normal }).layoutWeight(1).height(46).fontColor(INK).fontWeight(900)
-            .backgroundColor(CORAL).border({ width: 1.5, color: INK }).borderRadius(6)
-            .enabled(!this.busy && !this.renderingAudio).onClick(() => { void this.deleteSelected(); })
-        }.width('100%')
-      }.width(SHARE_SHEET_WIDTH).padding(20).backgroundColor(PAPER).border({ width: 2, color: INK })
-        .borderRadius(9).shadow(CARD_SHADOW)
+      Column() {
+        DrumPaper({
+          fill: PAPER,
+          paperWidth: '100%',
+          cornerRadius: 9,
+          paperLineWidth: 2,
+          offsetX: COMIC_CARD_INK_OFFSET,
+          offsetY: COMIC_CARD_INK_OFFSET
+        }) {
+          Column({ space: 14 }) {
+            Text(this.deleteIsBatch ? `删除这 ${this.deleteClipIds.length} 段作品？` : '删除这段作品？')
+              .fontSize(23).fontWeight(900).fontStyle(FontStyle.Italic).width('100%')
+            Text('将从本机作品中移除，已经保存到相册的副本不受影响。').fontSize(13).fontColor('#625C54').lineHeight(21)
+            Row({ space: 10 }) {
+              Column() {
+                ActionButton({
+                  label: '取消', active: !this.busy && !this.renderingAudio, controlHeight: 46,
+                  labelColor: INK, labelWeight: 900, fill: WHITE, cornerRadius: 6, lineWidth: 1.5, lineColor: INK,
+                  hardShadow: { offsetX: COMIC_CONTROL_INK_OFFSET, offsetY: COMIC_CONTROL_INK_OFFSET, color: INK },
+                  action: () => this.deleteConfirmVisible = false
+                })
+              }.layoutWeight(1)
+              Column() {
+                ActionButton({
+                  label: this.busy ? '正在删除…' : (this.deleteIsBatch ? `删除 ${this.deleteClipIds.length} 段` : '删除作品'),
+                  active: !this.busy && !this.renderingAudio, controlHeight: 46,
+                  labelColor: INK, labelWeight: 900, fill: CORAL, cornerRadius: 6, lineWidth: 1.5, lineColor: INK,
+                  hardShadow: { offsetX: COMIC_CARD_INK_OFFSET, offsetY: COMIC_CARD_INK_OFFSET, color: INK },
+                  action: () => { void this.deleteSelected(); }
+                })
+              }.layoutWeight(1)
+            }.width('100%')
+          }.width('100%').padding(20)
+        }
+      }.width(SHARE_SHEET_WIDTH)
     }.width('100%').height('100%').backgroundColor('#82000000').zIndex(110)
+      .padding({ right: COMIC_CARD_INK_OFFSET, bottom: COMIC_CARD_INK_OFFSET })
   }
 
   build() {
-    Stack() {
-      Scroll() {
+    Stack({ alignContent: Alignment.Bottom }) {
+      Scroll(this.pageScroller) {
         Column({ space: 16 }) {
           Row() {
-            Text('‹').fontSize(35).width(30).enabled(!this.busy && !this.renderingAudio).onClick(() => router.back())
-            Text(this.scope === 'solo' ? '单人练习作品' : '多人练习作品')
+            ActionButton({
+              active: !this.busy && !this.renderingAudio, controlWidth: 30, controlHeight: 'auto', fill: Color.Transparent,
+              accessibilityLabel: this.managing ? '退出作品管理' : '返回',
+              action: () => { if (this.managing) { this.exitManagement(); } else { router.back(); } }
+            }) {
+              Text('‹').fontSize(35).fontColor(INK).width('100%').textAlign(TextAlign.Start)
+            }
+            Text(this.managing ? '管理作品' : (this.scope === 'solo' ? '单人练习作品' : '多人练习作品'))
               .fontSize(27).fontWeight(900).fontStyle(FontStyle.Italic)
             Blank()
-            Text('LOCAL\nTAKES').fontSize(9).fontWeight(900).letterSpacing(1).textAlign(TextAlign.End)
+            if (this.managing) { this.managementButton('完成', () => this.exitManagement()) }
+            else { Text('LOCAL\nTAKES').fontSize(9).fontWeight(900).letterSpacing(1).textAlign(TextAlign.End) }
           }.width('100%')
           if (this.clips.length === 0) {
             Image($rawfile('comic/decor/recording_share_hero.png')).width('100%').height(LIBRARY_HERO_HEIGHT)
@@ -783,13 +1071,25 @@ struct RecordingLibraryPage {
             Text('回到行进页，点击红色录制按钮。\n画面、节奏与周围声音，会一起留下来。')
               .fontSize(13).fontColor('#625C54').lineHeight(22).textAlign(TextAlign.Center)
             this.calendarEntry(false)
-            ComicButton({ label: '返回首页', fill: LILAC, action: () => router.back() })
+            ComicButton({
+              label: '返回首页', fill: LILAC,
+              hardShadow: { offsetX: COMIC_CARD_INK_OFFSET, offsetY: COMIC_CARD_INK_OFFSET, color: INK },
+              action: () => router.back()
+            })
           } else {
+            if (!this.managing) {
             Column({ space: 10 }) {
-              // Keep video cropping inside this frame so the outer paper shadow
-              // can extend beyond the preview without being clipped away.
-              Stack() {
-                Stack() {
+              Column() {
+                DrumPaper({
+                  fill: INK,
+                  paperWidth: '100%',
+                  cornerRadius: 8,
+                  paperLineWidth: 2,
+                  clipContent: true,
+                  offsetX: COMIC_CARD_INK_OFFSET,
+                  offsetY: COMIC_CARD_INK_OFFSET
+                }) {
+                  Stack() {
                   if (this.practiceActive) {
                     // A muted Video can still request system audio focus. Do not
                     // create its player while the shared practice is running.
@@ -799,10 +1099,18 @@ struct RecordingLibraryPage {
                       Text('练习仍在进行，先收好这一拍')
                         .fontSize(12).fontWeight(900).fontColor(PAPER)
                       if (!this.renderingAudio) {
-                        Button('暂停练习后预览', { type: ButtonType.Normal })
-                          .height(34).fontSize(12).fontWeight(900).fontColor(INK).backgroundColor(LILAC)
-                          .border({ width: 1, color: PAPER }).borderRadius(5)
-                          .onClick(() => this.requestPreview())
+                        DrumPaper({
+                          fill: LILAC,
+                          cornerRadius: 5,
+                          paperLineWidth: 1,
+                          paperLineColor: PAPER,
+                          offsetX: COMIC_CONTROL_INK_OFFSET,
+                          offsetY: COMIC_CONTROL_INK_OFFSET
+                        }) {
+                          Button('暂停练习后预览', { type: ButtonType.Normal })
+                            .height(34).fontSize(12).fontWeight(900).fontColor(INK).backgroundColor('#00000000')
+                            .onClick(() => this.requestPreview())
+                        }
                       }
                     }.width('100%')
                   } else {
@@ -812,10 +1120,9 @@ struct RecordingLibraryPage {
                       this.previewCover()
                     }
                   }
-                }.width('100%').height(VIDEO_PREVIEW_HEIGHT).backgroundColor(INK)
-                  .border({ width: 2, color: INK }).borderRadius(8).clip(true)
-              }.width('100%').height(VIDEO_PREVIEW_HEIGHT).backgroundColor(INK)
-                .borderRadius(8).shadow(CARD_SHADOW)
+                  }.width('100%').height(VIDEO_PREVIEW_HEIGHT).backgroundColor(INK).clip(true)
+                }
+              }.width('100%').margin({ bottom: COMIC_CARD_INK_OFFSET })
               Row() {
                 Text('已保存在本机').fontSize(11).fontWeight(900).fontColor('#467A70')
                 Blank()
@@ -826,112 +1133,162 @@ struct RecordingLibraryPage {
               Text(this.practiceActive ? '为保护现场节奏，请先暂停练习再预览或分享。成品保留声波与停止控件。' :
                 '成品保留实时声波与停止控件。预览默认有声，可单独调整麦克风收到的声音。')
                 .fontSize(11).fontColor('#625C54').lineHeight(18).width('100%')
-              Column({ space: 5 }) {
-                Row() {
-                  Text('MIC / 外部声音').fontSize(12).fontWeight(900).fontColor(INK)
-                  Blank()
-                  Text(`${Math.round(this.micGain * 100)}%`).fontSize(13).fontWeight(900).fontColor(INK)
-                }.width('100%')
-                Slider({ value: this.micGain, min: 0, max: 2, step: 0.05, style: SliderStyle.OutSet })
-                  .width('100%').height(28).trackThickness(4).selectedColor('#29B5AE').trackColor('#BED8D1')
-                  .blockColor(INK).enabled(this.canAdjustMic())
-                  .onChange((value: number, mode: SliderChangeMode) => this.changeMicGain(value, mode))
-                Row() {
-                  Text('0%').fontSize(9).fontColor('#625C54')
-                  Blank()
-                  Text('应用内节奏声固定 100%').fontSize(10).fontWeight(FontWeight.Bold).fontColor('#467A70')
-                  Blank()
-                  Text('200%').fontSize(9).fontColor('#625C54')
-                }.width('100%')
-                Divider().strokeWidth(1).color('#B9CCC6').margin({ top: 7, bottom: 5 })
-                Row() {
-                  Text('人声对齐').fontSize(12).fontWeight(900).fontColor(INK)
-                  Blank()
-                  Text('范围 ±300ms').fontSize(9).fontWeight(FontWeight.Bold).fontColor('#625C54')
-                }.width('100%')
-                Row({ space: 8 }) {
-                  Button({ type: ButtonType.Normal }) {
-                    Text('‹').fontSize(27).fontWeight(900).fontColor(INK)
-                  }.width(38).height(38).padding(0).backgroundColor('#D4DDDA')
-                    .border({ width: 1, color: INK }).borderRadius(7).enabled(this.canAdjustMic())
-                    .accessibilityText('人声提前 10 毫秒')
-                    .onClick(() => this.nudgeMicShift(-MIC_SHIFT_STEP_MS))
-                  Stack({ alignContent: Alignment.Center }) {
-                    Canvas(this.alignmentCanvas).width('100%').height(MIC_ALIGNMENT_RULER_HEIGHT)
-                      .hitTestBehavior(HitTestMode.None)
-                      .onReady(() => {
-                        this.alignmentCanvasReady = true;
-                        this.drawMicAlignmentRuler();
-                      })
-                      .onAreaChange((_oldArea, area) => {
-                        this.alignmentCanvasWidth = Number(area.width);
-                        this.drawMicAlignmentRuler();
-                      })
-                    Slider({
-                      value: this.micShiftMs, min: -MIC_SHIFT_LIMIT_MS, max: MIC_SHIFT_LIMIT_MS,
-                      step: MIC_SHIFT_STEP_MS, style: SliderStyle.OutSet
-                    }).width('100%').height(MIC_ALIGNMENT_RULER_HEIGHT).opacity(0.01)
-                      .enabled(this.canAdjustMic())
-                      .accessibilityText(this.micShiftLabel())
-                      .onChange((value: number, mode: SliderChangeMode) => this.changeMicShift(value, mode))
-                  }.layoutWeight(1).height(MIC_ALIGNMENT_RULER_HEIGHT)
-                  Button({ type: ButtonType.Normal }) {
-                    Text('›').fontSize(27).fontWeight(900).fontColor(INK)
-                  }.width(38).height(38).padding(0).backgroundColor('#D4DDDA')
-                    .border({ width: 1, color: INK }).borderRadius(7).enabled(this.canAdjustMic())
-                    .accessibilityText('人声延后 10 毫秒')
-                    .onClick(() => this.nudgeMicShift(MIC_SHIFT_STEP_MS))
-                }.width('100%')
-                Text(this.micShiftLabel()).fontSize(10).fontWeight(FontWeight.Bold)
-                  .fontColor(this.micShiftMs === 0 ? '#625C54' : '#A34530')
-                  .textAlign(TextAlign.Center).width('100%')
-                if (!this.hasSeparateAudio()) {
-                  Text('旧版视频已合并声音，重新录制可单独调 MIC。')
-                    .fontSize(10).fontColor('#777065').lineHeight(17).width('100%')
-                } else {
-                  Text(this.renderingAudio ?
-                    '正在应用声音设置；可继续调节，将自动合并到最后一次，完成后从当前位置续播…' :
-                    '松开后应用音量与对齐。首次会准备快速 MIC 轨，之后调整更快；保存与分享使用当前设置。')
-                    .fontSize(10).fontColor('#625C54').lineHeight(17).width('100%')
-                }
-              }.width('100%').padding(12).backgroundColor('#E8F2EB').border({ width: 1, color: INK }).borderRadius(7)
-                .shadow(CONTROL_SHADOW)
-              Row({ space: 10 }) {
-                Button({ type: ButtonType.Normal }) {
-                  Row({ space: ALBUM_SAVE_LABEL_GAP }) {
-                    Image($rawfile('comic/icons/save_to_album.svg'))
-                      .width(ALBUM_SAVE_ICON_SIZE).height(ALBUM_SAVE_ICON_SIZE).objectFit(ImageFit.Contain)
-                    Text(this.savingToAlbum ? '正在保存…' : '保存到相册')
-                      .fontSize(13).fontWeight(900).fontColor(INK)
+              Column() {
+                DrumPaper({
+                  fill: '#E8F2EB',
+                  paperWidth: '100%',
+                  cornerRadius: 7,
+                  paperLineWidth: 1,
+                  offsetX: COMIC_CARD_INK_OFFSET,
+                  offsetY: COMIC_CARD_INK_OFFSET
+                }) {
+                  Column({ space: 5 }) {
+                  Row() {
+                    Text('MIC / 外部声音').fontSize(12).fontWeight(900).fontColor(INK)
+                    Blank()
+                    Text(`${Math.round(this.micGain * 100)}%`).fontSize(13).fontWeight(900).fontColor(INK)
+                  }.width('100%')
+                  Slider({ value: this.micGain, min: 0, max: 2, step: 0.05, style: SliderStyle.OutSet })
+                    .width('100%').height(28).trackThickness(4).selectedColor('#29B5AE').trackColor('#BED8D1')
+                    .blockColor(INK).enabled(this.canAdjustMic())
+                    .onChange((value: number, mode: SliderChangeMode) => this.changeMicGain(value, mode))
+                  Row() {
+                    Text('0%').fontSize(9).fontColor('#625C54')
+                    Blank()
+                    Text('应用内节奏声固定 100%').fontSize(10).fontWeight(FontWeight.Bold).fontColor('#467A70')
+                    Blank()
+                    Text('200%').fontSize(9).fontColor('#625C54')
+                  }.width('100%')
+                  Divider().strokeWidth(1).color('#B9CCC6').margin({ top: 7, bottom: 5 })
+                  Row() {
+                    Text('人声对齐').fontSize(12).fontWeight(900).fontColor(INK)
+                    Blank()
+                    Text('范围 ±300ms').fontSize(9).fontWeight(FontWeight.Bold).fontColor('#625C54')
+                  }.width('100%')
+                  Row({ space: 8 }) {
+                    ActionButton({
+                      active: this.canAdjustMic(), controlWidth: LIBRARY_MIC_NUDGE_SIZE,
+                      controlHeight: LIBRARY_MIC_NUDGE_SIZE, fill: '#D4DDDA',
+                      cornerRadius: 7, lineWidth: 1, lineColor: INK,
+                      hardShadow: { offsetX: COMIC_CONTROL_INK_OFFSET, offsetY: COMIC_CONTROL_INK_OFFSET, color: INK },
+                      accessibilityLabel: '人声提前 10 毫秒', action: () => this.nudgeMicShift(-MIC_SHIFT_STEP_MS)
+                    }) {
+                      Text('‹').fontSize(27).fontWeight(900).fontColor(INK)
+                    }
+                    Stack({ alignContent: Alignment.Center }) {
+                      Canvas(this.alignmentCanvas).width('100%').height(MIC_ALIGNMENT_RULER_HEIGHT)
+                        .hitTestBehavior(HitTestMode.None)
+                        .onReady(() => {
+                          this.alignmentCanvasReady = true;
+                          this.drawMicAlignmentRuler();
+                        })
+                        .onAreaChange((_oldArea, area) => {
+                          this.alignmentCanvasWidth = Number(area.width);
+                          this.drawMicAlignmentRuler();
+                        })
+                      Slider({
+                        value: this.micShiftMs, min: -MIC_SHIFT_LIMIT_MS, max: MIC_SHIFT_LIMIT_MS,
+                        step: MIC_SHIFT_STEP_MS, style: SliderStyle.OutSet
+                      }).width('100%').height(MIC_ALIGNMENT_RULER_HEIGHT).opacity(0.01)
+                        .enabled(this.canAdjustMic())
+                        .accessibilityText(this.micShiftLabel())
+                        .onChange((value: number, mode: SliderChangeMode) => this.changeMicShift(value, mode))
+                    }.layoutWeight(1).height(MIC_ALIGNMENT_RULER_HEIGHT)
+                    ActionButton({
+                      active: this.canAdjustMic(), controlWidth: LIBRARY_MIC_NUDGE_SIZE,
+                      controlHeight: LIBRARY_MIC_NUDGE_SIZE, fill: '#D4DDDA',
+                      cornerRadius: 7, lineWidth: 1, lineColor: INK,
+                      hardShadow: { offsetX: COMIC_CONTROL_INK_OFFSET, offsetY: COMIC_CONTROL_INK_OFFSET, color: INK },
+                      accessibilityLabel: '人声延后 10 毫秒', action: () => this.nudgeMicShift(MIC_SHIFT_STEP_MS)
+                    }) {
+                      Text('›').fontSize(27).fontWeight(900).fontColor(INK)
+                    }
+                  }.width('100%').alignItems(VerticalAlign.Center)
+                  Text(this.micShiftLabel()).fontSize(10).fontWeight(FontWeight.Bold)
+                    .fontColor(this.micShiftMs === 0 ? '#625C54' : '#A34530')
+                    .textAlign(TextAlign.Center).width('100%')
+                  if (!this.hasSeparateAudio()) {
+                    Text('旧版视频已合并声音，重新录制可单独调 MIC。')
+                      .fontSize(10).fontColor('#777065').lineHeight(17).width('100%')
+                  } else {
+                    Text(this.renderingAudio ?
+                      '正在应用声音设置；可继续调节，将自动合并到最后一次，完成后从当前位置续播…' :
+                      '松开后应用音量与对齐。首次会准备快速 MIC 轨，之后调整更快；保存与分享使用当前设置。')
+                      .fontSize(10).fontColor('#625C54').lineHeight(17).width('100%')
                   }
-                }.layoutWeight(1).height(ALBUM_SAVE_BUTTON_HEIGHT)
-                  .padding({ left: ALBUM_SAVE_HORIZONTAL_PADDING, right: ALBUM_SAVE_HORIZONTAL_PADDING })
-                  .backgroundColor(WHITE).border({ width: 1.5, color: INK }).borderRadius(5)
-                  .shadow(CONTROL_SHADOW)
-                  .opacity(this.busy || this.renderingAudio ? 0.55 : 1)
-                  .accessibilityText(this.savingToAlbum ? '正在保存到相册' : '保存到相册')
-                  .enabled(!this.busy && !this.renderingAudio)
-                  .onClick(() => { void this.saveSelected(); })
+                  }.width('100%').padding(12)
+                }
+              }.width('100%').margin({ bottom: COMIC_CARD_INK_OFFSET })
+              Row({ space: 10 }) {
+                Column() {
+                  ActionButton({
+                    active: !this.busy && !this.renderingAudio, controlHeight: ALBUM_SAVE_BUTTON_HEIGHT,
+                    fill: WHITE, cornerRadius: 5, lineWidth: 1.5, lineColor: INK,
+                    contentPadding: { left: ALBUM_SAVE_HORIZONTAL_PADDING, right: ALBUM_SAVE_HORIZONTAL_PADDING },
+                    hardShadow: { offsetX: COMIC_CARD_INK_OFFSET, offsetY: COMIC_CARD_INK_OFFSET, color: INK },
+                    accessibilityLabel: this.savingToAlbum ? '正在保存到相册' : '保存到相册',
+                    action: () => { void this.saveSelected(); }
+                  }) {
+                    Row({ space: ALBUM_SAVE_LABEL_GAP }) {
+                      Image($rawfile('comic/icons/save_to_album.svg'))
+                        .width(ALBUM_SAVE_ICON_SIZE).height(ALBUM_SAVE_ICON_SIZE).objectFit(ImageFit.Contain)
+                      Text(this.savingToAlbum ? '正在保存…' : '保存到相册')
+                        .fontSize(13).fontWeight(900).fontColor(INK)
+                    }
+                  }
+                }.layoutWeight(1)
                 this.calendarEntry(true)
               }.width('100%')
-            }.width('100%')
-            Row() {
-              Text('TAKES / 录制作品').fontSize(12).fontWeight(900).letterSpacing(0.7)
+            }.width('100%').clip(false)
+            }
+            Row({ space: 10 }) {
+              Text(this.managing ? `共 ${this.clips.length} 段作品` : 'TAKES / 录制作品')
+                .fontSize(12).fontWeight(900).letterSpacing(0.7)
               Blank()
-              Text(`${this.clips.length} 段`).fontSize(11).fontWeight(FontWeight.Bold)
+              Text(this.managing ? `已选 ${this.managementSelection.length} 项` : `${this.clips.length} 段`)
+                .fontSize(11).fontWeight(FontWeight.Bold)
+              if (!this.managing) { this.managementButton('管理', () => this.enterManagement()) }
             }.width('100%').margin({ top: 6 })
-            ForEach(this.clips, (clip: RecordingClip) => { this.clipCard(clip) },
-              (clip: RecordingClip) => `${clip.id}:${clip.coverPath ?? ''}`)
-            Text('视频与打卡记录保存在本机。分享后回到票根页，点击“去打卡”确认。')
-              .fontSize(10).fontColor('#777065').lineHeight(18).width('100%')
+            Column({ space: LIBRARY_GRID_GAP }) {
+              ForEach(this.clipRows(), (row: RecordingClip[]) => {
+                Row({ space: LIBRARY_GRID_GAP }) {
+                  ForEach(row, (clip: RecordingClip) => {
+                    Column() { this.clipCard(clip) }.layoutWeight(1)
+                  }, (clip: RecordingClip) => `${clip.id}:${clip.path}:${clip.coverPath ?? ''}`)
+                  if (row.length === 1) { Blank().layoutWeight(1) }
+                }.width('100%').alignItems(VerticalAlign.Top)
+              }, (row: RecordingClip[]) => row.map((clip: RecordingClip) => `${clip.id}:${clip.path}:${clip.coverPath ?? ''}`).join('|'))
+            }.width('100%')
+            if (!this.managing) {
+              Text('视频与打卡记录保存在本机。分享后回到票根页，点击“去打卡”确认。')
+                .fontSize(10).fontColor('#777065').lineHeight(18).width('100%')
+            }
           }
-        }.width('100%').padding({
-          left: LIBRARY_SIDE_INSET, right: LIBRARY_SIDE_INSET,
-          top: 10 + this.topSafeInset, bottom: 28 + this.bottomSafeInset
-        })
-      }.width('100%').height('100%').scrollBar(BarState.Off)
-      if (this.pauseConfirmVisible) { this.pauseConfirm() }
-      if (this.deleteConfirmVisible) { this.deleteConfirm() }
+        }.width('100%').clip(false)
+          .constraintSize({ minHeight: '100%' })
+          .justifyContent(FlexAlign.Start)
+          .padding({
+            left: LIBRARY_SIDE_INSET, right: LIBRARY_SIDE_INSET,
+            top: 10 + this.topSafeInset,
+            bottom: (this.managing ? LIBRARY_MANAGEMENT_BAR_HEIGHT + 16 : 28) + this.bottomSafeInset + COMIC_CARD_INK_OFFSET
+          })
+          .onAreaChange(() => this.restorePendingScroll())
+      }.width('100%').height('100%').scrollBar(BarState.Off).clip(false).align(Alignment.TopStart)
+      if (this.managing) {
+        Column() {
+          this.managementBar()
+        }.width('100%').padding({ bottom: this.bottomSafeInset }).backgroundColor(PAPER)
+      }
+      if (this.pauseConfirmVisible) {
+        Stack({ alignContent: Alignment.Center }) {
+          this.pauseConfirm()
+        }.width('100%').height('100%').zIndex(110)
+      }
+      if (this.deleteConfirmVisible) {
+        Stack({ alignContent: Alignment.Center }) {
+          this.deleteConfirm()
+        }.width('100%').height('100%').zIndex(110)
+      }
       if (this.calendarVisible) {
         ShareCalendarSheet({
           scope: this.scope,

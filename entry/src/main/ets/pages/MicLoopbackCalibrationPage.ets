@@ -1,3 +1,4 @@
+import { ActionButton } from '../components/ActionButton';
 import { common } from '@kit.AbilityKit';
 import { router, promptAction } from '@kit.ArkUI';
 import { MicLoopbackCalibrator } from '../audio/MicLoopbackCalibrator';
@@ -457,11 +458,12 @@ struct MicLoopbackCalibrationPage {
               .fontSize(13).lineHeight(20).fontColor('#5C554D').width('100%')
           }.width('100%')
 
-          Button(this.inputCalibrating ? '校准中…' : (this.inputLatencyMs >= 0 ? '重新校准输入侧' : '校准输入侧时延'), { type: ButtonType.Normal })
-            .width('100%').height(42).fontSize(13).fontWeight(900).fontColor(INK)
-            .backgroundColor(TEAL).border({ width: 1.5, color: INK }).borderRadius(7)
-            .enabled(!this.inputCalibrating && !this.measuring)
-            .onClick(() => { void this.startInputCalibration(); })
+          ActionButton({
+            label: this.inputCalibrating ? '校准中…' : (this.inputLatencyMs >= 0 ? '重新校准输入侧' : '校准输入侧时延'),
+            active: !this.inputCalibrating && !this.measuring, controlHeight: 42,
+            labelSize: 13, labelWeight: 900, fill: TEAL, lineWidth: 1.5, cornerRadius: 7,
+            action: () => { void this.startInputCalibration(); }
+          })
 
           if (this.inputStatus.length > 0) {
             Text(this.inputStatus).fontSize(11).fontWeight(700).fontColor('#5C554D').width('100%')
@@ -482,19 +484,18 @@ struct MicLoopbackCalibrationPage {
             this.resultCard()
           }
 
-          Button(this.measuring ? '测量中…' : (this.hasResult ? '重新测量' : '开始测量'), { type: ButtonType.Normal })
-            .width('100%').height(44).fontSize(14).fontWeight(900).fontColor(INK)
-            .backgroundColor(LILAC).border({ width: 1.5, color: INK }).borderRadius(7)
-            .enabled(!this.measuring)
-            .onClick(() => { void this.startMeasure(); })
+          ActionButton({
+            label: this.measuring ? '测量中…' : (this.hasResult ? '重新测量' : '开始测量'),
+            active: !this.measuring, controlHeight: 44, labelSize: 14, labelWeight: 900,
+            fill: LILAC, lineWidth: 1.5, cornerRadius: 7, action: () => { void this.startMeasure(); }
+          })
 
           if (this.hasResult) {
-            Button('保存并生效', { type: ButtonType.Normal })
-              .width('100%').height(56).fontSize(19).fontWeight(900).fontColor(INK)
-              .backgroundColor(CORAL).border({ width: 1.5, color: INK }).borderRadius(7)
-              .shadow(CONTROL_SHADOW).enabled(!this.saving && this.resultSaveable())
-              .opacity(this.saving || !this.resultSaveable() ? 0.55 : 1)
-              .onClick(() => { void this.finishAndSave(); })
+            ActionButton({
+              label: '保存并生效', active: !this.saving && this.resultSaveable(), controlHeight: 56,
+              labelSize: 19, labelWeight: 900, fill: CORAL, lineWidth: 1.5, cornerRadius: 7,
+              inkShadow: CONTROL_SHADOW, action: () => { void this.finishAndSave(); }
+            })
           }
         }
         .width('100%')

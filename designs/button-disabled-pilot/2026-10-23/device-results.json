@@ -1,0 +1,19 @@
+{
+  "checks": [
+    "native disabled state and one Button host per control; face bounds match wrapper",
+    "disabled clicks blocked for both shadow modes",
+    "false to true restores clicks; five taps produce exactly five actions",
+    "live native label and visual badge update",
+    "true to false restores blocking after label/color/badge updates",
+    "shadow overflow is not clickable",
+    "slide out cancels action",
+    "held enabled press releases exactly one action",
+    "disabling during a held press blocks the eventual release"
+  ],
+  "counts": [
+    "legacy clicks=0",
+    "hard clicks=0",
+    "native clicks=0"
+  ],
+  "state": "active=false; variant=false; pending=false"
+}

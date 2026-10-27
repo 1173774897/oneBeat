@@ -13,6 +13,8 @@ import {
 import {
   buildProgramSequence,
   DrumProgram,
+  drumProgramStyleKeys,
+  drumSectionStyleKey,
   parseDrumProgram,
   sectionFillStartBeat
 } from './DrumMachineCatalog';
@@ -203,6 +205,13 @@ interface RenderedBar {
   frameCount: number;
   samplesPerBeat: number;
   beatsPerBar: number;
+}
+
+interface DrumProgramPreparation {
+  raw: string;
+  looping: boolean;
+  token: number;
+  work: Promise<boolean>;
 }
 
 interface DrumPreviewBarPosition {
@@ -429,6 +438,7 @@ export class MetronomeEngine {
   private customProgram: DrumProgram | undefined = undefined;
   private customProgramLooping: boolean = true;
   private configurationToken: number = 0;
+  private drumProgramPreparation: DrumProgramPreparation | undefined = undefined;
   private sampleBank: Map<string, ArrayBuffer> = new Map();
   private drumPreviewPlan: DrumPreviewPlanContext | undefined = undefined;
   private stagedDrumPreviewUpdate: StagedDrumPreviewUpdate | undefined = undefined;
@@ -786,6 +796,13 @@ export class MetronomeEngine {
   /** True only when this request's drum sequence is ready; superseded loads cannot authorize playback. */
   async configureProgram(raw: string, looping: boolean = true): Promise<boolean> {
     this.clearDrumPreviewPlan();
+    const pending = this.drumProgramPreparation;
+    if (pending !== undefined && pending.raw === raw && pending.looping === looping &&
+      pending.token === this.configurationToken) {
+      // Snapshot/clock notifications can repeat while native resources load.
+      // Reuse the same preparation so a strict transport ACK can await it.
+      return await pending.work;
+    }
     // Even an already-applied request must invalidate older sample loads: a
     // late one-shot preview must never replace the walking transport's loop.
     const token = ++this.configurationToken;
@@ -795,8 +812,21 @@ export class MetronomeEngine {
     if (raw === this.customProgramRaw && looping === this.customProgramLooping) {
       return true;
     }
+    const work = this.prepareDrumProgram(raw, looping, token);
+    const preparation: DrumProgramPreparation = { raw, looping, token, work };
+    this.drumProgramPreparation = preparation;
+    try {
+      return await work;
+    } finally {
+      if (this.drumProgramPreparation === preparation) {
+        this.drumProgramPreparation = undefined;
+      }
+    }
+  }
+
+  private async prepareDrumProgram(raw: string, looping: boolean, token: number): Promise<boolean> {
     const program = parseDrumProgram(raw);
-    const bank = await DrumSampleBank.loadStyle(program.styleKey);
+    const bank = await this.loadProgramBank(program);
     if (token !== this.configurationToken) {
       return false;
     }
@@ -806,6 +836,23 @@ export class MetronomeEngine {
     this.sampleBank = bank;
     this.rebuildPendingSequence(buildProgramSequence(program), looping);
     return true;
+  }
+
+  private async loadProgramBank(program: DrumProgram): Promise<Map<string, ArrayBuffer>> {
+    const styles = drumProgramStyleKeys(program);
+    const kits = await Promise.all(styles.map((style: string) => DrumSampleBank.loadStyle(style)));
+    if (kits.length === 1) {
+      return kits[0];
+    }
+    const bank: Map<string, ArrayBuffer> = new Map();
+    for (let i = 0; i < kits.length; i++) {
+      kits[i].forEach((sample: ArrayBuffer, key: string) => {
+        bank.set(`${styles[i]}/${key}`, sample);
+      });
+    }
+    // Namespace kits in this request's immutable prepared bank. A late load or
+    // a staged preview must never change the kit used by already-rendered PCM.
+    return bank;
   }
 
   /** Releasing a local audition must also invalidate a sample load that has not completed yet. */
@@ -859,7 +906,7 @@ export class MetronomeEngine {
     }
     let bank: Map<string, ArrayBuffer>;
     try {
-      bank = await DrumSampleBank.loadStyle(program.styleKey);
+      bank = await this.loadProgramBank(program);
     } catch (err) {
       if (context !== this.drumPreviewPlan || revision !== this.drumPreviewUpdateRevision ||
         configuration !== this.configurationToken || !this.running) {
@@ -2152,22 +2199,41 @@ export class MetronomeEngine {
   private renderSequence(patterns: SequencerPattern[], looping: boolean,
     bank: Map<string, ArrayBuffer>, program: DrumProgram | undefined): RenderedBar[] {
     const sequence: RenderedBar[] = [];
+    const styles = this.programBarStyleKeys(program);
     for (let i = 0; i < patterns.length; i++) {
-      sequence.push(this.renderBar(patterns[i], true, bank, program));
+      sequence.push(this.renderBar(patterns[i], true, bank, program, styles[i]));
     }
     this.mixRideTails(patterns, sequence, looping, bank, program);
     return sequence;
   }
 
+  private programBarStyleKeys(program: DrumProgram | undefined): string[] {
+    const styles: string[] = [];
+    if (program !== undefined) {
+      for (let section = 0; section < program.sections.length; section++) {
+        const current = program.sections[section];
+        const style = drumSectionStyleKey(program, current);
+        for (let repeat = 0; repeat < current.repeats; repeat++) {
+          styles.push(style);
+        }
+      }
+    }
+    return styles;
+  }
+
+  private drumSample(bank: Map<string, ArrayBuffer>, sampleKey: string,
+    styleKey?: string): ArrayBuffer | undefined {
+    const styled = styleKey === undefined ? undefined : bank.get(`${styleKey}/${sampleKey}`);
+    return styled ?? bank.get(sampleKey);
+  }
+
   private mixRideTails(patterns: SequencerPattern[], sequence: RenderedBar[], looping: boolean,
     bank: Map<string, ArrayBuffer> = this.sampleBank,
     program: DrumProgram | undefined = this.customProgram): void {
-    const ride = bank.get('ride');
-    if (ride === undefined || sequence.length === 0) {
+    if (sequence.length === 0) {
       return;
     }
-    const source = new DataView(ride);
-    const sourceFrames = Math.floor(ride.byteLength / BYTES_PER_SAMPLE);
+    const styles = this.programBarStyleKeys(program);
     // Only the new, sustained ride voice needs this continuation. Mix it while
     // preparing PCM, never in writeData, and keep every bar's frame count and
     // transport boundary unchanged. Looping PCM includes the previous cycle's
@@ -2175,6 +2241,13 @@ export class MetronomeEngine {
     for (let barIndex = 0; barIndex < patterns.length; barIndex++) {
       const pattern = patterns[barIndex];
       const bar = sequence[barIndex];
+      const ride = this.drumSample(bank, 'ride', styles[barIndex]);
+      if (ride === undefined) {
+        continue;
+      }
+      // A ringing cymbal retains its source kit across the next section's style boundary.
+      const source = new DataView(ride);
+      const sourceFrames = Math.floor(ride.byteLength / BYTES_PER_SAMPLE);
       for (let eventIndex = 0; eventIndex < pattern.events.length; eventIndex++) {
         const event = pattern.events[eventIndex];
         if (event.sampleKey !== 'ride') {
@@ -2212,7 +2285,7 @@ export class MetronomeEngine {
 
   private renderBar(pattern: SequencerPattern, applyBeatPointPattern: boolean = true,
     bank: Map<string, ArrayBuffer> = this.sampleBank,
-    program: DrumProgram | undefined = this.customProgram): RenderedBar {
+    program: DrumProgram | undefined = this.customProgram, styleKey?: string): RenderedBar {
     const samplesPerBeat = SAMPLE_RATE * 60 / Math.max(1, this.bpm);
     const frameCount = Math.max(1, Math.round(samplesPerBeat * pattern.beatsPerBar));
     const data = new ArrayBuffer(frameCount * BYTES_PER_SAMPLE);
@@ -2226,7 +2299,7 @@ export class MetronomeEngine {
       if (applyBeatPointPattern && pointState === 'silent') {
         continue;
       }
-      const bankSample = bank.get(event.sampleKey);
+      const bankSample = this.drumSample(bank, event.sampleKey, styleKey);
       const sourceData = bankSample !== undefined ? bankSample :
         event.sampleKey === 'accent' ? this.accentBuffer : this.weakBuffer;
       const source = new DataView(sourceData);

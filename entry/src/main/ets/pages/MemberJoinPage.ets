@@ -20,6 +20,7 @@ import {
 } from '../network/join/TeamNetworkPermissions';
 import { ComicCharacter, PAPER, INK, CORAL, LILAC, WHITE, CONTROL_SHADOW } from '../components/ComicKit';
 import { TeamTicketBackdrop, TeamWifiFooter } from '../components/TeamEntryVisuals';
+import { ActionButton } from '../components/ActionButton';
 
 const PLAYER_DISPLAY_NAME_KEY: string = 'playerDisplayName';
 const JOIN_PAGE_SIDE_INSET: number = 18;
@@ -37,8 +38,6 @@ const JOIN_DIVIDER_HEIGHT: number = 24;
 const JOIN_CODE_HEIGHT: number = 180;
 const JOIN_CONTENT_INSET: number = 20;
 const JOIN_ACTION_HEIGHT: number = 46;
-const JOIN_DISABLED_OPACITY: number = 0.68;
-const JOIN_DISABLED_SHADOW_RADIUS: number = 1;
 
 @Entry
 @Component
@@ -205,36 +204,27 @@ struct MemberJoinPage {
 
   @Builder
   private joinAction(scan: boolean) {
-    Stack({ alignContent: Alignment.TopStart }) {
-      Row().width('100%').height(JOIN_ACTION_HEIGHT).backgroundColor(INK).borderRadius(6)
-        .translate({ x: 2, y: 3 })
-        .opacity(!this.joining && !this.scanning && (scan || this.joinCode.length === 6) ? 1 : 0)
-        .hitTestBehavior(HitTestMode.None).accessibilityLevel('no')
-      // Read state inside this builder: primitive builder arguments are snapshots
-      // on supported runtimes and would leave the six-digit action disabled.
-      Button(scan ? (this.scanning ? '正在扫码…' : '打开相机扫码  ›') :
-        (this.joining ? '正在连接…' : '用加入码进入  ›'), { type: ButtonType.Normal })
-        .width('100%').height(JOIN_ACTION_HEIGHT).fontSize(18).fontWeight(900)
-        .fontColor(INK).backgroundColor(scan ? CORAL : LILAC)
-        .border({ width: 1.5, color: INK }).borderRadius(6)
-        .shadow(!this.joining && !this.scanning && (scan || this.joinCode.length === 6) ?
-          { radius: 0, color: '#00000000' } :
-          { radius: JOIN_DISABLED_SHADOW_RADIUS, offsetX: 6, offsetY: 7, color: INK })
-        // The wrapper disables the entire hit target without the native Button's
-        // extra disabled tint, so the shared 0.68 fade matches the PRO entry.
-        .focusable(!this.joining && !this.scanning && (scan || this.joinCode.length === 6))
-        .stateEffect(!this.joining && !this.scanning && (scan || this.joinCode.length === 6))
-        .onClick(() => {
-          if (this.joining || this.scanning || (!scan && this.joinCode.length !== 6)) {
-            return;
-          }
-          if (scan) { void this.scanJoin(); } else { void this.joinWithCode(this.joinCode); }
-        })
-    }
-    .width('100%')
-    .height(JOIN_ACTION_HEIGHT)
-    .enabled(!this.joining && !this.scanning && (scan || this.joinCode.length === 6))
-    .opacity(!this.joining && !this.scanning && (scan || this.joinCode.length === 6) ? 1 : JOIN_DISABLED_OPACITY)
+    // Read state here: primitive builder arguments can retain their initial
+    // value and leave the six-digit action disabled after code entry.
+    ActionButton({
+      label: scan ? (this.scanning ? '正在扫码…' : '打开相机扫码  ›') :
+        (this.joining ? '正在连接…' : '用加入码进入  ›'),
+      active: !this.joining && !this.scanning && (scan || this.joinCode.length === 6),
+      controlHeight: JOIN_ACTION_HEIGHT,
+      contentPadding: { left: 16, right: 16 },
+      labelSize: 18,
+      labelWeight: 900,
+      fill: scan ? CORAL : LILAC,
+      lineWidth: 1.5,
+      cornerRadius: 6,
+      hardShadow: { offsetX: 2, offsetY: 2, color: INK },
+      action: () => {
+        if (this.joining || this.scanning || (!scan && this.joinCode.length !== 6)) {
+          return;
+        }
+        if (scan) { void this.scanJoin(); } else { void this.joinWithCode(this.joinCode); }
+      }
+    })
   }
 
   @Builder
@@ -283,9 +273,12 @@ struct MemberJoinPage {
           Row() {
             ForEach([0, 1, 2, 3, 4, 5], (slot: number) => {
               Text('—').fontSize(23).fontWeight(900).fontColor('#B2B3B8')
+                // None on the Row only excludes the Row itself, not its children.
+                .hitTestBehavior(HitTestMode.None)
             }, (slot: number): string => slot.toString())
           }.width('100%').height(46).padding({ left: 16, right: 16 })
-            .justifyContent(FlexAlign.SpaceEvenly).hitTestBehavior(HitTestMode.None).accessibilityLevel('no')
+            .justifyContent(FlexAlign.SpaceEvenly).hitTestBehavior(HitTestMode.None)
+            .accessibilityLevel('no-hide-descendants')
         }
       }.width('100%').height(46).margin({ top: 8 })
       Column() {

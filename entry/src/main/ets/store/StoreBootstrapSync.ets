@@ -15,6 +15,7 @@ import {
 export { invalidateStoreBootstrapRefresh } from './StoreBootstrapRefresh';
 
 let coldStartBootstrapPromise: Promise<void> | undefined = undefined;
+let inFlightBootstrapPromise: Promise<void> | undefined = undefined;
 let launchSessionHydrated: boolean = false;
 
 /** Fetches store bootstrap once per app session (deduped). Safe to call from EntryAbility, Index, and lobby. */
@@ -27,8 +28,17 @@ export function refreshStoreEntitlements(): Promise<void> {
     return existing;
   }
   const pending = runStoreBootstrapSync();
+  inFlightBootstrapPromise = pending;
   setStoreBootstrapRefreshPromise(pending);
+  void pending.then(() => clearCompletedBootstrap(pending), () => clearCompletedBootstrap(pending));
   return pending;
+}
+
+function clearCompletedBootstrap(pending: Promise<void>): void {
+  // Auth invalidation can start a newer request before this one completes.
+  if (inFlightBootstrapPromise === pending) {
+    inFlightBootstrapPromise = undefined;
+  }
 }
 
 /** App open: resolve session then bootstrap. Deduped for the whole process launch. */
@@ -44,11 +54,19 @@ export async function ensureStoreBootstrapReady(): Promise<void> {
   await startStoreColdStartBootstrap();
 }
 
-/** Refreshes the catalog after cold start so newly released pass content becomes usable without restarting the app. */
-export async function refreshStoreEntitlementsNow(): Promise<void> {
-  await startStoreColdStartBootstrap();
+/** Shares an active refresh, or starts a fresh catalog request when the previous one has settled. */
+export function refreshStoreEntitlementsNow(): Promise<void> {
+  if (!isStoreApiConfigured()) {
+    return Promise.resolve();
+  }
+  startStoreColdStartBootstrap();
+  const pending = inFlightBootstrapPromise;
+  // A cleared cache means the account changed; do not reuse an old account's request.
+  if (pending !== undefined && getStoreBootstrapRefreshPromise() === pending) {
+    return pending;
+  }
   setStoreBootstrapRefreshPromise(undefined);
-  await refreshStoreEntitlements();
+  return refreshStoreEntitlements();
 }
 
 /**

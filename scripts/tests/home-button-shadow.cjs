@@ -6,12 +6,7 @@ const vm = require('node:vm');
 const ts = require(process.argv[2] || '/Applications/DevEco-Studio.app/Contents/tools/hvigor/hvigor/node_modules/typescript/lib/typescript.js');
 const root = path.resolve(__dirname, '../..');
 const home = fs.readFileSync(path.join(root, 'entry/src/main/ets/pages/Index.ets'), 'utf8');
-const kit = fs.readFileSync(path.join(root, 'entry/src/main/ets/components/ComicKit.ets'), 'utf8');
-const button = kit.slice(kit.indexOf('export struct ComicButton'));
-const hardStart = button.indexOf('if (this.hardShadow !== undefined)');
-const fallbackStart = button.indexOf('} else {', hardStart);
-assert.ok(hardStart >= 0 && fallbackStart > hardStart, 'Keep hard shadows opt-in');
-const hard = button.slice(hardStart, fallbackStart);
+require('./comic-button-disabled.cjs');
 assert.match(home, /this\.practiceEntryPanel\('team', '多人练习', '组队同行 · 同拍出发', CORAL\)/);
 assert.match(home, /this\.practiceEntryPanel\('solo', '单人练习', '跟着节奏 · 找到步调', WHITE\)/);
 assert.match(home, /Row\(\{ space: HOME_ENTRANCE_GAP \}\)[\s\S]*this\.storeEntryPanel\(\)/);
@@ -54,21 +49,6 @@ assert.match(home, /SAME BEAT!/);
 assert.match(storeCard, /onClick\(\(\) => this\.goPrimary\('store'\)\)/);
 assert.match(home, /onebeat_wordmark\.png[\s\S]*entry_burst\.png[\s\S]*height\(245\)\.clip\(true\)/,
   'The existing title and hero remain unchanged above the redesigned entries');
-assert.match(button, /@Prop hardShadow: ComicHardShadowOptions \| undefined = undefined/);
-assert.ok(hard.indexOf('Row()') < hard.indexOf('this.buttonFace()'), 'Backing must paint before the face');
-assert.match(hard, /backgroundColor\(this\.hardShadow\?\.color \?\? INK\)/);
-assert.match(hard, /translate\(\{ x: this\.hardShadow\?\.offsetX \?\? 0, y: this\.hardShadow\?\.offsetY \?\? 0 \}\)/);
-assert.match(hard, /hitTestBehavior\(HitTestMode\.None\)\.accessibilityLevel\('no'\)/);
-assert.match(hard, /height\(COMIC_BUTTON_HEIGHT\)\.clip\(false\)/);
-assert.equal((button.match(/height\(COMIC_BUTTON_HEIGHT\)/g) || []).length, 3, 'Face, backing and wrapper must have the same height');
-assert.equal((button.match(/borderRadius\(COMIC_BUTTON_RADIUS\)/g) || []).length, 2, 'Backing must match the face corners');
-assert.match(button, /shadow\(this\.hardShadow !== undefined \? \{ radius: 0, color: '#00000000' \} : this\.inkShadow\)/);
-assert.match(button, /enabled\(this\.active\)\.opacity\(this\.active \? 1 : 0\.5\)\.onClick\(this\.action\)/);
-assert.match(hard, /opacity\(this\.active \? 1 : 0\.5\)/);
-assert.match(button.slice(fallbackStart), /this\.buttonFace\(\)/);
-assert.match(kit, /const COMIC_BUTTON_HEIGHT: number = 56/);
-assert.match(kit, /const COMIC_BUTTON_RADIUS: number = 7/);
-
 // Run the real home methods with repository/router boundaries replaced. This
 // verifies scope routing and live statistics without pretending to render ArkUI.
 const business = (home.slice(0, home.indexOf('  @Builder')) + '\n}')

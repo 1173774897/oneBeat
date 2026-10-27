@@ -7,9 +7,16 @@ import { RecordingRepository } from '../recording/RecordingRepository';
 import { RecordingShareService } from '../sharing/RecordingShareService';
 import { initializeShareCheckInStore, refreshShareCheckInClock } from '../store/ShareCheckInStore';
 import { DrumSampleBank } from '../audio/DrumSampleBank';
+import { TeamAcousticProbe } from '../audio/TeamAcousticProbe';
+import { initializeDrumProgramLibrary } from '../audio/DrumProgramLibrary';
 import { AppSession } from '../app/AppSession';
 import { SessionBackgroundKeeper } from '../session/SessionBackgroundKeeper';
-import { initializeEntitlementCache, initializeMonthlyPassCache, isSceneAccessible } from '../store/EntitlementStore';
+import {
+  initializeEntitlementCache,
+  initializeStoredEntitlementCache,
+  initializeMonthlyPassCache,
+  isSceneAccessible
+} from '../store/EntitlementStore';
 import { startStoreColdStartBootstrap } from '../store/StoreBootstrapSync';
 import { bindStoreSessionPersistenceContext } from '../store/StoreSessionPersistence';
 import { bindAudioLatencyPersistenceContext, restoreCalibrationMs, restoreInputLatencyMs } from '../store/AudioLatencyPersistence';
@@ -20,6 +27,11 @@ export default class EntryAbility extends UIAbility {
     SessionBackgroundKeeper.initialize(this.context);
     bindStoreSessionPersistenceContext(this.context);
     bindAudioLatencyPersistenceContext(this.context);
+    try {
+      initializeDrumProgramLibrary(this.context);
+    } catch (_error) {
+      hilog.warn(DOMAIN, TAG, 'Restore local drum arrangement library failed');
+    }
     void restoreCalibrationMs().catch((error: Object) => {
       hilog.warn(DOMAIN, TAG, `Restore audio latency calibration failed: ${JSON.stringify(error)}`);
     });
@@ -37,6 +49,7 @@ export default class EntryAbility extends UIAbility {
     AppStorage.setOrCreate('safeAreaBottom', 0);
     AppStorage.setOrCreate('storeEntitlementEpoch', 0);
     initializeEntitlementCache();
+    initializeStoredEntitlementCache(this.context);
     AppStorage.setOrCreate('recordingLibraryEpoch', 0);
     AppStorage.setOrCreate('recordingShareEpoch', 0);
     AppStorage.setOrCreate('recordingPendingClipId', '');
@@ -73,12 +86,6 @@ export default class EntryAbility extends UIAbility {
       return;
     }
     try {
-      const exportedTracks = await RecordingRepository.exportLatestTracksForDebug();
-      hilog.info(DOMAIN, TAG, `Debug export tracks: ${JSON.stringify(exportedTracks)}`);
-    } catch (_error) {
-      hilog.warn(DOMAIN, TAG, 'Debug export tracks failed');
-    }
-    try {
       await RecordingShareService.initialize(this.context);
     } catch (_error) {
       // Sharing metadata cannot prevent a local video from being recorded.
@@ -86,8 +93,13 @@ export default class EntryAbility extends UIAbility {
     }
   }
 
+  onNewWant(want: Want, _launchParam: AbilityConstant.LaunchParam): void {
+    void TeamAcousticProbe.handleWant(this.context, want);
+  }
+
   onDestroy(): void {
     hilog.info(DOMAIN, TAG, 'EntryAbility onDestroy');
+    TeamAcousticProbe.cancel();
     RecordingCoordinator.handleBackground();
     AppSession.clear();
   }
@@ -106,6 +118,7 @@ export default class EntryAbility extends UIAbility {
 
   onBackground(): void {
     hilog.info(DOMAIN, TAG, 'EntryAbility onBackground');
+    TeamAcousticProbe.cancel();
     RecordingCoordinator.handleBackground();
     AppSession.handleAppBackground();
   }

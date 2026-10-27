@@ -13,12 +13,32 @@
           "profile": "/Users/lizhe/work/oneBeatExtraFiles/onebeat_debugDebug.p7b",
           "certpath": "/Users/lizhe/work/oneBeatExtraFiles/onebeat_debug.cer"
         }
+      },
+      {
+        "name": "release",
+        "type": "HarmonyOS",
+        "material": {
+          "storeFile": "/Users/lizhe/work/oneBeatExtraFiles/release/onebeat_release.p12",
+          "storePassword": "0000001AF0CB25C6BF59EA9CEE4DD3499053C2F07972829A3F738789B30DC70FB911D4F9CCA9AEC408F2",
+          "keyAlias": "releasekey",
+          "keyPassword": "0000001A17DEE312B1CF89CC9BA2B9C5FAB115DC5E81D94F1CDD4A74A9FF31722AE48BE11B25296CB9A6",
+          "signAlg": "SHA256withECDSA",
+          "profile": "/Users/lizhe/work/oneBeatExtraFiles/release/onebeat_releaseRelease.p7b",
+          "certpath": "/Users/lizhe/work/oneBeatExtraFiles/release/onebeat_release.cer"
+        }
       }
     ],
     "products": [
       {
         "name": "default",
         "signingConfig": "default",
+        "compatibleSdkVersion": "5.0.0(12)",
+        "targetSdkVersion": "6.0.0(20)",
+        "runtimeOS": "HarmonyOS"
+      },
+      {
+        "name": "release",
+        "signingConfig": "release",
         "compatibleSdkVersion": "5.0.0(12)",
         "targetSdkVersion": "6.0.0(20)",
         "runtimeOS": "HarmonyOS"
@@ -41,7 +61,8 @@
         {
           "name": "default",
           "applyToProducts": [
-            "default"
+            "default",
+            "release"
           ]
         }
       ]

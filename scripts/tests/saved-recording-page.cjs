@@ -4,6 +4,12 @@ const vm = require('node:vm');
 const ts = require(process.argv[2] || '/Applications/DevEco-Studio.app/Contents/tools/hvigor/hvigor/node_modules/typescript/lib/typescript.js');
 
 const source = fs.readFileSync('entry/src/main/ets/pages/SavedRecordingPage.ets', 'utf8');
+const comicInkOffsets = Object.fromEntries([...fs.readFileSync('entry/src/main/ets/components/ComicInkSurface.ets', 'utf8')
+  .matchAll(/export const (COMIC_[A-Z_]+): number = ([\d.]+);/g)].map(match => [match[1], Number(match[2])]));
+assert.match(source, /private shareButton\(\) \{\s*ActionButton\(\{\s*active: !this\.busy && this\.savedClip !== undefined,[\s\S]*?hardShadow: \{ offsetX: COMIC_CARD_INK_OFFSET, offsetY: COMIC_CARD_INK_OFFSET, color: INK \},[\s\S]*?action: \(\) => this\.requestShare\(\)/,
+  'Sharing retains its unavailable-work gate, solid backing and explicit share action');
+assert.match(source, /ActionButton\(\{\s*label: this\.checkingIn \? '记卡中…' : '去打卡', active: !this\.busy,[\s\S]*?action: \(\) => \{ void this\.confirmToday\(\); \}/,
+  'Daily check-in stays disabled during work and requires a deliberate confirmation');
 const business = (source.slice(0, source.indexOf('  @Builder')) + '\n}')
   .replace(/^import[\s\S]*?from\s+['"][^'"]+['"];\s*/gm, '')
   .replace(/@(?:Entry|Component)\b\s*/g, '').replace(/@State\s+/g, '')
@@ -27,6 +33,7 @@ function harness() {
   const controller = { isLeader: true, state: 'paused' };
   let session = { controller, async leaderPause() { trace.push('pause'); controller.state = 'paused'; } };
   const context = { exports: {}, WHITE: '#fff', INK: '#000', Date: PageDate,
+    ...comicInkOffsets,
     SHARE_CHECK_IN_DAY_MS: 86400000,
     getShareCheckInSummary: () => ({ todayCompleted, ready: true, clockBlocked: false }),
     getShareCheckInTodayKey: todayKey,

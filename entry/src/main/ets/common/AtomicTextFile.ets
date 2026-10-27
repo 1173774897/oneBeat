@@ -6,6 +6,44 @@ export async function readOptional(path: string): Promise<string> {
   return await fs.access(path) ? await fs.readText(path) : '';
 }
 
+export function readOptionalSync(path: string): string {
+  return fs.accessSync(path) ? fs.readTextSync(path) : '';
+}
+
+/** Small local snapshots commit before a synchronous UI mutation can report success or the app can exit. */
+export function writeAtomicSync(path: string, contents: string): void {
+  const temporary = `${path}.tmp-${util.generateRandomUUID(true)}`;
+  let committed = false;
+  try {
+    const file = fs.openSync(temporary, fs.OpenMode.CREATE | fs.OpenMode.TRUNC | fs.OpenMode.WRITE_ONLY);
+    try {
+      const bytes = new util.TextEncoder().encodeInto(contents);
+      let written = 0;
+      while (written < bytes.byteLength) {
+        const remaining = written === 0 ? bytes.buffer : bytes.buffer.slice(written);
+        const count = fs.writeSync(file.fd, remaining);
+        if (count <= 0 || count > bytes.byteLength - written) {
+          throw new Error('本机记录写入未完成，请检查存储空间后重试');
+        }
+        written += count;
+      }
+      fs.fsyncSync(file.fd);
+    } finally {
+      fs.closeSync(file);
+    }
+    fs.renameSync(temporary, path);
+    committed = true;
+  } finally {
+    if (!committed) {
+      try {
+        if (fs.accessSync(temporary)) { fs.unlinkSync(temporary); }
+      } catch (_error) {
+        // Readers ignore unfinished temporary files and retain the last committed snapshot.
+      }
+    }
+  }
+}
+
 /** Callers serialize mutations. Rename commits one complete snapshot, without Preferences' 8KB value limit. */
 export async function writeAtomic(path: string, contents: string): Promise<void> {
   const temporary = `${path}.tmp-${util.generateRandomUUID(true)}`;

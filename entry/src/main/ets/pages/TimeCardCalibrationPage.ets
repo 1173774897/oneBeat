@@ -1,3 +1,4 @@
+import { ActionButton } from '../components/ActionButton';
 import { router } from '@kit.ArkUI';
 import { AppSession } from '../app/AppSession';
 import { MonotonicClock } from '../common/MonotonicClock';
@@ -912,8 +913,14 @@ struct TimeCardCalibrationPage {
   @Builder
   private pageHeader() {
     Row({ space: 8 }) {
-      Text('‹').fontSize(34).fontWeight(900).fontColor(INK)
-        .width(32).height(44).enabled(!this.saving).onClick(() => router.back())
+      ActionButton({
+        label: '‹', active: !this.saving, controlWidth: 32, controlHeight: 44,
+        labelSize: 34, labelWeight: 900, fill: Color.Transparent, cornerRadius: 0,
+        accessibilityLabel: '返回', action: () => router.back()
+      }) {
+        Text('‹').fontSize(34).fontWeight(900).fontColor(INK)
+          .width('100%').height(44).textAlign(TextAlign.Start)
+      }
       Column({ space: 2 }) {
         Text('耳机延迟测量').fontSize(24).fontWeight(900).fontStyle(FontStyle.Italic)
         Text('整张时间卡 · 120 BPM · 4/4').fontSize(10).fontWeight(800).fontColor('#625B53')
@@ -1070,14 +1077,16 @@ struct TimeCardCalibrationPage {
       Text(this.stabilityLabel()).fontSize(13).fontWeight(900)
         .fontColor(this.jitterMs > 38 ? CORAL : '#08827B')
       Row({ space: 9 }) {
-        Button('校准前试听', { type: ButtonType.Normal }).layoutWeight(1).height(44)
-          .fontSize(13).fontWeight(900).fontColor(INK).backgroundColor(WHITE)
-          .border({ width: 1.5, color: INK }).borderRadius(7).enabled(!this.saving && this.btAudioActive)
-          .onClick(() => { void this.startResultPreview(0, '校准前'); })
-        Button('校准后试听', { type: ButtonType.Normal }).layoutWeight(1).height(44)
-          .fontSize(13).fontWeight(900).fontColor(INK).backgroundColor(TEAL)
-          .border({ width: 1.5, color: INK }).borderRadius(7).enabled(!this.saving && this.btAudioActive)
-          .onClick(() => { void this.startResultPreview(this.resultMs, '校准后'); })
+        ActionButton({
+          label: '校准前试听', active: !this.saving && this.btAudioActive, controlHeight: 44,
+          labelSize: 13, labelWeight: 900, fill: WHITE, lineWidth: 1.5, cornerRadius: 7,
+          action: () => { void this.startResultPreview(0, '校准前'); }
+        }).layoutWeight(1)
+        ActionButton({
+          label: '校准后试听', active: !this.saving && this.btAudioActive, controlHeight: 44,
+          labelSize: 13, labelWeight: 900, fill: TEAL, lineWidth: 1.5, cornerRadius: 7,
+          action: () => { void this.startResultPreview(this.resultMs, '校准后'); }
+        }).layoutWeight(1)
       }.width('100%')
       Row({ space: 9 }) {
         Circle().width(19).height(19).fill(this.previewPulse > 0 ? CORAL : '#E5D9C7').stroke(INK).strokeWidth(1.2)
@@ -1121,22 +1130,25 @@ struct TimeCardCalibrationPage {
   @Builder
   private resultActions() {
     Column({ space: 10 }) {
-      Button(this.saving ? '正在保存…' : this.resultActionsReady ? '保存并生效' : '请先查看结果', { type: ButtonType.Normal })
-        .width('100%').height(54).fontSize(19).fontWeight(900).fontColor(INK)
-        .backgroundColor(CORAL).border({ width: 1.5, color: INK }).borderRadius(7).shadow(CONTROL_SHADOW)
-        .enabled(this.resultActionsReady && !this.saving && this.btAudioActive)
-        .onTouch((event: TouchEvent) => { this.onResultActionTouch(event, 'save'); })
-        .onClick((event: ClickEvent) => {
+      ActionButton({
+        label: this.saving ? '正在保存…' : this.resultActionsReady ? '保存并生效' : '请先查看结果',
+        active: this.resultActionsReady && !this.saving && this.btAudioActive, controlHeight: 54,
+        labelSize: 19, labelWeight: 900, fill: CORAL, lineWidth: 1.5, cornerRadius: 7,
+        inkShadow: CONTROL_SHADOW,
+        touchAction: (event: TouchEvent) => { this.onResultActionTouch(event, 'save'); },
+        action: (event: ClickEvent) => {
           if (this.consumeResultActionClick('save', event)) { void this.finishAndSave(); }
-        })
-      Button('重新测量', { type: ButtonType.Normal }).width('100%').height(40)
-        .fontSize(14).fontWeight(900).fontColor(INK).backgroundColor(LILAC)
-        .border({ width: 1.2, color: INK }).borderRadius(7)
-        .enabled(this.resultActionsReady && !this.saving && this.btAudioActive)
-        .onTouch((event: TouchEvent) => { this.onResultActionTouch(event, 'retry'); })
-        .onClick((event: ClickEvent) => {
+        }
+      })
+      ActionButton({
+        label: '重新测量', active: this.resultActionsReady && !this.saving && this.btAudioActive,
+        controlHeight: 40, labelSize: 14, labelWeight: 900, fill: LILAC,
+        lineWidth: 1.2, cornerRadius: 7,
+        touchAction: (event: TouchEvent) => { this.onResultActionTouch(event, 'retry'); },
+        action: (event: ClickEvent) => {
           if (this.consumeResultActionClick('retry', event)) { this.retryMeasurement(); }
-        })
+        }
+      })
     }.width('100%').padding({ left: PAGE_SIDE_PADDING, right: PAGE_SIDE_PADDING,
       top: CONTENT_ACTIONS_GAP, bottom: 18 + this.bottomSafeInset })
   }
@@ -1148,19 +1160,22 @@ struct TimeCardCalibrationPage {
         Text(this.operationError).fontSize(12).lineHeight(19).fontColor(CORAL).width('100%')
       }
       if (this.phase === 'intro') {
-        Button('开始打卡', { type: ButtonType.Normal }).width('100%').height(54)
-          .fontSize(21).fontWeight(900).fontStyle(FontStyle.Italic).fontColor(INK)
-          .backgroundColor(CORAL).border({ width: 1.5, color: INK }).borderRadius(7).shadow(CONTROL_SHADOW)
-          .enabled(this.btAudioActive).onClick(() => { void this.startMeasurement(); })
+        ActionButton({
+          label: '开始打卡', active: this.btAudioActive, controlHeight: 54,
+          labelSize: 21, labelWeight: 900, labelStyle: FontStyle.Italic,
+          fill: CORAL, lineWidth: 1.5, cornerRadius: 7, inkShadow: CONTROL_SHADOW,
+          action: () => { void this.startMeasurement(); }
+        })
         if (!this.btAudioActive && this.operationError.length === 0) {
           Text('请先连接蓝牙耳机').fontSize(11).fontColor('#625B53')
         }
       } else {
-        Button(this.phase === 'changing' ? '正在换入空白卡…' : '重新听一小节，再打卡', { type: ButtonType.Normal })
-          .width('100%').height(54).fontSize(18).fontWeight(900).fontColor(INK)
-          .backgroundColor(CORAL).border({ width: 1.5, color: INK }).borderRadius(7).shadow(CONTROL_SHADOW)
-          .enabled(this.retryReady && !this.touchHeld && this.btAudioActive)
-          .onClick(() => { this.retryMeasurement(); })
+        ActionButton({
+          label: this.phase === 'changing' ? '正在换入空白卡…' : '重新听一小节，再打卡',
+          active: this.retryReady && !this.touchHeld && this.btAudioActive, controlHeight: 54,
+          labelSize: 18, labelWeight: 900, fill: CORAL, lineWidth: 1.5, cornerRadius: 7,
+          inkShadow: CONTROL_SHADOW, action: () => { this.retryMeasurement(); }
+        })
         if (!this.btAudioActive && this.operationError.length === 0) {
           Text('请先重新连接耳机').fontSize(11).fontColor('#625B53')
         }

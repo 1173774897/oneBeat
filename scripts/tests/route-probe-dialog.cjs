@@ -2,7 +2,9 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
-const ts = require(process.argv[2]);
+const ts = require(process.argv[2] || '/Applications/DevEco-Studio.app/Contents/tools/hvigor/hvigor/node_modules/typescript/lib/typescript.js');
+const comicInkOffsets = Object.fromEntries([...fs.readFileSync('entry/src/main/ets/components/ComicInkSurface.ets', 'utf8')
+  .matchAll(/export const (COMIC_[A-Z_]+): number = ([\d.]+);/g)].map(match => [match[1], Number(match[2])]));
 
 const source = fs.readFileSync('entry/src/main/ets/pages/LeaderLobbyPage.ets', 'utf8');
 const builderStart = source.indexOf('  @Builder');
@@ -20,6 +22,7 @@ function actualMethodsBetween(start, end) {
 const businessSource = (source.slice(0, builderStart) +
   actualMethodsBetween('  aboutToDisappear(): void {', '  onBackPress(): boolean {') +
   actualMethodsBetween('  onPageHide(): void {', '  private startRosterStatusAnimation(): void {') +
+  actualMethodsBetween('  private cancelRosterDrag(): void {', '  private async finishRosterDrag(): Promise<void> {') +
   actualMethodsBetween('  private async leaveLobby(): Promise<void> {', '  refresh(): void {') + '\n}\n')
   .replace(/^import[\s\S]*?from\s+['"][^'"]+['"];\s*/gm, '')
   .replace(/@(?:Entry|Component)\b\s*/g, '')
@@ -55,6 +58,7 @@ function harness() {
   };
   const context = {
     exports: {},
+    ...comicInkOffsets,
     Map,
     Scroller: class {},
     AppSession: { get: () => session, async reset() { trace.push('reset-session'); } },
@@ -93,14 +97,24 @@ assert.equal((compiledMain.diagnostics ?? []).filter(d => d.category === ts.Diag
 function mainHarness() {
   const requests = [];
   const notices = [];
+  const timers = new Map();
+  let timerId = 0;
   let session = {
     controller: { isLeader: true },
+    async waitForCurrentAudioConfiguration() { return true; },
     leaderStart() { const request = deferred(); requests.push(request); return request.promise; },
     leaderReturnToLobby() { const request = deferred(); requests.push(request); return request.promise; }
   };
   const context = {
     exports: {},
     Map,
+    Curve: { Linear: 'linear' },
+    WalkReloadFrame: class {
+      constructor(ready) { this.ready = ready; }
+      onIdle() { this.ready(); }
+    },
+    setTimeout(callback) { timers.set(++timerId, callback); return timerId; },
+    clearTimeout(id) { timers.delete(id); },
     AppSession: { get: () => session },
     defaultBeatPointStates: () => [],
     logUserFailure() {},
@@ -110,12 +124,21 @@ function mainHarness() {
   };
   vm.runInNewContext(compiledMain.outputText, context);
   const page = new context.exports.MainPage();
+  page.getUIContext = () => ({
+    animateTo(_options, action) { action(); },
+    postFrameCallback(callback) { queueMicrotask(() => callback.onIdle()); }
+  });
   page.leader = true;
   page.refresh = () => {};
   page.startVisualLoop = () => {};
   page.startRecordingLoop = () => {};
   page.finishRecordingOnLeave = async () => {};
   return { page, requests, notices, replaceSession: () => { session = {}; } };
+}
+
+async function flushWalkingFrame() {
+  // Walking controls now submit a native frame before starting audio work.
+  for (let turn = 0; turn < 6; turn++) await Promise.resolve();
 }
 
 (async () => {
@@ -257,21 +280,25 @@ function mainHarness() {
   const hiddenWalk = mainHarness();
   const toggle = hiddenWalk.page.toggle();
   assert.equal(hiddenWalk.page.busy, true);
+  await flushWalkingFrame();
   hiddenWalk.page.onPageHide();
   hiddenWalk.page.onPageShow();
-  await hiddenWalk.page.toggle();
+  const overlappingToggle = hiddenWalk.page.toggle();
+  await flushWalkingFrame();
   assert.equal(hiddenWalk.requests.length, 1, 'A pending hidden action must still prevent overlap after showing');
   hiddenWalk.requests[0].reject(new Error('late native playback failure'));
-  await toggle;
+  await Promise.all([toggle, overlappingToggle]);
   assert.equal(hiddenWalk.page.busy, false, 'A hidden action must always release its busy flag');
   assert.equal(hiddenWalk.notices.length, 0, 'Hiding must invalidate the old action feedback');
   const replay = hiddenWalk.page.toggle();
+  await flushWalkingFrame();
   hiddenWalk.requests[1].reject(new Error('new playback failure'));
   await replay;
   assert.deepEqual(hiddenWalk.notices, ['播放操作失败，请重试']);
 
   const changedRoom = mainHarness();
   const previousRoomAction = changedRoom.page.toggle();
+  await flushWalkingFrame();
   changedRoom.replaceSession();
   changedRoom.requests[0].reject(new Error('old room failure'));
   await previousRoomAction;

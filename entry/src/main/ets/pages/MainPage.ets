@@ -1,5 +1,6 @@
 import { router } from '@kit.ArkUI';
 import { AppSession } from '../app/AppSession';
+import { WalkReloadFrame } from '../components/WalkReloadFrame';
 import { SessionMember } from '../protocol/messages';
 import {
   PAPER,
@@ -17,16 +18,19 @@ import { MeterEditorOverlay } from '../components/EditableMeter';
 import { BeatPointState, defaultBeatPointStates } from '../common/MeterModel';
 import { logUserFailure, showUserNotice, userErrorMessage } from '../common/UserFeedback';
 import {
-  defaultDrumProgram,
-  DrumStyle,
-  DRUM_STYLES,
+  drumProgramStyleKeys,
+  styleByKey,
   parseDrumProgram,
   serializeDrumProgram
 } from '../audio/DrumMachineCatalog';
+import {
+  SavedDrumProgram, loadSavedDrumPrograms, rememberRecentDrumProgram, resolveSavedDrumProgram
+} from '../audio/DrumProgramLibrary';
 import { RecordingCoordinator } from '../recording/RecordingCoordinator';
 import { RecordingClip, RecordingScope, RecordingState, RecordingSavePhase } from '../recording/RecordingModels';
 import { RecordingOverlay, RECORD_PILL_HEIGHT, RECORD_STOP_BOTTOM } from '../components/RecordingOverlay';
 import { isProDrumMachineAccessible } from '../store/EntitlementStore';
+import { ActionButton } from '../components/ActionButton';
 
 const COUNTDOWN_FONT_SIZE: number = 138;
 const COUNTDOWN_START_SCALE: number = 0.52;
@@ -46,6 +50,39 @@ const RECORD_SAVE_DIALOG_MAX_HEIGHT: string = '82%';
 const RECORD_SAVE_DIALOG_PADDING: number = 20;
 const RECORD_SAVE_ACTION_HEIGHT: number = 88;
 const RECORD_RESULT_Y_OFFSET: number = 0;
+const PROGRAM_DRAWER_HEIGHT: number = 116;
+const PROGRAM_CARD_WIDTH: number = 100;
+const PROGRAM_CARD_HEIGHT: number = 68;
+const PROGRAM_CARD_INNER_SPACE: number = 4;
+const PROGRAM_CARD_ROW1_HEIGHT: number = 16;
+const PROGRAM_CARD_ROW2_HEIGHT: number = 14;
+const PROGRAM_CARD_ROW3_HEIGHT: number = 16;
+const PROGRAM_CARD_STATUS_SIZE: number = 14;
+const PROGRAM_DRAWER_GAP: number = 10;
+const PROGRAM_CARD_SHADOW: number = 3;
+const BOTTOM_PANEL_HIDDEN_OFFSET: number = 190;
+const WALK_RELOAD_DELAY_MS: number = 300;
+const WALK_RELOAD_FADE_MS: number = 120;
+const WALK_RELOAD_MIN_VISIBLE_MS: number = 300;
+const WALK_RELOAD_LONG_MS: number = 3000;
+const WALK_RELOAD_ROW_HEIGHT: number = 16;
+const WALK_RELOAD_SPINNER_SIZE: number = 12;
+const WALK_RELOAD_TOP_GAP: number = 4;
+const WALK_RELOAD_BOTTOM_GAP: number = 5;
+
+type WalkReloadRegion = 'top' | 'bottom';
+
+interface WalkReloadRequest {
+  region: WalkReloadRegion;
+  session: AppSession;
+  label: string;
+  startedAt: number;
+  slow: boolean;
+  settled: boolean;
+  slowTimer: number;
+  hideTimer: number;
+  releaseFrame: () => void;
+}
 
 @Entry
 @Component
@@ -63,8 +100,33 @@ struct MainPage {
   @State sound: number = 0;
   @State showStyles: boolean = false;
   @State rhythm: number = 0;
-  @State drumStyleKey: string = 'rock';
+  @State walkBaseProgram: string = '';
+  @State walkBaseProgramName: string = '未命名编排';
+  @State savedDrumPrograms: SavedDrumProgram[] = [];
+  @State savedDrumProgramsRevision: number = 0;
+  @State selectedProgramKey: string = 'base';
+  @State switchingProgramKey: string = '';
+  @State confirmProgramKey: string = '';
+  @State confirmProgramRaw: string = '';
+  @State confirmProgramName: string = '';
+  @State showProgramMeterConfirm: boolean = false;
+  private walkProgramSession: AppSession | undefined = undefined;
+  private walkBaseProgramLibraryId: string = '';
+  private selectedProgramRaw: string = '';
+  private confirmProgramSession: AppSession | undefined = undefined;
+  private programSwitchInFlight: boolean = false;
+  private switchingVisualOwner: number = 0;
   @State busy: boolean = false;
+  @State topReloadPending: boolean = false;
+  @State bottomReloadPending: boolean = false;
+  @State topReloadOpacity: number = 0;
+  @State bottomReloadOpacity: number = 0;
+  @State topReloadText: string = '';
+  @State bottomReloadText: string = '';
+  private reloadSequence: number = 0;
+  private busyOwner: number = 0;
+  private busySession: AppSession | undefined = undefined;
+  private readonly reloadRequests: Map<number, WalkReloadRequest> = new Map();
   @State exiting: boolean = false;
   @State showExitConfirm: boolean = false;
   @State meterEditorVisible: boolean = false;
@@ -120,6 +182,7 @@ struct MainPage {
   }
   aboutToDisappear(): void {
     this.pageActive = false;
+    this.clearReloadFeedback();
     this.pendingActions.clear();
     this.actionSessions.clear();
     this.stopVisualLoop();
@@ -128,12 +191,14 @@ struct MainPage {
   }
   onPageShow(): void {
     this.pageActive = true;
+    if (this.showStyles) { this.reloadSavedDrumPrograms(); }
     this.refresh();
     this.startVisualLoop();
     this.startRecordingLoop();
   }
   onPageHide(): void {
     this.pageActive = false;
+    this.clearReloadFeedback();
     this.pendingActions.clear();
     this.actionSessions.clear();
     this.stopVisualLoop();
@@ -164,7 +229,159 @@ struct MainPage {
       showUserNotice(userErrorMessage(error, fallback), scope);
     }
   }
+
+  private animateReload(region: WalkReloadRegion, visible: boolean, delayed: boolean = false): void {
+    const update = (): void => {
+      if (region === 'top') { this.topReloadOpacity = visible ? 1 : 0; }
+      else { this.bottomReloadOpacity = visible ? 1 : 0; }
+    };
+    try {
+      // The spinner already exists at opacity zero. A native delayed animation
+      // can appear even while the following PCM generation occupies JS.
+      this.getUIContext().animateTo({ duration: visible ? WALK_RELOAD_FADE_MS : 0,
+        delay: delayed ? WALK_RELOAD_DELAY_MS : 0, curve: Curve.Linear }, update);
+    } catch (_error) {
+      update();
+    }
+  }
+
+  private syncReloadFeedback(region: WalkReloadRegion): void {
+    let pending = false;
+    let slow = false;
+    let text = '';
+    this.reloadRequests.forEach((request: WalkReloadRequest) => {
+      if (request.region === region) {
+        pending = true;
+        slow = slow || request.slow;
+        text = request.label;
+      }
+    });
+    const wasPending = region === 'top' ? this.topReloadPending : this.bottomReloadPending;
+    if (region === 'top') {
+      this.topReloadPending = pending;
+      this.topReloadText = slow ? '仍在处理，请稍候' : text;
+    } else {
+      this.bottomReloadPending = pending;
+      this.bottomReloadText = slow ? '仍在处理，请稍候' : text;
+    }
+    if (pending !== wasPending) { this.animateReload(region, pending, pending); }
+  }
+
+  private beginReloadFeedback(region: WalkReloadRegion, session: AppSession,
+    label: string = '正在准备节奏…'): number {
+    const id = ++this.reloadSequence;
+    const request: WalkReloadRequest = {
+      region, session, label, startedAt: Date.now(), slow: false, settled: false,
+      slowTimer: -1, hideTimer: -1, releaseFrame: () => {}
+    };
+    this.reloadRequests.set(id, request);
+    request.slowTimer = setTimeout(() => {
+      if (!this.isReloadCurrent(id)) { return; }
+      request.slow = true;
+      this.syncReloadFeedback(region);
+    }, WALK_RELOAD_LONG_MS);
+    this.syncReloadFeedback(region);
+    return id;
+  }
+
+  private isReloadCurrent(id: number): boolean {
+    const request = this.reloadRequests.get(id);
+    return request !== undefined && !request.settled && this.pageActive && !this.exiting && !this.returningToLobby &&
+      AppSession.get() === request.session;
+  }
+
+  private async waitForReloadFrame(id: number): Promise<boolean> {
+    const request = this.reloadRequests.get(id);
+    if (!this.isReloadCurrent(id) || request === undefined) { return false; }
+    await new Promise<void>((resolve: () => void) => {
+      request.releaseFrame = resolve;
+      try { this.getUIContext().postFrameCallback(new WalkReloadFrame(resolve)); }
+      catch (_error) { resolve(); }
+    });
+    return this.isReloadCurrent(id);
+  }
+
+  private finishReloadFeedback(id: number): void {
+    const request = this.reloadRequests.get(id);
+    if (request === undefined) { return; }
+    request.settled = true;
+    clearTimeout(request.slowTimer);
+    const remove = (): void => {
+      if (this.reloadRequests.get(id) !== request) { return; }
+      this.reloadRequests.delete(id);
+      if (this.switchingVisualOwner === id) {
+        this.switchingProgramKey = '';
+        this.switchingVisualOwner = 0;
+      }
+      this.syncReloadFeedback(request.region);
+    };
+    const elapsed = Date.now() - request.startedAt;
+    const remaining = elapsed >= WALK_RELOAD_DELAY_MS ?
+      Math.max(0, WALK_RELOAD_DELAY_MS + WALK_RELOAD_MIN_VISIBLE_MS - elapsed) : 0;
+    // Only the visual cue may linger; audio and business locks finish immediately.
+    if (remaining > 0 && this.pageActive && AppSession.get() === request.session) {
+      request.hideTimer = setTimeout(remove, remaining);
+    } else { remove(); }
+  }
+
+  private clearReloadFeedback(discardBusiness: boolean = false): void {
+    const requests: WalkReloadRequest[] = [];
+    this.reloadRequests.forEach((request: WalkReloadRequest) => requests.push(request));
+    this.reloadRequests.clear();
+    requests.forEach((request: WalkReloadRequest) => {
+      clearTimeout(request.slowTimer);
+      clearTimeout(request.hideTimer);
+      request.releaseFrame();
+    });
+    this.topReloadPending = false;
+    this.bottomReloadPending = false;
+    this.switchingProgramKey = '';
+    this.switchingVisualOwner = 0;
+    this.animateReload('top', false);
+    this.animateReload('bottom', false);
+    // Hiding a page only cancels its visuals. An already submitted native
+    // operation still owns its lock when the same page becomes visible again.
+    if (discardBusiness) {
+      this.busyOwner = 0;
+      this.busySession = undefined;
+      this.busy = false;
+      this.programSwitchInFlight = false;
+    }
+  }
+
+  private releaseBusy(request: number): void {
+    if (this.busyOwner === request) {
+      this.busy = false;
+      this.busyOwner = 0;
+      this.busySession = undefined;
+    }
+  }
+
+  private async waitForReloadAudio(id: number, session: AppSession): Promise<void> {
+    if (!this.isReloadCurrent(id)) { return; }
+    const configuration = this.reloadConfigurationKey(session);
+    const ready = await session.waitForCurrentAudioConfiguration();
+    // Another BPM/meter edit may supersede this preparation without failing.
+    // Its own request owns the new configuration and the remaining feedback.
+    if (this.isReloadCurrent(id) && !ready && configuration === this.reloadConfigurationKey(session)) {
+      throw new Error('节奏准备未完成，请稍后重试');
+    }
+  }
+
+  private reloadConfigurationKey(session: AppSession): string {
+    const c = session.controller;
+    return `${c.rhythm}|${c.bpm}|${c.beatsPerBar}|${c.beatUnit}|${c.soundId}|` +
+      `${c.drumProgram}|${c.beatPointStates.join(',')}`;
+  }
   onBackPress(): boolean {
+    if (this.showProgramMeterConfirm) {
+      this.showProgramMeterConfirm = false;
+      return true;
+    }
+    if (this.showStyles) {
+      this.showStyles = false;
+      return true;
+    }
     if (this.showRecordingError) {
       this.showRecordingError = false;
       return true;
@@ -205,12 +422,20 @@ struct MainPage {
     return true;
   }
   refresh(): void {
-    const c = AppSession.get()?.controller;
+    const session = AppSession.get();
+    let stale = false;
+    this.reloadRequests.forEach((request: WalkReloadRequest) => {
+      if (request.session !== session) { stale = true; }
+    });
+    if (stale || (this.busyOwner !== 0 && this.busySession !== session)) {
+      this.clearReloadFeedback(true);
+    }
+    const c = session?.controller;
     if (c === undefined) { return; }
     this.members = c.getMembers(); this.bpm = c.bpm; this.beats = c.beatsPerBar; this.unit = c.beatUnit;
     this.beatPointStates = c.beatPointStates.slice();
     this.leader = c.isLeader; this.state = c.state; this.sound = c.soundId; this.rhythm = c.rhythm;
-    this.drumStyleKey = c.drumProgram.length > 0 ? parseDrumProgram(c.drumProgram).styleKey : 'rock';
+    this.refreshProgramSelection();
     if (this.rhythm !== 3 && this.showStyles) { this.showStyles = false; }
     const storedBeatInBar = AppStorage.get<number>('currentBeatInBar') ?? 0;
     this.beat = storedBeatInBar > 0 ? storedBeatInBar - 1 : -1;
@@ -222,30 +447,138 @@ struct MainPage {
     }
   }
 
+  private refreshProgramSelection(): void {
+    const session = AppSession.get();
+    if (session === undefined) { return; }
+    const raw = session.controller.drumProgram;
+    if (this.walkProgramSession !== session) {
+      this.walkProgramSession = session;
+      this.walkBaseProgram = '';
+      this.walkBaseProgramName = '未命名编排';
+      this.walkBaseProgramLibraryId = '';
+      this.selectedProgramRaw = '';
+      this.selectedProgramKey = 'base';
+    }
+    if (session.controller.rhythm !== 3 || raw.length === 0) { return; }
+    const canonical = serializeDrumProgram(parseDrumProgram(raw));
+    // The return card is the complete entry arrangement, never the latest selection.
+    if (this.walkBaseProgram.length === 0) {
+      this.reloadSavedDrumPrograms();
+      const origin = resolveSavedDrumProgram(canonical, session.controller.drumProgramLibraryId, this.savedDrumPrograms);
+      this.walkBaseProgram = canonical;
+      this.walkBaseProgramLibraryId = origin?.id ?? '';
+      this.walkBaseProgramName = origin?.name ?? '未命名编排';
+      this.selectedProgramRaw = canonical;
+    }
+    if (this.programSwitchInFlight || this.selectedProgramRaw === canonical) { return; }
+    this.selectedProgramRaw = canonical;
+    this.selectedProgramKey = canonical === this.walkBaseProgram ? 'base' : '';
+    if (this.selectedProgramKey.length === 0) {
+      const owned = resolveSavedDrumProgram(canonical, session.controller.drumProgramLibraryId, this.savedDrumPrograms);
+      if (owned?.program === canonical) { this.selectedProgramKey = owned.id; }
+    }
+  }
+
+  private reloadSavedDrumPrograms(): void {
+    this.savedDrumPrograms = loadSavedDrumPrograms();
+    this.savedDrumProgramsRevision++;
+    if (this.selectedProgramKey !== 'base' && !this.savedDrumPrograms.some((entry: SavedDrumProgram) =>
+      entry.id === this.selectedProgramKey && entry.program === this.selectedProgramRaw)) {
+      // A replaced/deleted library version must not claim to be the currently audible snapshot.
+      this.selectedProgramRaw = '';
+    }
+  }
+
   private toggleStyleDrawer(): void {
-    if (!this.leader || this.rhythm !== 3) {
-      return;
+    if (!this.leader || this.rhythm !== 3) { return; }
+    if (!this.showStyles) {
+      this.reloadSavedDrumPrograms();
+      if (this.selectedProgramKey.length === 0) { this.selectedProgramRaw = ''; }
+      this.refreshProgramSelection();
     }
     this.showStyles = !this.showStyles;
   }
 
-  private async chooseDrumStyle(styleKey: string): Promise<void> {
+  private programStyleKeys(raw: string): string[] {
+    return raw.length > 0 ? drumProgramStyleKeys(parseDrumProgram(raw)) : [];
+  }
+
+  private programMeterSummary(raw: string): string {
+    const program = parseDrumProgram(raw);
+    return `${program.beatsPerBar}/${program.beatUnit} · ${program.sections.length}段`;
+  }
+
+  private async chooseDrumArrangement(key: string, raw: string, name: string): Promise<void> {
     const controller = AppSession.get()?.controller;
-    if (controller === undefined || !controller.isLeader || controller.rhythm !== 3) {
-      return;
-    }
+    if (controller === undefined || !controller.isLeader || controller.rhythm !== 3 ||
+      this.busy || this.exiting || this.returningToLobby || raw.length === 0) { return; }
     if (!isProDrumMachineAccessible()) {
-      showUserNotice('鼓机权益已到期，本轮播放继续；回到队伍大厅可查看解锁方式', 'walk-drum-style-locked');
+      showUserNotice('鼓机权益已到期，本轮播放继续；回到队伍大厅可查看解锁方式', 'walk-drum-program-locked');
       return;
     }
-    const program = controller.drumProgram.length > 0 ?
-      parseDrumProgram(controller.drumProgram) : defaultDrumProgram();
-    if (program.styleKey === styleKey) {
+    const program = parseDrumProgram(raw);
+    const canonical = serializeDrumProgram(program);
+    if (key === this.selectedProgramKey && canonical === this.selectedProgramRaw) { return; }
+    if (program.beatsPerBar !== controller.beatsPerBar || program.beatUnit !== controller.beatUnit) {
+      this.confirmProgramSession = AppSession.get();
+      this.confirmProgramKey = key;
+      this.confirmProgramRaw = canonical;
+      this.confirmProgramName = name;
+      this.showProgramMeterConfirm = true;
       return;
     }
-    program.styleKey = styleKey;
-    await controller.updateDrumProgram(serializeDrumProgram(program));
-    this.refresh();
+    await this.switchDrumArrangement(key, canonical);
+  }
+
+  private async confirmDrumArrangement(): Promise<void> {
+    if (!this.pageActive || this.confirmProgramSession !== AppSession.get()) {
+      this.showProgramMeterConfirm = false;
+      return;
+    }
+    const key = this.confirmProgramKey;
+    const raw = this.confirmProgramRaw;
+    this.showProgramMeterConfirm = false;
+    await this.switchDrumArrangement(key, raw);
+  }
+
+  private async switchDrumArrangement(key: string, raw: string): Promise<void> {
+    const session = AppSession.get();
+    if (session === undefined || !session.controller.isLeader || this.busy ||
+      this.exiting || this.returningToLobby || !isProDrumMachineAccessible()) { return; }
+    this.busy = true;
+    this.programSwitchInFlight = true;
+    this.switchingProgramKey = key;
+    const request = this.beginAction('walk-drum-program');
+    this.busyOwner = request;
+    this.busySession = session;
+    const loading = this.beginReloadFeedback('bottom', session, '正在切换编排…');
+    this.switchingVisualOwner = loading;
+    try {
+      if (!await this.waitForReloadFrame(loading)) { return; }
+      const libraryId = key === 'base' ? this.walkBaseProgramLibraryId :
+        this.savedDrumPrograms.find((entry: SavedDrumProgram) => entry.id === key)?.id ?? '';
+      const applied = await session.controller.updateDrumArrangement(raw, libraryId);
+      if (!this.isCurrentAction('walk-drum-program', request)) { return; }
+      if (!applied) { throw new Error('编排切换未完成，请重试'); }
+      await this.waitForReloadAudio(loading, session);
+      if (!this.isCurrentAction('walk-drum-program', request)) { return; }
+      this.selectedProgramKey = key;
+      this.selectedProgramRaw = raw;
+      try {
+        rememberRecentDrumProgram(raw, libraryId);
+      } catch (error) {
+        logUserFailure('walk-drum-program-recent', error);
+      }
+    } catch (error) {
+      this.reportActionFailure('walk-drum-program', request, error, '编排切换未完成，请重试');
+    } finally {
+      this.finishReloadFeedback(loading);
+      if (this.busyOwner === request) {
+        this.programSwitchInFlight = false;
+      }
+      this.releaseBusy(request);
+      if (this.isCurrentAction('walk-drum-program', request)) { this.refresh(); }
+    }
   }
 
   private startVisualLoop(): void {
@@ -618,16 +951,24 @@ struct MainPage {
 
   private async toggle(): Promise<void> {
     if (!this.leader || this.busy || this.exiting) { return; }
+    const session = AppSession.get();
+    if (session === undefined) { return; }
     this.busy = true;
     const request = this.beginAction('walk-playback');
+    this.busyOwner = request;
+    this.busySession = session;
+    const pausing = this.state === 'playing' || this.state === 'countdown';
+    const loading = this.beginReloadFeedback('bottom', session, pausing ? '正在暂停…' : '正在准备播放…');
     try {
-      const s = AppSession.get();
-      if (this.state === 'playing' || this.state === 'countdown') { await s?.leaderPause(); }
-      else if (this.state === 'paused') { await s?.leaderResume(); }
-      else { await s?.leaderStart(); }
+      if (!await this.waitForReloadFrame(loading)) { return; }
+      if (pausing) { await session.leaderPause(); }
+      else if (this.state === 'paused') { await session.leaderResume(); }
+      else { await session.leaderStart(); }
+      if (!pausing) { await this.waitForReloadAudio(loading, session); }
     } catch (error) { this.reportActionFailure('walk-playback', request, error, '播放操作失败，请重试'); }
     finally {
-      this.busy = false;
+      this.finishReloadFeedback(loading);
+      this.releaseBusy(request);
       if (this.isCurrentAction('walk-playback', request)) {
         this.refresh();
       }
@@ -635,35 +976,73 @@ struct MainPage {
   }
 
   private async applyMeter(beats: number, unit: number): Promise<void> {
-    if (!this.leader || this.exiting) {
+    if (!this.leader || this.busy || this.exiting || (this.beats === beats && this.unit === unit)) {
       return;
     }
     this.beats = beats;
     this.unit = unit;
-    const request = this.beginAction('walk-meter');
+    await this.runWalkingConfiguration('top', 'walk-meter', '拍号修改失败，请重试',
+      (session: AppSession) => session.controller.updateMeter(beats, unit));
+  }
+
+  private async runWalkingConfiguration(region: WalkReloadRegion, scope: string, failure: string,
+    operation: (session: AppSession) => Promise<void>): Promise<void> {
+    const session = AppSession.get();
+    if (!this.leader || this.busy || this.exiting || this.returningToLobby ||
+      session === undefined || !session.controller.isLeader) { return; }
+    const request = this.beginAction(scope);
+    const loading = this.beginReloadFeedback(region, session);
     try {
-      await AppSession.get()?.controller.updateMeter(beats, unit);
+      if (!await this.waitForReloadFrame(loading)) { return; }
+      await operation(session);
+      await this.waitForReloadAudio(loading, session);
     } catch (error) {
-      this.reportActionFailure('walk-meter', request, error, '拍号修改失败，请重试');
+      this.reportActionFailure(scope, request, error, failure);
     } finally {
-      if (this.isCurrentAction('walk-meter', request)) {
-        this.refresh();
-      }
+      this.finishReloadFeedback(loading);
+      if (this.isCurrentAction(scope, request)) { this.refresh(); }
     }
   }
 
+  private async applyBpm(value: number): Promise<void> {
+    if (value === AppSession.get()?.controller.bpm) { return; }
+    await this.runWalkingConfiguration('top', 'walk-bpm-top', '速度修改失败，请重试',
+      (session: AppSession) => session.controller.updateBpm(value));
+  }
+
+  private async changeBpm(delta: number): Promise<void> {
+    await this.runWalkingConfiguration('bottom', 'walk-bpm-bottom', '速度修改失败，请重试',
+      (session: AppSession) => session.controller.updateBpm(session.controller.bpm + delta));
+  }
+
+  private async changeSound(): Promise<void> {
+    await this.runWalkingConfiguration('bottom', 'walk-sound', '音色修改失败，请重试',
+      (session: AppSession) => session.controller.updateSoundId(session.controller.soundId + 1));
+  }
+
   private async cycleBeatPoint(index: number): Promise<void> {
-    if (!this.leader || this.busy || this.exiting) {
+    const controller = AppSession.get()?.controller;
+    const session = AppSession.get();
+    // A metronome button can deliver a late event after the room switches to drums.
+    if (!this.leader || this.busy || this.exiting || session === undefined ||
+      this.rhythm === 3 || controller?.rhythm === 3) {
       return;
     }
     this.busy = true;
     const request = this.beginAction('walk-beat-point');
+    this.busyOwner = request;
+    this.busySession = session;
+    const loading = this.beginReloadFeedback('top', session);
     try {
-      await AppSession.get()?.controller.cycleBeatPointState(index);
+      if (!await this.waitForReloadFrame(loading)) { return; }
+      if (this.rhythm === 3 || controller?.rhythm === 3) { return; }
+      await controller?.cycleBeatPointState(index);
+      await this.waitForReloadAudio(loading, session);
     } catch (error) {
       this.reportActionFailure('walk-beat-point', request, error, '拍点修改失败，请重试');
     } finally {
-      this.busy = false;
+      this.finishReloadFeedback(loading);
+      this.releaseBusy(request);
       if (this.isCurrentAction('walk-beat-point', request)) {
         this.refresh();
       }
@@ -705,20 +1084,31 @@ struct MainPage {
 
   @Builder
   private beatPoint(index: number) {
-    Stack()
-      .width(this.beatPointSize())
-      .height(this.beatPointHeight())
-      .backgroundColor(this.beatPointFill(index))
-      .border({
-        width: this.beat === index && (this.visualPlaying || this.visualCountIn) ? 3 : 1.5,
-        color: this.beat === index && (this.visualPlaying || this.visualCountIn) ? '#35D6E4' : INK
+    if (this.rhythm === 3) {
+      // Drum mode uses these as playback indicators; accent editing belongs
+      // to the arrangement. Block touches here so they cannot toggle the scene.
+      Row().width(this.beatPointSize()).height(this.beatPointHeight())
+        .backgroundColor(this.beatPointFill(index)).borderRadius(5)
+        .border({
+          width: this.beat === index && (this.visualPlaying || this.visualCountIn) ? 3 : 1.5,
+          color: this.beat === index && (this.visualPlaying || this.visualCountIn) ? '#35D6E4' : INK
+        })
+        .shadow(this.beat === index && (this.visualPlaying || this.visualCountIn) ?
+          { radius: 8, color: '#CC35D6E4', offsetX: 0, offsetY: 0 } :
+          { radius: 0, color: '#00000000', offsetX: 0, offsetY: 0 })
+        .hitTestBehavior(HitTestMode.Block).focusable(false).accessibilityLevel('no')
+    } else {
+      ActionButton({
+        active: this.leader && !this.busy, controlWidth: this.beatPointSize(), controlHeight: this.beatPointHeight(),
+        fill: this.beatPointFill(index), cornerRadius: 5,
+        lineWidth: this.beat === index && (this.visualPlaying || this.visualCountIn) ? 3 : 1.5,
+        lineColor: this.beat === index && (this.visualPlaying || this.visualCountIn) ? '#35D6E4' : INK,
+        inkShadow: this.beat === index && (this.visualPlaying || this.visualCountIn) ?
+          { radius: 8, color: '#CC35D6E4', offsetX: 0, offsetY: 0 } :
+          { radius: 0, color: '#00000000', offsetX: 0, offsetY: 0 },
+        accessibilityLabel: `调整第 ${index + 1} 拍的拍点`, action: () => { void this.cycleBeatPoint(index); }
       })
-      .borderRadius(5)
-      .shadow(this.beat === index && (this.visualPlaying || this.visualCountIn) ?
-        { radius: 8, color: '#CC35D6E4', offsetX: 0, offsetY: 0 } :
-        { radius: 0, color: '#00000000', offsetX: 0, offsetY: 0 })
-      .opacity(this.leader && !this.busy ? 1 : 0.82)
-      .onClick(() => { void this.cycleBeatPoint(index); })
+    }
   }
 
   private beatUnitIconPath(): string {
@@ -786,6 +1176,10 @@ struct MainPage {
   }
 
   private toggleChrome(): void {
+    if (this.showStyles) {
+      this.showStyles = false;
+      return;
+    }
     if (this.recordingState === 'preparing' || this.recordingState === 'stopping') { return; }
     animateTo({ duration: 220, curve: Curve.EaseInOut }, () => {
       this.chromeVisible = !this.chromeVisible;
@@ -873,24 +1267,33 @@ struct MainPage {
               .border({ width: 1.5, color: INK }).borderRadius(6).shadow(CONTROL_SHADOW)
               .onClick(() => this.continueWalkingAfterRecording())
             if (this.showRecordingSaving) {
-              Button('正在保存…', { type: ButtonType.Normal }).layoutWeight(1).height(46)
-                .fontSize(14).fontWeight(900).fontColor('#625C54').backgroundColor('#E7DFD3')
-                .border({ width: 1.5, color: '#A29B90' }).borderRadius(6).enabled(false)
+              ActionButton({
+                label: '正在保存…', active: false, controlHeight: 46, labelSize: 14, labelWeight: 900,
+                labelColor: '#625C54', fill: '#E7DFD3', lineWidth: 1.5, lineColor: '#A29B90', cornerRadius: 6,
+                action: () => {}
+              }).layoutWeight(1)
             } else if (this.showRecordingSaved) {
-              Button('退出去查看', { type: ButtonType.Normal }).layoutWeight(1).height(46)
-                .fontSize(14).fontWeight(900).fontColor(INK).backgroundColor(CORAL)
-                .border({ width: 1.5, color: INK }).borderRadius(6).shadow(CONTROL_SHADOW)
-                .enabled(!this.exiting).onClick(() => { void this.exitAndViewSavedRecording(); })
+              ActionButton({
+                label: '退出去查看', active: !this.exiting, controlHeight: 46,
+                labelSize: 14, labelWeight: 900, labelColor: INK, fill: CORAL,
+                lineWidth: 1.5, lineColor: INK, cornerRadius: 6, inkShadow: CONTROL_SHADOW,
+                action: () => { void this.exitAndViewSavedRecording(); }
+              }).layoutWeight(1)
             } else {
-              Button('重试保存', { type: ButtonType.Normal }).layoutWeight(1).height(46)
-                .fontSize(14).fontWeight(900).fontColor(INK).backgroundColor(CORAL)
-                .border({ width: 1.5, color: INK }).borderRadius(6).shadow(CONTROL_SHADOW)
-                .enabled(!this.retrySaveBusy).onClick(() => { void this.retryRecordingSave(); })
+              ActionButton({
+                label: '重试保存', active: !this.retrySaveBusy, controlHeight: 46,
+                labelSize: 14, labelWeight: 900, labelColor: INK, fill: CORAL,
+                lineWidth: 1.5, lineColor: INK, cornerRadius: 6, inkShadow: CONTROL_SHADOW,
+                action: () => { void this.retryRecordingSave(); }
+              }).layoutWeight(1)
             }
           }.width('100%')
           if (!this.showRecordingSaving && !this.showRecordingSaved) {
-            Text('放弃这段').fontSize(12).fontWeight(900).fontColor('#7C493A').padding(5)
-              .enabled(!this.retrySaveBusy).onClick(() => this.requestDiscardPendingRecording())
+            ActionButton({
+              label: '放弃这段', active: !this.retrySaveBusy, controlWidth: 'auto', controlHeight: 'auto',
+              labelSize: 12, labelWeight: 900, labelColor: '#7C493A', fill: Color.Transparent, contentPadding: 5,
+              action: () => this.requestDiscardPendingRecording()
+            })
           } else {
             Text(this.showRecordingSaving ? '保存只处理本机视频，不会暂停行进' : '关闭窗口后，也能从首页找到这段作品')
               .fontSize(10).fontColor('#777064').lineHeight(18).height(28)
@@ -932,14 +1335,18 @@ struct MainPage {
         Text('将删除这段尚未保存的画面和音轨。已保存的练习作品不会受影响。')
           .fontSize(13).fontColor('#625C54').lineHeight(21).width('100%')
         Row({ space: 10 }) {
-          Button('保留这段', { type: ButtonType.Normal }).layoutWeight(1).height(46)
-            .fontSize(13).fontWeight(900).fontColor(INK).backgroundColor(PAPER)
-            .border({ width: 1.5, color: INK }).borderRadius(6).shadow(CONTROL_SHADOW)
-            .enabled(!this.retrySaveBusy).onClick(() => this.showDiscardRecordingConfirm = false)
-          Button(this.retrySaveBusy ? '正在处理…' : '确认放弃', { type: ButtonType.Normal }).layoutWeight(1).height(46)
-            .fontSize(13).fontWeight(900).fontColor(INK).backgroundColor(CORAL)
-            .border({ width: 1.5, color: INK }).borderRadius(6).shadow(CONTROL_SHADOW)
-            .enabled(!this.retrySaveBusy).onClick(() => { void this.discardPendingRecording(); })
+          ActionButton({
+            label: '保留这段', active: !this.retrySaveBusy, controlHeight: 46,
+            labelSize: 13, labelWeight: 900, labelColor: INK, fill: PAPER,
+            lineWidth: 1.5, lineColor: INK, cornerRadius: 6, inkShadow: CONTROL_SHADOW,
+            action: () => this.showDiscardRecordingConfirm = false
+          }).layoutWeight(1)
+          ActionButton({
+            label: this.retrySaveBusy ? '正在处理…' : '确认放弃', active: !this.retrySaveBusy, controlHeight: 46,
+            labelSize: 13, labelWeight: 900, labelColor: INK, fill: CORAL,
+            lineWidth: 1.5, lineColor: INK, cornerRadius: 6, inkShadow: CONTROL_SHADOW,
+            action: () => { void this.discardPendingRecording(); }
+          }).layoutWeight(1)
         }.width('100%')
       }.width(RECORD_INTRO_WIDTH).padding(20).backgroundColor(PAPER).border({ width: 2, color: INK })
         .borderRadius(9).shadow(CARD_SHADOW)
@@ -1025,7 +1432,7 @@ struct MainPage {
       Row({ space: 5 }) {
         EditableBpm({
           value: this.bpm,
-          editable: this.leader,
+          editable: this.leader && !this.busy,
           inputId: 'walk-bpm-input',
           controlWidth: 105,
           controlHeight: 62,
@@ -1033,26 +1440,25 @@ struct MainPage {
           valueColor: CORAL,
           valueShadow: { radius: 0, offsetX: 3, offsetY: 3, color: INK },
           onCommit: (value: number): void => {
-            void AppSession.get()?.controller.updateBpm(value);
+            void this.applyBpm(value);
           }
         })
         Text('BPM').fontSize(20).fontWeight(900).fontStyle(FontStyle.Italic)
         Blank()
-        Text(`${this.beats}/${this.unit}`)
-          .width(76)
-          .height(46)
-          .fontSize(27)
-          .fontWeight(900)
-          .fontStyle(FontStyle.Italic)
-          .fontColor(CORAL)
-          .textAlign(TextAlign.Center)
-          .textShadow({ radius: 0, offsetX: 2, offsetY: 2, color: INK })
-          .opacity(this.leader && !this.busy ? 1 : 0.6)
-          .onClick(() => {
+        ActionButton({
+          active: this.leader && !this.busy, controlWidth: 76, controlHeight: 46, fill: Color.Transparent,
+          accessibilityLabel: `拍号 ${this.beats}/${this.unit}，编辑拍号`,
+          action: () => {
             if (this.leader && !this.busy) {
               this.meterEditorVisible = true;
             }
-          })
+          }
+        }) {
+          Text(`${this.beats}/${this.unit}`).width(76).height(46).fontSize(27).fontWeight(900)
+            .fontStyle(FontStyle.Italic).fontColor(CORAL).textAlign(TextAlign.Center)
+            .textShadow(this.leader && !this.busy ? { radius: 0, offsetX: 2, offsetY: 2, color: INK } :
+              { radius: 0, color: '#00000000' })
+        }
         Image($rawfile(this.beatUnitIconPath()))
           .width(38)
           .height(46)
@@ -1078,9 +1484,21 @@ struct MainPage {
           this.beatPointAreaWidth = width;
         }
       })
-      Text(this.visualCountIn ? '准备拍 · 下一小节出发' :
-        this.visualPlaying ? 'STEP BY STEP · SAME BEAT' : 'READY TO WALK?')
-        .fontSize(9).fontWeight(FontWeight.Bold).letterSpacing(1).width('100%')
+      Stack({ alignContent: Alignment.TopStart }) {
+        Text(this.visualCountIn ? '准备拍 · 下一小节出发' :
+          this.visualPlaying ? 'STEP BY STEP · SAME BEAT' : 'READY TO WALK?')
+          .fontSize(9).fontWeight(FontWeight.Bold).letterSpacing(1).width('100%')
+          .height(WALK_RELOAD_ROW_HEIGHT).opacity(1 - this.topReloadOpacity)
+          .accessibilityLevel(this.topReloadPending ? 'no' : 'yes')
+        Row({ space: WALK_RELOAD_TOP_GAP }) {
+          LoadingProgress().width(WALK_RELOAD_SPINNER_SIZE).height(WALK_RELOAD_SPINNER_SIZE)
+            .color('#6F6B64').enableLoading(this.topReloadPending).accessibilityLevel('no')
+          Text(this.topReloadText).fontSize(11).fontColor('#6F6B64').maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+        }.width('100%').height(WALK_RELOAD_ROW_HEIGHT).opacity(this.topReloadOpacity)
+          .accessibilityGroup(true).accessibilityText(this.topReloadText)
+          .accessibilityLevel(this.topReloadPending ? 'yes' : 'no-hide-descendants')
+      }.width('100%').height(WALK_RELOAD_ROW_HEIGHT).hitTestBehavior(HitTestMode.Block)
     }
     .width('100%').padding({ left: 14, right: 14, top: 8 + this.topSafeInset, bottom: 8 })
     .backgroundColor(WHITE)
@@ -1090,95 +1508,199 @@ struct MainPage {
   }
 
   @Builder
+  private programCard(key: string, name: string, raw: string) {
+    Stack({ alignContent: Alignment.TopStart }) {
+      Row().width(PROGRAM_CARD_WIDTH).height(PROGRAM_CARD_HEIGHT).backgroundColor(INK).borderRadius(6)
+        .translate({ x: PROGRAM_CARD_SHADOW, y: PROGRAM_CARD_SHADOW }).hitTestBehavior(HitTestMode.None)
+      Column({ space: PROGRAM_CARD_INNER_SPACE }) {
+        Row({ space: 3 }) {
+          Text(name).fontSize(12).fontWeight(900).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+            .fontColor(this.selectedProgramKey === key ? '#FFFFFF' : INK).layoutWeight(1)
+          // Keep a fixed status slot so selecting a card never reflows the three text rows.
+          Stack({ alignContent: Alignment.Center }) {
+            LoadingProgress().width(WALK_RELOAD_SPINNER_SIZE).height(WALK_RELOAD_SPINNER_SIZE)
+              .color(this.selectedProgramKey === key ? '#FFFFFF' : INK)
+              .enableLoading(this.switchingProgramKey === key && this.bottomReloadPending)
+              .opacity(this.switchingProgramKey === key ? this.bottomReloadOpacity : 0)
+              .accessibilityLevel('no').hitTestBehavior(HitTestMode.None)
+            if (this.selectedProgramKey === key) {
+              Text('✓').fontSize(14).fontWeight(900).fontColor('#FFFFFF')
+                .opacity(this.switchingProgramKey === key ? 1 - this.bottomReloadOpacity : 1)
+            }
+          }.width(PROGRAM_CARD_STATUS_SIZE).height(PROGRAM_CARD_STATUS_SIZE)
+        }.width('100%').height(PROGRAM_CARD_ROW1_HEIGHT)
+        Text(this.programMeterSummary(raw)).fontSize(10).fontWeight(FontWeight.Bold)
+          .fontColor(this.selectedProgramKey === key ? '#FFFFFF' : INK).width('100%')
+          .height(PROGRAM_CARD_ROW2_HEIGHT).lineHeight(PROGRAM_CARD_ROW2_HEIGHT)
+        Row({ space: 3 }) {
+          ForEach(this.programStyleKeys(raw).slice(0, 2), (styleKey: string) => {
+            Text(styleByKey(styleKey).name).fontSize(9).minFontSize(7).maxFontSize(9)
+              .maxLines(1).fontWeight(900).fontColor(INK).width(34).height(16).textAlign(TextAlign.Center)
+              .padding({ left: 3, right: 3 })
+              .backgroundColor(styleByKey(styleKey).color).borderRadius(3)
+          }, (styleKey: string) => styleKey)
+          if (this.programStyleKeys(raw).length > 2) {
+            Text('…').width(12).fontSize(12).fontWeight(900).fontColor(this.selectedProgramKey === key ? '#FFFFFF' : INK)
+          }
+        }.width('100%').height(PROGRAM_CARD_ROW3_HEIGHT).alignItems(VerticalAlign.Center)
+      }.width(PROGRAM_CARD_WIDTH).height(PROGRAM_CARD_HEIGHT).padding(7)
+        .justifyContent(FlexAlign.Start)
+        .backgroundColor(this.selectedProgramKey === key ? CORAL : '#FFFFFF')
+        .border({ width: 1.2, color: INK }).borderRadius(6).alignItems(HorizontalAlign.Start)
+    }.width(PROGRAM_CARD_WIDTH + PROGRAM_CARD_SHADOW).height(PROGRAM_CARD_HEIGHT + PROGRAM_CARD_SHADOW)
+      .id(`walk-program-${key}`).onClick(() => { void this.chooseDrumArrangement(key, raw, name); })
+  }
+
+  @Builder
+  private programDrawer() {
+    Stack({ alignContent: Alignment.TopStart }) {
+      Row().width('100%').height(PROGRAM_DRAWER_HEIGHT).backgroundColor(INK).borderRadius(8)
+        .translate({ x: 3, y: 3 }).hitTestBehavior(HitTestMode.None)
+      Column({ space: 6 }) {
+        Row({ space: PROGRAM_DRAWER_GAP }) {
+          Text('本编排').width(PROGRAM_CARD_WIDTH + PROGRAM_CARD_SHADOW).fontSize(11).fontWeight(900)
+          Text('我的编排').fontSize(11).fontWeight(900).layoutWeight(1)
+          Button('×', { type: ButtonType.Normal }).width(24).height(22).padding(0).fontSize(22)
+            .fontColor(INK).backgroundColor(Color.Transparent).onClick(() => { this.showStyles = false; })
+        }.width('100%').height(22)
+        Row({ space: PROGRAM_DRAWER_GAP }) {
+          this.programCard('base', this.walkBaseProgramName, this.walkBaseProgram)
+          Scroll() {
+            Row({ space: 8 }) {
+              if (this.savedDrumPrograms.length === 0) {
+                Text('还没有保存的节奏').fontSize(11).fontColor('#625C54').width(140).height(PROGRAM_CARD_HEIGHT)
+              }
+              ForEach(this.savedDrumPrograms, (entry: SavedDrumProgram) => {
+                this.programCard(entry.id, entry.name, entry.program)
+              }, (entry: SavedDrumProgram) => `${entry.id}:${this.savedDrumProgramsRevision}`)
+            }.padding({ right: PROGRAM_CARD_SHADOW })
+          }.scrollable(ScrollDirection.Horizontal).scrollBar(BarState.Off).layoutWeight(1)
+            .height(PROGRAM_CARD_HEIGHT + PROGRAM_CARD_SHADOW).clip(true)
+        }.width('100%').alignItems(VerticalAlign.Top)
+      }.width('100%').height(PROGRAM_DRAWER_HEIGHT).padding(8).backgroundColor(LILAC)
+        .border({ width: 1.5, color: INK }).borderRadius(8)
+    }.width('100%').height(PROGRAM_DRAWER_HEIGHT + PROGRAM_CARD_SHADOW).id('walk-program-drawer')
+  }
+
+  @Builder
+  private programMeterConfirmOverlay() {
+    Stack({ alignContent: Alignment.Center }) {
+      Column({ space: 14 }) {
+        Text('切换这套编排？').fontSize(23).fontWeight(900).fontColor(INK).width('100%')
+        Text(this.confirmProgramName).fontSize(16).fontWeight(900).fontColor(INK).width('100%')
+        Text(`将从 ${this.beats}/${this.unit} 切换为 ${parseDrumProgram(this.confirmProgramRaw).beatsPerBar}/${parseDrumProgram(this.confirmProgramRaw).beatUnit}，BPM 保持 ${this.bpm}`)
+          .fontSize(13).fontColor('#625C54').lineHeight(21).width('100%')
+        Row({ space: 12 }) {
+          Button('取消', { type: ButtonType.Normal }).layoutWeight(1).height(42).backgroundColor(PAPER)
+            .fontColor(INK).border({ width: 1.5, color: INK }).borderRadius(6)
+            .onClick(() => { this.showProgramMeterConfirm = false; })
+          Button('切换编排', { type: ButtonType.Normal }).layoutWeight(1).height(42).backgroundColor(CORAL)
+            .fontColor(INK).fontWeight(900).border({ width: 1.5, color: INK }).borderRadius(6)
+            .onClick(() => { void this.confirmDrumArrangement(); })
+        }.width('100%')
+      }.width('86%').padding(20).backgroundColor(PAPER).border({ width: 2, color: INK }).borderRadius(8)
+    }.width('100%').height('100%').backgroundColor('#72000000').zIndex(100)
+  }
+
+  @Builder
   private bottomPanel() {
     Column({ space: 7 }) {
       if (this.showStyles && this.rhythm === 3) {
-        Column() {
-          Scroll() {
-            Row({ space: 8 }) {
-              ForEach(DRUM_STYLES, (style: DrumStyle) => {
-                Column({ space: 2 }) {
-                  Text(style.name).fontSize(13).fontWeight(900)
-                  Text(style.caption).fontSize(9).fontWeight(FontWeight.Bold)
-                }
-                .padding({ left: 12, right: 12, top: 7, bottom: 7 })
-                .backgroundColor(this.drumStyleKey === style.key ? style.color : PAPER)
-                .border({ width: 1, color: INK })
-                .borderRadius(5)
-                .shadow(CONTROL_SHADOW)
-                .onClick(() => { void this.chooseDrumStyle(style.key); })
-              }, (style: DrumStyle) => style.key)
-            }.padding({ left: 8, right: 8, top: 4, bottom: 5 })
-          }
-          .scrollable(ScrollDirection.Horizontal)
-          .scrollBar(BarState.Off)
-          .width('100%')
-          .height(58)
-        }
-        .width('100%')
-        .backgroundColor(LILAC)
-        .border({ width: 1, color: INK })
-        .borderRadius(5)
-        .shadow(CARD_SHADOW)
+        this.programDrawer()
       }
       Row({ space: 10 }) {
         Column({ space: 2 }) {
           if (this.rhythm === 3) {
-            Button({ type: ButtonType.Normal }) {
-              Text('风').fontSize(17).fontWeight(900).fontColor(INK).lineHeight(22)
-            }.width(38).height(38).padding(0).backgroundColor(this.showStyles ? LILAC : PAPER)
-              .fontColor(INK).border({ width: 1.5, color: INK }).borderRadius(5).shadow(CONTROL_SHADOW)
-              .enabled(this.leader).onClick(() => this.toggleStyleDrawer())
-            Text('风格').fontSize(9).fontWeight(FontWeight.Bold)
+            ActionButton({
+              active: this.leader, controlWidth: 38, controlHeight: 38, fill: this.showStyles ? LILAC : PAPER,
+              accessibilityLabel: this.showStyles ? '收起鼓机编排' : '展开鼓机编排',
+              lineWidth: 1.5, lineColor: INK, cornerRadius: 5, inkShadow: CONTROL_SHADOW,
+              action: () => this.toggleStyleDrawer()
+            }) {
+              Column({ space: 3 }) {
+                Row().width(19).height(3).backgroundColor(INK).borderRadius(2)
+                Row().width(14).height(3).backgroundColor(INK).borderRadius(2)
+                Row().width(19).height(3).backgroundColor(INK).borderRadius(2)
+              }.alignItems(HorizontalAlign.Start)
+            }
+            Text('编排').fontSize(9).fontWeight(FontWeight.Bold)
           } else {
-            Button({ type: ButtonType.Normal }) {
+            ActionButton({
+              active: this.leader, controlWidth: 38, controlHeight: 38, fill: PAPER,
+              accessibilityLabel: `切换音色，当前${this.sounds[this.sound]}`,
+              lineWidth: 1.5, lineColor: INK, cornerRadius: 5, inkShadow: CONTROL_SHADOW,
+              action: () => { void this.changeSound(); }
+            }) {
               Text('♪').fontSize(21).fontWeight(900).fontColor(INK).lineHeight(24)
-            }.width(38).height(38).padding(0).backgroundColor(PAPER).fontColor(INK)
-              .border({ width: 1.5, color: INK }).borderRadius(5).shadow(CONTROL_SHADOW)
-              .enabled(this.leader).onClick(() => { void AppSession.get()?.controller.updateSoundId(this.sound + 1); })
+            }
             Text(this.sounds[this.sound]).fontSize(9).fontWeight(FontWeight.Bold)
           }
         }
-        Button({ type: ButtonType.Normal }) {
+        ActionButton({
+          active: this.leader && !this.busy && this.bpm > 40, controlWidth: 38, controlHeight: 38, fill: PAPER,
+          accessibilityLabel: '降低 BPM',
+          lineWidth: 1.5, lineColor: INK, cornerRadius: 5, inkShadow: CONTROL_SHADOW,
+          action: () => { void this.changeBpm(-1); }
+        }) {
           Text('−').fontSize(22).fontWeight(900).fontColor(INK).lineHeight(24)
-        }.width(38).height(38).padding(0).backgroundColor(PAPER).fontColor(INK)
-          .border({ width: 1.5, color: INK }).borderRadius(5).shadow(CONTROL_SHADOW)
-          .enabled(this.leader && this.bpm > 40).onClick(() => { void AppSession.get()?.controller.updateBpm(this.bpm - 1); })
-        Button({ type: ButtonType.Normal }) {
+        }
+        ActionButton({
+          active: this.leader && !this.busy, controlWidth: 68, controlHeight: 68, fill: CORAL,
+          accessibilityLabel: this.state === 'playing' || this.state === 'countdown' ? '停止播放' : '开始播放',
+          lineWidth: 2, lineColor: INK, cornerRadius: 34,
+          inkShadow: { radius: INK_SHADOW_RADIUS, offsetX: 3, offsetY: 3, color: INK },
+          action: () => { void this.toggle(); }
+        }) {
           Image($rawfile(this.state === 'playing' || this.state === 'countdown' ?
             'comic/icons/stop.svg' : 'comic/icons/play.svg'))
             .width(32).height(32).objectFit(ImageFit.Contain)
         }
-          .width(68).height(68).padding(0).backgroundColor(CORAL).fontColor(INK)
-          .border({ width: 2, color: INK }).borderRadius(34).shadow({ radius: INK_SHADOW_RADIUS, offsetX: 3, offsetY: 3, color: INK })
-          .enabled(this.leader && !this.busy).onClick(() => { void this.toggle(); })
-        Button({ type: ButtonType.Normal }) {
+        ActionButton({
+          active: this.leader && !this.busy && this.bpm < 240, controlWidth: 38, controlHeight: 38, fill: PAPER,
+          accessibilityLabel: '提高 BPM',
+          lineWidth: 1.5, lineColor: INK, cornerRadius: 5, inkShadow: CONTROL_SHADOW,
+          action: () => { void this.changeBpm(1); }
+        }) {
           Text('+').fontSize(22).fontWeight(900).fontColor(INK).lineHeight(24)
-        }.width(38).height(38).padding(0).backgroundColor(PAPER).fontColor(INK)
-          .border({ width: 1.5, color: INK }).borderRadius(5).shadow(CONTROL_SHADOW)
-          .enabled(this.leader && this.bpm < 240).onClick(() => { void AppSession.get()?.controller.updateBpm(this.bpm + 1); })
+        }
         Column({ space: 2 }) {
-          Button({ type: ButtonType.Normal }) {
+          ActionButton({
+            active: this.recordingState !== 'stopping', controlWidth: 38, controlHeight: 38, fill: PAPER,
+            accessibilityLabel: this.recordingState === 'recording' ? '停止本机录制' : '开始本机录制',
+            lineWidth: 1.5, lineColor: INK, cornerRadius: 5, inkShadow: CONTROL_SHADOW,
+            action: () => this.requestRecording()
+          }) {
             if (this.recordingState === 'recording') {
               Rect().width(15).height(15).radius(2).fill(CORAL).stroke(INK).strokeWidth(1.2)
             } else {
               Circle().width(17).height(17).fill(CORAL).stroke(INK).strokeWidth(1.2)
             }
-          }.width(38).height(38).padding(0).backgroundColor(PAPER).fontColor(INK)
-            .border({ width: 1.5, color: INK }).borderRadius(5).shadow(CONTROL_SHADOW)
-            .enabled(this.recordingState !== 'stopping').onClick(() => this.requestRecording())
+          }
           Text(this.recordingState === 'recording' ? '停止' : '录制').fontSize(9).fontWeight(FontWeight.Bold)
         }
       }.width('100%').justifyContent(FlexAlign.SpaceBetween).alignItems(VerticalAlign.Center)
-      Text(this.leader ? (this.state === 'idle' ? '点击播放 · 全队一起出发' :
-        this.state === 'paused' ? '已暂停 · 点击继续' :
-          this.visualCountIn ? '准备拍…' : 'ONEBEAT / 同拍进行中') : '节奏由队长控制')
-        .fontSize(10).fontWeight(FontWeight.Bold).fontStyle(FontStyle.Italic).letterSpacing(0.5)
+      Stack({ alignContent: Alignment.Center }) {
+        Text(this.leader ? (this.state === 'idle' ? '点击播放 · 全队一起出发' :
+          this.state === 'paused' ? '已暂停 · 点击继续' :
+            this.visualCountIn ? '准备拍…' : 'ONEBEAT / 同拍进行中') : '节奏由队长控制')
+          .fontSize(10).fontWeight(FontWeight.Bold).fontStyle(FontStyle.Italic).letterSpacing(0.5)
+          .height(WALK_RELOAD_ROW_HEIGHT).opacity(1 - this.bottomReloadOpacity)
+          .accessibilityLevel(this.bottomReloadPending ? 'no' : 'yes')
+        Row({ space: WALK_RELOAD_BOTTOM_GAP }) {
+          LoadingProgress().width(WALK_RELOAD_SPINNER_SIZE).height(WALK_RELOAD_SPINNER_SIZE)
+            .color('#6F6B64').enableLoading(this.bottomReloadPending).accessibilityLevel('no')
+          Text(this.bottomReloadText).fontSize(11).fontColor('#6F6B64').maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+        }.width('100%').height(WALK_RELOAD_ROW_HEIGHT).justifyContent(FlexAlign.Center)
+          .opacity(this.bottomReloadOpacity).accessibilityGroup(true).accessibilityText(this.bottomReloadText)
+          .accessibilityLevel(this.bottomReloadPending ? 'yes' : 'no-hide-descendants')
+      }.width('100%').height(WALK_RELOAD_ROW_HEIGHT).hitTestBehavior(HitTestMode.Block)
     }
     .width('100%').padding({ left: 14, right: 14, top: 8, bottom: 12 + this.bottomSafeInset })
     .backgroundColor(WHITE)
     .border({ width: { top: 3 }, color: INK })
-    .translate({ y: this.chromeVisible ? 0 : 190 + this.bottomSafeInset })
+    .translate({ y: this.chromeVisible ? 0 : BOTTOM_PANEL_HIDDEN_OFFSET + this.bottomSafeInset +
+      (this.showStyles && this.rhythm === 3 ? PROGRAM_DRAWER_HEIGHT + 7 : 0) })
     .opacity(this.chromeVisible ? 1 : 0)
   }
 
@@ -1246,6 +1768,9 @@ struct MainPage {
       }
       if (this.showExitConfirm) {
         this.exitConfirmOverlay()
+      }
+      if (this.showProgramMeterConfirm) {
+        this.programMeterConfirmOverlay()
       }
       if (this.meterEditorVisible) {
         MeterEditorOverlay({

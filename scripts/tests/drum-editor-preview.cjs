@@ -36,6 +36,18 @@ const catalog = load(ets('audio/DrumMachineCatalog.ets'), {
   './RhythmTimeline': timeline,
   '../common/MeterModel': meter
 });
+function memoryDrumLibrary(appStorage) {
+  const files = new Map();
+  const library = load(ets('audio/DrumProgramLibrary.ets'), {
+    './DrumMachineCatalog': catalog, '../common/MeterModel': meter,
+    '../common/AtomicTextFile': {
+      readOptionalSync: path => files.get(path) ?? '',
+      writeAtomicSync: (path, contents) => files.set(path, contents)
+    }
+  }, { AppStorage: appStorage });
+  library.initializeDrumProgramLibrary({ filesDir: '/test-files' });
+  return library;
+}
 const source = ets('pages/DrumMachinePage.ets');
 function numericConstant(name) {
   const match = source.match(new RegExp(`const ${name}: number = ([\\d.]+);`));
@@ -97,6 +109,15 @@ function harness() {
   const toasts = [];
   const failures = [];
   const storageWrites = [];
+  const storage = new Map();
+  const appStorage = {
+    setOrCreate: (key, value) => { storage.set(key, value); storageWrites.push(plain([key, value])); },
+    get: key => storage.get(key) ?? ''
+  };
+  const rectangles = {
+    'dm-scroll-content': { windowOffset: { x: 0, y: 0 }, size: { width: 390, height: 1400 } },
+    'dm-page-scroll': { windowOffset: { x: 0, y: 0 }, size: { width: 390, height: 760 } }
+  };
   const teamMeterCalls = [];
   const teamProgramCalls = [];
   const teamMeterResponses = [];
@@ -131,17 +152,29 @@ function harness() {
       beatsPerBar: 4,
       beatUnit: 4,
       drumProgram: '',
+      drumProgramLibraryId: undefined,
       getProDrumEditorSettings() { return undefined; },
       rememberProDrumEditorSettings() {},
+      rememberDrumProgramLibraryId(raw, id) {
+        if (this.rhythm !== 3 || this.drumProgram !== raw) return false;
+        this.drumProgramLibraryId = id;
+        return true;
+      },
       async updateMeter(beats, unit) {
         teamMeterCalls.push([beats, unit]);
         const response = teamMeterResponses.shift();
         if (response !== undefined) await response.promise;
       },
-      async updateDrumProgram(raw) {
+      async updateDrumArrangement(raw, libraryId) {
         teamProgramCalls.push(raw);
         const response = teamProgramResponses.shift();
-        if (response !== undefined) await response.promise;
+        const applied = response === undefined ? true : await response.promise;
+        if (applied !== false) {
+          const program = JSON.parse(raw);
+          this.drumProgram = raw; this.drumProgramLibraryId = libraryId; this.rhythm = 3;
+          this.beatsPerBar = program.beatsPerBar; this.beatUnit = program.beatUnit;
+        }
+        return applied !== false;
       }
     },
     async previewDrumProgram(raw, looping, bpm, beats, positionBeats = 0, sectionKeys) {
@@ -213,6 +246,7 @@ function harness() {
     archivedTimers.set(id, timer);
     return id;
   }
+  const library = memoryDrumLibrary(appStorage);
   const { DrumMachinePage } = load(businessSource, {
     '@kit.ArkUI': {
       promptAction: { showToast: ({ message }) => toasts.push(message) },
@@ -228,13 +262,16 @@ function harness() {
       userErrorMessage: (_error, fallback) => fallback
     },
     '../audio/DrumMachineCatalog': catalog,
+    '../audio/DrumProgramLibrary': library,
     '../audio/RhythmTimeline': timeline
   }, {
     Date: { now() {
       if (persistenceTime === undefined) throw new Error('Audition progress must use the transport snapshot, never Date.now()');
       return persistenceTime;
     } },
-    AppStorage: { setOrCreate: (...args) => storageWrites.push(plain(args)), get() { return ''; } },
+    AppStorage: appStorage,
+    TouchType: { Down: 0, Up: 1, Move: 2, Cancel: 3 },
+    vp2px: value => value,
     Scroller: class {
       offset = 0;
       calls = [];
@@ -250,13 +287,28 @@ function harness() {
     clearTimeout: id => timers.delete(id)
   });
   const page = new DrumMachinePage();
+  page.getUIContext = () => ({
+    px2vp: value => value,
+    vp2px: value => value,
+    getComponentUtils: () => ({ getRectangleById(id) {
+      if (Object.hasOwn(rectangles, id)) {
+        assert.ok(rectangles[id], `Missing rectangle: ${id}`);
+        return rectangles[id];
+      }
+      if (/^dm-(style|pattern|fill|frequency)-\d+$/.test(id)) {
+        return { windowOffset: { x: 70, y: 120 }, size: { width: 140, height: 34 } };
+      }
+      throw new Error(`Missing rectangle: ${id}`);
+    } })
+  });
   page.sections = [{
-    id: 'B', patternIndex: 2, repeats: 8, fillIndex: 2, fillEvery: 4,
+    id: 'B', styleKey: 'rock', patternIndex: 2, repeats: 8, fillIndex: 2, fillEvery: 4,
     customRows: Array.from({ length: catalog.DRUM_TRACKS.length }, (_, i) => i === 0 ? '1000000010000000' : '0000000000000000'),
     customFillRows: Array.from({ length: catalog.DRUM_TRACKS.length }, (_, i) => i === 1 ? '0000000000001111' : '0000000000000000')
   }];
   return {
-    page, session, calls, audioActions, responses, updateCalls, updateResponses, toasts, failures, timers, archivedTimers, storageWrites,
+    page, session, library, calls, audioActions, responses, updateCalls, updateResponses, toasts, failures, timers, archivedTimers, storageWrites,
+    storage, rectangles,
     teamMeterCalls, teamProgramCalls, teamMeterResponses, teamProgramResponses,
     backCount: () => backCount,
     replaceSession: () => { sessionOverride = { ...session, controller: { ...session.controller } }; },
@@ -374,6 +426,26 @@ async function testIndependentSectionExpansion() {
     p.toggleSectionExpanded(p.sections.length);
     assert.deepEqual(expansion(p), beforeInvalid, 'Out-of-range card actions cannot modify expansion');
   }
+}
+
+function testAddSectionPresetFromPrevious() {
+  const h = harness(), p = h.page;
+  p.styleKey = 'rock';
+  p.sections = [{ id: 'A', styleKey: 'jazz', patternIndex: 1, repeats: 4, fillIndex: 2, fillEvery: 8 }];
+  p.expandedSections = [true];
+  p.sectionPlaybackKeys = ['section-1'];
+  p.addSection();
+  assert.equal(p.sections.length, 2);
+  assert.equal(p.sectionStyleKey(1), 'jazz', 'New section keeps the previous section style');
+  assert.equal(p.sections[1].patternIndex, 2, 'Pattern cycles to the next preset');
+  assert.equal(p.sections[1].fillIndex, 0, 'Fill wraps to a different preset');
+  p.sections = [{ id: 'A', patternIndex: 2, repeats: 4, fillIndex: 1, fillEvery: 4 }];
+  p.expandedSections = [true];
+  p.sectionPlaybackKeys = ['section-1'];
+  p.addSection();
+  assert.equal(p.sectionStyleKey(1), 'rock');
+  assert.equal(p.sections[1].patternIndex, 0, 'Pattern wraps after the last rock preset');
+  assert.equal(p.sections[1].fillIndex, 2, 'Fill advances from the previous index');
 }
 
 async function testSectionExpansionStructure() {
@@ -908,10 +980,11 @@ async function testLocalSaveAndEditingFeedback() {
   assert.equal(p.saveNameError, '');
   assert.equal(p.savedPrograms[0].name, '夜跑');
   assert.equal(p.saveDialogVisible, false);
-  assert.deepEqual(h.toasts, ['已保存到我的节奏'], 'Persistence has one lightweight result notice');
+  assert.deepEqual(h.toasts, ['已保存到我的编排'], 'Persistence has one lightweight result notice');
   const original = p.savedPrograms[0].program;
   const writesBeforeOverwrite = h.storageWrites.length;
   p.updateRepeats(0, 1);
+  p.loadedProgramId = ''; // A different, unnamed draft still confirms a colliding name.
   p.openSaveDialog();
   p.saveName = '夜跑';
   p.confirmNamedSave();
@@ -926,7 +999,7 @@ async function testLocalSaveAndEditingFeedback() {
   p.persistNamedSave(true);
   assert.equal(p.savedPrograms.length, 1);
   assert.notEqual(p.savedPrograms[0].program, original);
-  assert.deepEqual(h.toasts, ['已保存到我的节奏', '已更新我的节奏']);
+  assert.deepEqual(h.toasts, ['已保存到我的编排', '已更新我的编排']);
 
   h.toasts.length = 0;
   const saved = p.savedPrograms[0];
@@ -955,29 +1028,27 @@ async function testLocalSaveAndEditingFeedback() {
 }
 
 async function testTeamApplyFeedbackOwnership() {
-  for (const stage of ['meter', 'program']) {
-    for (const transition of ['leave', 'replace']) {
-      for (const failed of [false, true]) {
-        const h = harness();
-        const p = h.page;
-        const result = deferred();
-        (stage === 'meter' ? h.teamMeterResponses : h.teamProgramResponses).push(result);
-        const applying = p.applyToTeam();
-        await settle();
-        assert.equal(p.saving, true);
-        await p.applyToTeam();
-        assert.equal(h.teamMeterCalls.length, 1, 'Repeated applies while busy must share one operation');
-        if (transition === 'leave') p.aboutToDisappear();
-        else h.replaceSession();
-        if (failed) result.reject(new Error('Former page or session failed'));
-        else result.resolve();
-        await applying;
-        assert.deepEqual(h.toasts, [], 'An obsolete team apply must not publish success or error feedback');
-        assert.deepEqual(h.failures, [], 'An obsolete team apply must not log a current-operation failure');
-        assert.equal(h.backCount(), 0, 'A late apply cannot navigate away from a different page or session');
-        assert.equal(h.teamProgramCalls.length, stage === 'meter' ? 0 : 1,
-          'A page/session change after meter preparation must not submit the remaining program update');
-      }
+  for (const transition of ['leave', 'replace']) {
+    for (const failed of [false, true]) {
+      const h = harness();
+      const p = h.page;
+      const result = deferred();
+      h.teamProgramResponses.push(result);
+      const applying = p.applyToTeam();
+      await settle();
+      assert.equal(p.saving, true);
+      await p.applyToTeam();
+      assert.equal(h.teamProgramCalls.length, 1, 'Repeated applies while busy must share one atomic operation');
+      assert.equal(h.teamMeterCalls.length, 0, 'Meter and arrangement must not be submitted as competing room updates');
+      if (transition === 'leave') p.aboutToDisappear();
+      else h.replaceSession();
+      if (failed) result.reject(new Error('Former page or session failed'));
+      else result.resolve(true);
+      await applying;
+      assert.deepEqual(h.toasts, [], 'An obsolete team apply must not publish success or error feedback');
+      assert.deepEqual(h.failures, [], 'An obsolete team apply must not log a current-operation failure');
+      assert.equal(h.backCount(), 0, 'A late apply cannot navigate away from a different page or session');
+      assert.equal(h.teamProgramCalls.length, 1, 'A page/session change cannot submit a second configuration update');
     }
   }
 
@@ -989,7 +1060,7 @@ async function testTeamApplyFeedbackOwnership() {
     const applying = p.applyToTeam();
     await settle();
     if (failed) result.reject(new Error('Current apply failed'));
-    else result.resolve();
+    else result.resolve(true);
     await applying;
     assert.equal(p.saving, false);
     assert.deepEqual(h.toasts, [failed ? '应用失败，请重试' : '鼓机编排已应用到队伍'],
@@ -1002,20 +1073,21 @@ async function testTeamApplyFeedbackOwnership() {
   const p = h.page;
   const old = deferred();
   const current = deferred();
-  h.teamMeterResponses.push(old, current);
+  h.teamProgramResponses.push(old, current);
   const former = p.applyToTeam();
   p.aboutToDisappear();
   p.aboutToAppear();
   assert.equal(p.saving, false, 'A new page appearance must not inherit an old apply spinner');
   const latest = p.applyToTeam();
-  old.resolve();
+  old.resolve(true);
   await former;
   assert.equal(p.saving, true, 'An older completion cannot clear the new page apply state');
   assert.deepEqual(h.toasts, []);
-  current.resolve();
+  current.resolve(true);
   await latest;
   assert.equal(p.saving, false);
-  assert.equal(h.teamProgramCalls.length, 1);
+  assert.equal(h.teamProgramCalls.length, 2, 'Each page lifetime owns one complete atomic configuration');
+  assert.equal(h.teamMeterCalls.length, 0);
   assert.deepEqual(h.toasts, ['鼓机编排已应用到队伍']);
   assert.equal(h.backCount(), 1);
 }
@@ -1254,7 +1326,7 @@ async function testSongToEditorHandoff() {
       assert.equal(p.playingSongSection, -1, 'A queued song paint cannot highlight a card during editor audition');
       assert.deepEqual(h.calls[1].program, {
         styleKey: p.styleKey, beatsPerBar: 4, beatUnit: 4,
-        sections: [{ id: 'B', patternIndex: 0, repeats: 1, fillIndex: 0, fillEvery: 0,
+        sections: [{ id: 'B', styleKey: p.sectionStyleKey(0), patternIndex: 0, repeats: 1, fillIndex: 0, fillEvery: 0,
           customPattern: { subdivision: 3, events: draft } }]
       }, 'The handoff must play the current unsaved main/fill draft, not the previously playing song');
       assert.equal(h.calls[1].positionBeats, 3, 'The handoff must use the editor cursor, not song progress');
@@ -1363,7 +1435,7 @@ async function testDraftsAndLifecycle() {
     const audition = h.calls[0];
     assert.deepEqual(audition.program, {
       styleKey: p.styleKey, beatsPerBar: 4, beatUnit: 4,
-      sections: [{ id: 'B', patternIndex: 0, repeats: 1, fillIndex: 0, fillEvery: 0, customPattern: { subdivision: p.editorSubdivision, events: plain(p.editorEvents) } }]
+      sections: [{ id: 'B', styleKey: p.sectionStyleKey(0), patternIndex: 0, repeats: 1, fillIndex: 0, fillEvery: 0, customPattern: { subdivision: p.editorSubdivision, events: plain(p.editorEvents) } }]
     }, 'Both grid modes must play exactly the visible draft as one looping bar, without scheduled fills');
     assert.equal(audition.looping, true);
     assert.equal(audition.bpm, 120);
@@ -2300,6 +2372,7 @@ async function main() {
   await testSongHighlightPresentationDeadlines();
   await testSongEditDuringPresentationRecoveryGap();
   await testIndependentSectionExpansion();
+  testAddSectionPresetFromPrevious();
   await testSectionExpansionStructure();
   await testSectionCollapsePreservesPlayback();
   await testSongBehindEditor();
@@ -2321,10 +2394,14 @@ async function main() {
     'Each card header must use the tested independent expansion action');
   assert.ok(sectionBuilder.includes('if (this.isSectionExpanded(index))'),
     'Card contents must follow their own expansion state');
-  assert.ok(sectionBuilder.includes('.enabled(this.sections.length > 1)'),
-    'The final remaining section must have a disabled delete control');
-  assert.ok(source.includes('.enabled(this.sections.length < 8)'),
-    'The eighth section must disable adding another section');
+  assert.match(sectionBuilder,
+    /ActionButton\(\{ label: '×', active: this\.sections\.length > 1,[\s\S]*?action: \(\) => this\.requestDeleteSection\(index\)/,
+    'The final remaining section must disable its native delete action through the shared button');
+  const addSectionBuilder = source.slice(source.indexOf('  private addSectionAction()'),
+    source.indexOf('  private programActions()'));
+  assert.match(addSectionBuilder,
+    /ActionButton\(\{ label: '\+ 新增段落', active: this\.sections\.length < 8,[\s\S]*?action: \(\) => this\.addSection\(\)/,
+    'The eighth section must disable the shared add action without freezing the section count');
   assert.equal(sectionBuilder.includes('this.selectedSection === index'), false,
     'The editor-selected section must never control card visibility');
   assert.equal(sectionBuilder.includes('.onClick(() => this.selectedSection = index)'), false,
@@ -2334,7 +2411,10 @@ async function main() {
   assert.ok(sectionBuilder.includes('this.playingSongSection === index') && sectionBuilder.includes('DRUM_SECTION_PLAYING_COLOR'),
     'Card background must react to the audible whole-song section independently of editor selection');
   for (const fill of [false, true]) {
-    assert.ok(sectionBuilder.includes(`this.isSongPhrasePlaying(index, ${fill}) ? DRUM_PHRASE_PLAYING_COLOR : PAPER`),
+    assert.ok(sectionBuilder.includes(`this.phraseField(index, ${fill})`),
+      'Both phrase rows must use the shared field component');
+    const fieldBuilder = source.slice(source.indexOf('  private phraseField('), source.indexOf('  private formRule('));
+    assert.ok(fieldBuilder.includes('this.isSongPhrasePlaying(index, fill) ? styleByKey(this.sectionStyleKey(index)).color : PAPER'),
       'Both phrase dropdowns must use the tested exclusive playback highlight');
   }
   const editorBuilder = source.slice(source.indexOf('  private editorOverlay()'), source.indexOf('\n  build()'));
@@ -2349,8 +2429,16 @@ async function main() {
     'The grid cursor must span the track viewport and let cell taps pass through it');
   assert.ok(editorBuilder.includes('Scroll(this.editorScroller)') && editorBuilder.includes('this.updateEditorViewport(Number(area.width))'),
     'The tested scroll controller and resize handler must be attached to the grid');
+  assert.match(editorBuilder,
+    /ActionButton\(\{ active: this\.editorStepEditable\(step\),[\s\S]*?controlWidth: DRUM_EDITOR_BUTTON_WIDTH, controlHeight: this\.editorTrackRowHeight - 8,[\s\S]*?hardShadow: \{ offsetX: DRUM_EDITOR_CELL_SHADOW_OFFSET,\s*offsetY: DRUM_EDITOR_CELL_SHADOW_OFFSET, color: INK \},[\s\S]*?action: \(\) => this\.toggleStep\(trackIndex, step\)/,
+    'Fill editability, fixed cell bounds and the original ink offset must share one composed native button');
+  assert.match(editorBuilder,
+    /ActionButton\(\{ active: this\.editorEventTickEditable\(event\.tick\),[\s\S]*?controlWidth: DRUM_EDITOR_OFF_GRID_HIT_SIZE, controlHeight: this\.editorTrackRowHeight,[\s\S]*?action: \(\) => this\.snapEditorEventToGrid\(trackIndex, event\.tick\)/,
+    'Off-grid events must keep their full hit target and locked main-pattern guard');
+  assert.equal(numericConstant('DRUM_EDITOR_CELL_SHADOW_OFFSET'), 1,
+    'The shared cell surface must retain its one-vp shadow registration');
   console.log('PASS drum editor audition: exclusive main/fill dropdown highlight follows audible fill windows, transport-driven song card highlight, unequal-repeat boundaries and loops, frozen timing and stale visual races, independent manual card expansion, add/delete/load card state, fold preserves playback, continuous background song across draft navigation, explicit song-to-draft handoff, pending song ownership, unsaved events, subdivision switches and nearest snapping, startup races, numbered cursor seek, cursor resume, stop cursor capture, exit cleanup, transport cursor and viewport following');
 }
 
-module.exports = { harness, load, ets, meter, catalog, plain };
+module.exports = { harness, load, ets, meter, catalog, plain, memoryDrumLibrary };
 if (require.main === module) main().catch(error => { console.error(error); process.exitCode = 1; });

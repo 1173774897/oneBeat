@@ -79,6 +79,7 @@ function harness({ sampleBankClass, engineOptions = {}, drumAccess = () => true 
     beatPointStates = Array(4).fill('normal');
     constructor(_id, leader) { this.isLeader = leader; }
     setUiListener(listener) { this.listener = listener; }
+    setTransportPreparationHandler(handler) { this.prepareAudio = handler; }
     emit() { this.listener(); }
     getRemoteSessionEndReason() { return undefined; }
     getOffsetMs() { return 0; }

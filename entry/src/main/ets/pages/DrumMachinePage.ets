@@ -1,4 +1,5 @@
 import { router } from '@kit.ArkUI';
+import { ActionButton } from '../components/ActionButton';
 import { AppSession } from '../app/AppSession';
 import {
   CORAL,
@@ -12,6 +13,7 @@ import {
 } from '../components/ComicKit';
 import { isProDrumMachineAccessible } from '../store/EntitlementStore';
 import { EditableBpm } from '../components/EditableBpm';
+import { DrumPaper } from '../components/DrumPaper';
 import { EditableMeter, MeterEditorOverlay } from '../components/EditableMeter';
 import { beatUnitLabel } from '../common/MeterModel';
 import { logUserFailure, showUserNotice, userErrorMessage } from '../common/UserFeedback';
@@ -28,6 +30,9 @@ import {
   DrumTrack,
   DRUM_STYLES,
   DRUM_TRACKS,
+  drumSectionStyleKey,
+  drumProgramStyleKeys,
+  drumProgramStyleSummary,
   drumFillDescription,
   drumFillNames,
   drumPatternDescription,
@@ -37,16 +42,17 @@ import {
   styleByKey
 } from '../audio/DrumMachineCatalog';
 
+import {
+  SavedDrumProgram, loadSavedDrumPrograms, writeSavedDrumPrograms,
+  loadRecentDrumProgram, rememberRecentDrumProgram, resolveSavedDrumProgram
+} from '../audio/DrumProgramLibrary';
+
 const FILL_FREQUENCIES: number[] = [1, 2, 4, 8, 16];
 const EDITED_LABEL: string = '已编辑';
 
-interface SavedDrumProgram {
-  id: string;
-  name: string;
-  program: string;
-}
-
 interface DrumSectionSelectionState {
+  playbackKey: string;
+  styleKey: string;
   patternIndex: number;
   fillIndex: number;
   customRows?: string[];
@@ -67,7 +73,7 @@ const DRUM_EDITOR_BUTTON_WIDTH: number = Math.max(1, DRUM_EDITOR_CELL_WIDTH - DR
 const DRUM_EDITOR_CELL_RADIUS: number = 4;
 const DRUM_EDITOR_PANEL_MAX_WIDTH: number = 560;
 const DRUM_EDITOR_PANEL_MAX_HEIGHT: number = 720;
-const DRUM_EDITOR_PANEL_RADIUS: number = 16;
+const DRUM_EDITOR_PANEL_RADIUS: number = 8;
 const DRUM_EDITOR_OVERLAY_SIDE_INSET: number = 16;
 const DRUM_EDITOR_OVERLAY_VERTICAL_INSET: number = 24;
 const DRUM_EDITOR_LABEL_WIDTH: number = 56;
@@ -84,16 +90,61 @@ const DRUM_EDITOR_PREVIEW_FRAME_MS: number = 32;
 const DRUM_EDITOR_SUBDIVISIONS: number[] = [4, 3, 6];
 const DRUM_EDITOR_SUBDIVISION_HEIGHT: number = 34;
 const DRUM_EDITOR_SUBDIVISION_GAP: number = 6;
+const DRUM_EDITOR_CONTROL_SHADOW_OFFSET: number = 2;
+const DRUM_EDITOR_ACTION_SHADOW_OFFSET: number = 4;
+const DRUM_EDITOR_CELL_SHADOW_OFFSET: number = 1;
 const DRUM_EDITOR_OFF_GRID_SIZE: number = 10;
 const DRUM_EDITOR_OFF_GRID_HIT_SIZE: number = 18;
 const DRUM_EDITOR_FILL_FOCUS_DELAY_MS: number = 1000;
-const DRUM_EDITOR_LOCKED_CELL_OPACITY: number = 0.52;
 const DRUM_SECTION_PLAYING_COLOR: string = '#EDE4FA';
 const DRUM_SECTION_TITLE_GAP: number = 4;
 const DRUM_SECTION_TOGGLE_WIDTH: number = 22;
-const DRUM_PHRASE_PLAYING_COLOR: string = '#FFF0B8';
 const DRUM_SONG_PREVIEW_PROGRESS_MS: number = 16;
 const DRUM_SONG_PREVIEW_UPDATE_DELAY_MS: number = 150;
+
+const DRUM_OUTER_RADIUS: number = 8;
+const DRUM_INNER_RADIUS: number = 6;
+const DRUM_PAGE_SIDE_INSET: number = 16;
+const DRUM_SAVED_CARD_SIZE: number = 112;
+const DRUM_POPOVER_MIN_WIDTH: number = 180;
+const DRUM_STYLE_POPOVER_WIDTH: number = 320;
+const DRUM_STYLE_POPOVER_THREE_COLUMN_MIN: number = 300;
+const DRUM_POPOVER_GAP: number = 2;
+const DRUM_POPOVER_TAIL: number = 6;
+const DRUM_POPOVER_PADDING: number = 8;
+const DRUM_POPOVER_HEADER_HEIGHT: number = 20;
+const DRUM_POPOVER_HEADER_GAP: number = 8;
+const DRUM_POPOVER_OPTION_GAP: number = 4;
+const DRUM_POPOVER_ROW_HEIGHT: number = 30;
+const DRUM_POPOVER_SHADOW_OFFSET: number = 3;
+const DRUM_CARD_HARD_SHADOW: ShadowOptions = { radius: 0, offsetX: 4, offsetY: 4, color: INK };
+const DRUM_HEADER_HEIGHT: number = 48;
+const DRUM_SETTINGS_HEIGHT: number = 42;
+const DRUM_BODY_INSET: number = 0;
+const DRUM_CONTENT_TOP_INSET: number = 12;
+const DRUM_CONTENT_BOTTOM_INSET: number = 20;
+const DRUM_FOOTER_INSET: number = 12;
+const DRUM_ACTION_HEIGHT: number = 44;
+const DRUM_ADD_SECTION_HEIGHT: number = 36;
+const DRUM_BLOCK_GAP: number = 12;
+const DRUM_ARRANGEMENT_TITLE_HEIGHT: number = 32;
+const DRUM_ARRANGEMENT_META_HEIGHT: number = 18;
+const DRUM_ARRANGEMENT_HEADING_GAP: number = 4;
+const DRUM_ARRANGEMENT_ACTION_WIDTH: number = 74;
+const DRUM_ARRANGEMENT_ACTION_HEIGHT: number = 28;
+const DRUM_ARRANGEMENT_ACTION_GAP: number = 8;
+const DRUM_NEW_PROGRAM_DIALOG_MAX_WIDTH: number = 360;
+const DRUM_NEW_PROGRAM_DIALOG_PADDING: number = 18;
+const DRUM_NEW_PROGRAM_DIALOG_BUTTON_HEIGHT: number = 42;
+const DRUM_SECTION_TAB_WIDTH: number = 96;
+const DRUM_SECTION_HEADER_HEIGHT: number = 34;
+const DRUM_SECTION_STYLE_WIDTH: number = 84;
+const DRUM_FORM_ROW_HEIGHT: number = 40;
+const DRUM_FIELD_HEIGHT: number = 30;
+const DRUM_FIELD_LABEL_WIDTH: number = 42;
+const DRUM_PHRASE_ICON_SIZE: number = 18;
+const DRUM_PHRASE_ACTION_WIDTH: number = 32;
+const DRUM_CONTROL_HARD_SHADOW: ShadowOptions = { radius: 0, offsetX: 2, offsetY: 2, color: INK };
 
 @Entry
 @Component
@@ -121,6 +172,10 @@ struct DrumMachinePage {
   @State dropdownAnchorY: number = 0;
   @State dropdownMenuWidth: number = 126;
   @State dropdownKind: string = '';
+  @State dropdownAbove: boolean = false;
+  @State dropdownTailX: number = 24;
+  @State pendingStyleKey: string = '';
+  @State pendingStyleSection: number = -1;
   @State dropdownSectionIndex: number = 0;
   @State saveDialogVisible: boolean = false;
   @State overwriteDialogVisible: boolean = false;
@@ -129,6 +184,10 @@ struct DrumMachinePage {
   @State saveNameError: string = '';
   @State songPreviewMessage: string = '';
   @State savedPrograms: SavedDrumProgram[] = [];
+  @State savedProgramsRevision: number = 0;
+  @State loadedProgramId: string = '';
+  @State newProgramDialogVisible: boolean = false;
+  @State newProgramAfterSave: boolean = false;
   @StorageLink('safeAreaTop') topSafeInset: number = 0;
   @StorageLink('safeAreaBottom') bottomSafeInset: number = 0;
   private sectionPreviewStopTimerId: number = -1;
@@ -143,6 +202,11 @@ struct DrumMachinePage {
   private sectionPlaybackKeys: string[] = [];
   private nextSectionPlaybackKey: number = 0;
   private contextStates: DrumContextState[] = [];
+  private dropdownAnchorId: string = '';
+  private dropdownTouchX: number = 0;
+  private dropdownTouchY: number = 0;
+  private dropdownTouchMoved: boolean = false;
+  private readonly pageScroller: Scroller = new Scroller();
   private readonly editorScroller: Scroller = new Scroller();
   private editorViewportWidth: number = 0;
   private editorPreviewTimerId: number = -1;
@@ -151,6 +215,7 @@ struct DrumMachinePage {
   private editorFillFocusTimerId: number = -1;
   private bpmUpdateRevision: number = 0;
   private pageLifetimeRevision: number = 0;
+  private cleanProgramRaw: string = '';
 
   aboutToAppear(): void {
     this.pageLifetimeRevision++;
@@ -161,22 +226,40 @@ struct DrumMachinePage {
       return;
     }
     this.loadSavedPrograms();
+    this.loadedProgramId = '';
+    this.newProgramDialogVisible = false;
+    this.newProgramAfterSave = false;
+    this.saveDialogVisible = false;
+    this.overwriteDialogVisible = false;
     const controller = AppSession.get()?.controller;
     let program = defaultDrumProgram();
+    let sourceId: string | undefined = '';
+    let restoringRecent: boolean = false;
     if (controller !== undefined && controller.drumProgram.length > 0) {
       program = parseDrumProgram(controller.drumProgram);
+      sourceId = controller.drumProgramLibraryId;
     } else {
-      const saved = AppStorage.get<string>('myDrumProgram') ?? '';
-      if (saved.length > 0) {
-        program = parseDrumProgram(saved);
+      const recent = loadRecentDrumProgram();
+      if (recent !== undefined) {
+        program = parseDrumProgram(recent.program);
+        sourceId = recent.libraryId;
+        restoringRecent = true;
       }
     }
+    const owned = resolveSavedDrumProgram(serializeDrumProgram(program), sourceId, this.savedPrograms);
+    this.loadedProgramId = owned?.id ?? '';
     this.styleKey = program.styleKey;
     this.sections = program.sections;
     this.resetSectionPlaybackKeys();
     this.expandedSections = this.sections.map((_section: DrumSection, index: number) => index === 0);
     const editorSettings = controller?.getProDrumEditorSettings();
-    if (editorSettings !== undefined) {
+    if (restoringRecent) {
+      // A recent arrangement includes its own meter. The room still owns live BPM;
+      // restoring the local draft must not publish a meter change before Apply.
+      this.beatsPerBar = program.beatsPerBar;
+      this.beatUnit = program.beatUnit;
+      this.bpm = controller?.bpm ?? this.bpm;
+    } else if (editorSettings !== undefined) {
       this.beatsPerBar = editorSettings.beatsPerBar;
       this.beatUnit = editorSettings.beatUnit;
       this.bpm = editorSettings.bpm;
@@ -192,6 +275,7 @@ struct DrumMachinePage {
     }
     this.contextStates = [];
     this.storeCurrentContext();
+    this.cleanProgramRaw = owned?.program ?? serializeDrumProgram(this.currentProgram());
   }
 
   private rememberEditedTempoAndMeter(): void {
@@ -200,6 +284,26 @@ struct DrumMachinePage {
   }
 
   onBackPress(): boolean {
+    if (this.overwriteDialogVisible) {
+      this.returnToRename();
+      return true;
+    }
+    if (this.saveDialogVisible) {
+      this.cancelSaveFlow();
+      return true;
+    }
+    if (this.newProgramDialogVisible) {
+      this.cancelNewProgram();
+      return true;
+    }
+    if (this.pendingStyleKey.length > 0) {
+      this.pendingStyleKey = '';
+      return true;
+    }
+    if (this.dropdownTarget.length > 0) {
+      this.closeDropdown();
+      return true;
+    }
     if (this.meterEditorVisible) {
       this.meterEditorVisible = false;
       return true;
@@ -212,21 +316,78 @@ struct DrumMachinePage {
   }
 
   private loadSavedPrograms(): void {
-    const raw = AppStorage.get<string>('savedDrumPrograms') ?? '';
-    if (raw.length === 0) {
-      this.savedPrograms = [];
+    this.savedPrograms = loadSavedDrumPrograms();
+    this.savedProgramsRevision++;
+  }
+
+  private hasUnsavedProgramChanges(): boolean {
+    // Tempo is preserved by New and is not part of a library arrangement.
+    return serializeDrumProgram(this.currentProgram()) !== this.cleanProgramRaw;
+  }
+
+  private requestNewProgram(): void {
+    if (this.saving || this.newProgramDialogVisible || this.saveDialogVisible || this.overwriteDialogVisible) {
       return;
     }
-    try {
-      this.savedPrograms = JSON.parse(raw) as SavedDrumProgram[];
-    } catch (_e) {
-      this.savedPrograms = [];
+    this.closeDropdown();
+    if (this.hasUnsavedProgramChanges()) {
+      this.newProgramDialogVisible = true;
+    } else {
+      this.beginNewProgram();
     }
   }
 
+  private cancelNewProgram(): void {
+    this.newProgramDialogVisible = false;
+    this.newProgramAfterSave = false;
+  }
+
+  private saveBeforeNewProgram(): void {
+    this.newProgramDialogVisible = false;
+    this.newProgramAfterSave = true;
+    this.openSaveDialog();
+  }
+
+  private cancelSaveFlow(): void {
+    this.saveDialogVisible = false;
+    this.overwriteDialogVisible = false;
+    this.newProgramAfterSave = false;
+  }
+
+  private beginNewProgram(): void {
+    this.stopActivePreview();
+    this.bpmUpdateRevision++;
+    this.clearEditorFillFocusTimer();
+    this.closeDropdown();
+    this.pendingStyleKey = '';
+    this.editorVisible = false;
+    this.meterEditorVisible = false;
+    this.cancelSaveFlow();
+    this.newProgramDialogVisible = false;
+    this.loadedProgramId = '';
+
+    const fresh = defaultDrumProgram();
+    this.styleKey = fresh.styleKey;
+    this.selectedSection = 0;
+    this.expandedSections = [true];
+    this.sections = fresh.sections;
+    this.resetSectionPlaybackKeys();
+    this.contextStates = [];
+    this.storeCurrentContext();
+    this.cleanProgramRaw = serializeDrumProgram(this.currentProgram());
+    // New only replaces the local draft. Meter/tempo and the applied team program stay owned by the session.
+    this.pageScroller.scrollTo({ xOffset: 0, yOffset: 0, animation: false });
+  }
+
   private openSaveDialog(): void {
-    this.dropdownTarget = '';
-    this.saveName = `我的节奏 ${this.savedPrograms.length + 1}`;
+    this.closeDropdown();
+    const loaded = this.loadedProgram();
+    if (loaded !== undefined) {
+      this.saveName = loaded.name;
+      this.persistNamedSave(true, loaded.id);
+      return;
+    }
+    this.saveName = '';
     this.saveNameError = '';
     this.saveDialogVisible = true;
   }
@@ -248,29 +409,65 @@ struct DrumMachinePage {
     this.persistNamedSave(false);
   }
 
-  private persistNamedSave(overwrite: boolean): void {
+  private loadedProgram(): SavedDrumProgram | undefined {
+    return this.savedPrograms.find((saved: SavedDrumProgram) => saved.id === this.loadedProgramId);
+  }
+
+  private loadedProgramName(): string {
+    return this.loadedProgram()?.name ?? '';
+  }
+
+  private arrangementTitleName(): string {
+    return this.loadedProgramName() || '未命名';
+  }
+
+  private persistNamedSave(overwrite: boolean, targetId: string = ''): void {
     const name = this.saveName.trim();
     const program = serializeDrumProgram(this.currentProgram());
     const next: SavedDrumProgram[] = [];
     let replaced = false;
+    let savedId = '';
     for (let i = 0; i < this.savedPrograms.length; i++) {
       const saved = this.savedPrograms[i];
-      if (overwrite && saved.name === name) {
+      if (overwrite && (targetId.length > 0 ? saved.id === targetId : saved.name === name)) {
         next.push({ id: saved.id, name: name, program: program });
         replaced = true;
+        savedId = saved.id;
       } else {
         next.push(saved);
       }
     }
     if (!replaced) {
-      next.unshift({ id: `rhythm-${Date.now()}`, name: name, program: program });
+      savedId = `rhythm-${Date.now()}`;
+      next.unshift({ id: savedId, name: name, program: program });
+    }
+    try {
+      writeSavedDrumPrograms(next);
+    } catch (error) {
+      // A save continuation may discard the old draft only after persistence completes.
+      this.saveNameError = '保存失败，请重试';
+      logUserFailure('drum.save', error);
+      showUserNotice('保存失败，当前编排仍然保留', 'drum.save');
+      if (this.newProgramAfterSave && !this.saveDialogVisible && !this.overwriteDialogVisible) {
+        this.newProgramAfterSave = false;
+        this.newProgramDialogVisible = true;
+      }
+      return;
     }
     this.savedPrograms = next;
-    AppStorage.setOrCreate('savedDrumPrograms', JSON.stringify(next));
-    AppStorage.setOrCreate('myDrumProgram', program);
+    // ForEach reuses closures by key. A stable record ID alone keeps old meter/style/callback data after overwrite.
+    this.savedProgramsRevision++;
+    // An explicitly loaded/saved record owns later saves by ID, even after its draft changes.
+    this.loadedProgramId = savedId;
+    this.cleanProgramRaw = program;
+    AppSession.get()?.controller.rememberDrumProgramLibraryId(program, savedId);
+    this.rememberRecentProgram(program, savedId);
     this.saveDialogVisible = false;
     this.overwriteDialogVisible = false;
-    showUserNotice(replaced ? '已更新我的节奏' : '已保存到我的节奏', 'drum.save');
+    showUserNotice(replaced ? '已更新我的编排' : '已保存到我的编排', 'drum.save');
+    if (this.newProgramAfterSave) {
+      this.beginNewProgram();
+    }
   }
 
   private returnToRename(): void {
@@ -285,13 +482,35 @@ struct DrumMachinePage {
         next.push(this.savedPrograms[i]);
       }
     }
+    try {
+      writeSavedDrumPrograms(next);
+    } catch (error) {
+      logUserFailure('drum.delete', error);
+      showUserNotice('删除失败，原编排仍然保留，请重试', 'drum.delete');
+      return;
+    }
     this.savedPrograms = next;
-    AppStorage.setOrCreate('savedDrumPrograms', JSON.stringify(next));
+    this.savedProgramsRevision++;
+    if (this.loadedProgramId === id) {
+      this.loadedProgramId = '';
+      this.cleanProgramRaw = '';
+    }
+  }
+
+  private rememberRecentProgram(raw: string, libraryId: string): void {
+    try {
+      rememberRecentDrumProgram(raw, libraryId);
+    } catch (error) {
+      // The saved library / applied room state already committed; a cache failure must not undo either one.
+      logUserFailure('drum.recent', error);
+    }
   }
 
   private loadSavedProgram(saved: SavedDrumProgram): void {
     const wasPreviewing = this.previewTarget.length > 0;
     const program = parseDrumProgram(saved.program);
+    this.loadedProgramId = saved.id;
+    this.newProgramAfterSave = false;
     this.styleKey = program.styleKey;
     this.beatsPerBar = program.beatsPerBar;
     this.beatUnit = program.beatUnit;
@@ -303,6 +522,7 @@ struct DrumMachinePage {
     this.contextStates = [];
     this.storeCurrentContext();
     this.rememberEditedTempoAndMeter();
+    this.cleanProgramRaw = serializeDrumProgram(this.currentProgram());
     if (wasPreviewing) {
       void this.refreshActivePreview();
     }
@@ -314,10 +534,14 @@ struct DrumMachinePage {
   }
 
   private savedProgramStyle(saved: SavedDrumProgram): string {
-    return styleByKey(parseDrumProgram(saved.program).styleKey).name;
+    return drumProgramStyleSummary(parseDrumProgram(saved.program));
   }
 
   aboutToDisappear(): void {
+    this.cancelSaveFlow();
+    this.newProgramDialogVisible = false;
+    this.closeDropdown();
+    this.pendingStyleKey = '';
     this.pageLifetimeRevision++;
     this.bpmUpdateRevision++;
     this.clearEditorFillFocusTimer();
@@ -329,7 +553,7 @@ struct DrumMachinePage {
       styleKey: this.styleKey,
       beatsPerBar: this.beatsPerBar,
       beatUnit: this.beatUnit,
-      sections: this.sections
+      sections: this.sections.map((section: DrumSection) => this.copySection(section))
     };
   }
 
@@ -351,19 +575,20 @@ struct DrumMachinePage {
   private copySection(section: DrumSection): DrumSection {
     return {
       id: section.id,
+      styleKey: section.styleKey ?? this.styleKey,
       patternIndex: section.patternIndex,
       repeats: section.repeats,
       fillIndex: section.fillIndex,
       fillEvery: section.fillEvery,
-      customRows: this.copyOptionalRows(section.customRows),
-      customFillRows: this.copyOptionalRows(section.customFillRows),
       customPattern: cloneDrumCustomPattern(section.customPattern),
-      customFill: cloneDrumCustomPattern(section.customFill)
+      customFill: cloneDrumCustomPattern(section.customFill),
+      customRows: this.copyOptionalRows(section.customRows),
+      customFillRows: this.copyOptionalRows(section.customFillRows)
     };
   }
 
   private contextKey(styleKey: string, beats: number, unit: number): string {
-    return `${styleKey}-${beats}-${unit}`;
+    return `${beats}-${unit}`;
   }
 
   private copyOptionalRows(rows?: string[]): string[] | undefined {
@@ -377,6 +602,8 @@ struct DrumMachinePage {
     const selections: DrumSectionSelectionState[] = [];
     for (let i = 0; i < this.sections.length; i++) {
       selections.push({
+        playbackKey: this.playbackSectionKeys()[i],
+        styleKey: this.sectionStyleKey(i),
         patternIndex: this.sections[i].patternIndex,
         fillIndex: this.sections[i].fillIndex,
         customRows: this.copyOptionalRows(this.sections[i].customRows),
@@ -414,8 +641,11 @@ struct DrumMachinePage {
     const next: DrumSection[] = [];
     for (let i = 0; i < this.sections.length; i++) {
       const section = this.copySection(this.sections[i]);
-      if (saved !== undefined && i < saved.selections.length) {
-        const selection = saved.selections[i];
+      // Letters and indices can move after deletion; drafts belong to the stable section identity.
+      const selection = saved?.selections.find((value: DrumSectionSelectionState) =>
+        value.playbackKey === this.playbackSectionKeys()[i]);
+      if (selection !== undefined) {
+        section.styleKey = selection.styleKey;
         section.patternIndex = selection.patternIndex;
         section.fillIndex = selection.fillIndex;
         section.customRows = this.copyOptionalRows(selection.customRows);
@@ -435,19 +665,49 @@ struct DrumMachinePage {
     this.sections = next;
   }
 
-  private chooseStyle(styleKey: string): void {
-    if (this.styleKey === styleKey) {
+  private sectionStyleKey(index: number): string {
+    const section = this.sections[index];
+    return section === undefined ? this.styleKey : drumSectionStyleKey(this.currentProgramBase(), section);
+  }
+
+  private currentProgramBase(): DrumProgram {
+    return { styleKey: this.styleKey, beatsPerBar: this.beatsPerBar, beatUnit: this.beatUnit,
+      sections: this.sections };
+  }
+
+  private chooseSectionStyle(index: number, key: string): void {
+    this.closeDropdown();
+    if (index < 0 || index >= this.sections.length || this.sectionStyleKey(index) === key) {
       return;
     }
-    this.storeCurrentContext();
-    this.styleKey = styleKey;
-    this.restoreContext(styleKey, this.beatsPerBar, this.beatUnit);
-    this.dropdownTarget = '';
-    if (this.previewTarget === 'song') {
-      this.queueSongPreviewUpdate();
-    } else {
-      void this.refreshActivePreview();
+    if (this.hasCustomPattern(this.sections[index]) || this.hasCustomFill(this.sections[index])) {
+      this.pendingStyleSection = index;
+      this.pendingStyleKey = key;
+      return;
     }
+    this.applySectionStyle(index, key, false);
+  }
+
+  private applySectionStyle(index: number, key: string, keepCustom: boolean): void {
+    if (index < 0 || index >= this.sections.length) {
+      this.pendingStyleKey = '';
+      return;
+    }
+    const section = this.copySection(this.sections[index]);
+    section.styleKey = styleByKey(key).key;
+    section.patternIndex = 0;
+    section.fillIndex = 0;
+    // A new preset must not silently overwrite a hand-edited phrase.
+    if (!keepCustom) {
+      section.customPattern = undefined;
+      section.customFill = undefined;
+      section.customRows = undefined;
+      section.customFillRows = undefined;
+    }
+    this.pendingStyleKey = '';
+    this.replaceSection(index, section);
+    this.storeCurrentContext();
+    this.notifySectionEdited(index);
   }
 
   private replaceSection(index: number, section: DrumSection): void {
@@ -476,26 +736,103 @@ struct DrumMachinePage {
     }
   }
 
-  private openDropdownFromAnchor(target: string, anchorId: string, menuWidth: number): void {
+  private styleDropdownColumns(): number {
+    return this.dropdownMenuWidth >= DRUM_STYLE_POPOVER_THREE_COLUMN_MIN ? 3 : 2;
+  }
+
+  private styleDropdownRows(): number[] {
+    const rows: number[] = [];
+    for (let row = 0; row < Math.ceil(DRUM_STYLES.length / this.styleDropdownColumns()); row++) {
+      rows.push(row);
+    }
+    return rows;
+  }
+
+  private dropdownHeight(): number {
+    const count = this.dropdownKind === 'style' ? this.styleDropdownRows().length :
+      this.dropdownKind === 'frequency' ? FILL_FREQUENCIES.length : 3;
+    const headerHeight = this.dropdownKind === 'style' ? DRUM_POPOVER_HEADER_HEIGHT + DRUM_POPOVER_HEADER_GAP : 0;
+    return DRUM_POPOVER_PADDING * 2 + headerHeight +
+      DRUM_POPOVER_TAIL + count * DRUM_POPOVER_ROW_HEIGHT + Math.max(0, count - 1) * DRUM_POPOVER_OPTION_GAP;
+  }
+
+  private openDropdownFromAnchor(target: string, anchorId: string): void {
     if (this.dropdownTarget === target) {
       this.closeDropdown();
       return;
     }
     const parts = target.split('-');
-    const sectionIndex = Number.parseInt(parts[parts.length - 1], 10);
-    this.dropdownKind = parts.slice(1, parts.length - 1).join('-');
-    this.dropdownSectionIndex = sectionIndex;
-    this.dropdownMenuWidth = menuWidth;
+    this.dropdownKind = parts[1];
+    this.dropdownSectionIndex = Number.parseInt(parts[parts.length - 1], 10);
+    this.dropdownAnchorId = anchorId;
     try {
-      const uiContext = this.getUIContext();
-      const rect = uiContext.getComponentUtils().getRectangleById(anchorId);
-      this.dropdownAnchorX = uiContext.px2vp(rect.windowOffset.x);
-      this.dropdownAnchorY = uiContext.px2vp(rect.windowOffset.y + rect.size.height);
+      const ui = this.getUIContext();
+      const anchor = ui.getComponentUtils().getRectangleById(anchorId);
+      const content = ui.getComponentUtils().getRectangleById('dm-scroll-content');
+      const viewport = ui.getComponentUtils().getRectangleById('dm-page-scroll');
+      const contentX = ui.px2vp(content.windowOffset.x);
+      const contentY = ui.px2vp(content.windowOffset.y);
+      const width = ui.px2vp(content.size.width);
+      const anchorLeft = ui.px2vp(anchor.windowOffset.x);
+      const anchorWidth = ui.px2vp(anchor.size.width);
+      const anchorTop = ui.px2vp(anchor.windowOffset.y);
+      const anchorBottom = anchorTop + ui.px2vp(anchor.size.height);
+      const menuWidth = this.dropdownKind === 'style' ? DRUM_STYLE_POPOVER_WIDTH :
+        Math.max(DRUM_POPOVER_MIN_WIDTH, anchorWidth);
+      this.dropdownMenuWidth = Math.min(menuWidth, width - DRUM_PAGE_SIDE_INSET * 2 - DRUM_POPOVER_SHADOW_OFFSET);
+      // Lists extend their field edges; the wider palette grows left from its compact style trigger.
+      const menuLeft = this.dropdownKind === 'style' ? anchorLeft + anchorWidth - this.dropdownMenuWidth : anchorLeft;
+      this.dropdownAnchorX = Math.max(DRUM_PAGE_SIDE_INSET, Math.min(width -
+        DRUM_PAGE_SIDE_INSET - this.dropdownMenuWidth - DRUM_POPOVER_SHADOW_OFFSET, menuLeft - contentX));
+      const tailInset = DRUM_OUTER_RADIUS + DRUM_POPOVER_TAIL + 2;
+      this.dropdownTailX = Math.max(tailInset, Math.min(this.dropdownMenuWidth - tailInset,
+        anchorLeft + anchorWidth / 2 - contentX - this.dropdownAnchorX));
+      const viewportTop = ui.px2vp(viewport.windowOffset.y);
+      // The fixed footer already reserves the bottom safe area outside this viewport.
+      const viewportBottom = ui.px2vp(viewport.windowOffset.y + viewport.size.height);
+      const height = this.dropdownHeight();
+      this.dropdownAbove = anchorBottom + DRUM_POPOVER_GAP + height > viewportBottom &&
+        anchorTop - height - DRUM_POPOVER_GAP > viewportTop;
+      this.dropdownAnchorY = this.dropdownAbove ? anchorTop - contentY - height - DRUM_POPOVER_GAP :
+        anchorBottom - contentY + DRUM_POPOVER_GAP;
       this.dropdownTarget = target;
     } catch (_e) {
-      this.dropdownAnchorX = 59;
-      this.dropdownAnchorY = 120;
-      this.dropdownTarget = target;
+      // A missing anchor must never open an unrelated, fixed-position menu.
+      this.closeDropdown();
+    }
+  }
+
+  private pointInsideComponent(id: string, x: number, y: number): boolean {
+    try {
+      const ui = this.getUIContext();
+      const rect = ui.getComponentUtils().getRectangleById(id);
+      const left = ui.px2vp(rect.windowOffset.x);
+      const top = ui.px2vp(rect.windowOffset.y);
+      return x >= left && x <= left + ui.px2vp(rect.size.width) &&
+        y >= top && y <= top + ui.px2vp(rect.size.height);
+    } catch (_e) {
+      return false;
+    }
+  }
+
+  private observePageTouch(event: TouchEvent): void {
+    const touch = event.changedTouches[0];
+    if (touch === undefined || this.dropdownTarget.length === 0) {
+      return;
+    }
+    if (event.type === TouchType.Down) {
+      this.dropdownTouchX = touch.windowX;
+      this.dropdownTouchY = touch.windowY;
+      this.dropdownTouchMoved = false;
+    } else if (event.type === TouchType.Move) {
+      if (Math.abs(touch.windowX - this.dropdownTouchX) > 8 ||
+        Math.abs(touch.windowY - this.dropdownTouchY) > 8) {
+        this.dropdownTouchMoved = true;
+      }
+    } else if (event.type === TouchType.Up && !this.dropdownTouchMoved &&
+      !this.pointInsideComponent('dm-open-dropdown', touch.windowX, touch.windowY) &&
+      !this.pointInsideComponent(this.dropdownAnchorId, touch.windowX, touch.windowY)) {
+      this.closeDropdown();
     }
   }
 
@@ -565,6 +902,7 @@ struct DrumMachinePage {
   }
 
   private updatePattern(index: number, patternIndex: number): void {
+    if (index < 0 || index >= this.sections.length) { return; }
     const section = this.copySection(this.sections[index]);
     section.patternIndex = patternIndex;
     section.customRows = undefined;
@@ -574,26 +912,40 @@ struct DrumMachinePage {
     this.notifySectionEdited(index);
   }
 
-  private hasCustomPattern(section: DrumSection): boolean {
-    return section.customPattern !== undefined || section.customRows !== undefined;
+  private hasCustomPattern(section: DrumSection | undefined): boolean {
+    return section !== undefined && (section.customPattern !== undefined || section.customRows !== undefined);
   }
 
-  private hasCustomFill(section: DrumSection): boolean {
-    return section.customFill !== undefined || section.customFillRows !== undefined;
+  private hasCustomFill(section: DrumSection | undefined): boolean {
+    return section !== undefined && (section.customFill !== undefined || section.customFillRows !== undefined);
+  }
+
+  private sectionRepeats(index: number): number {
+    return this.sections[index]?.repeats ?? 1;
+  }
+
+  private sectionDisplayId(index: number): string {
+    return this.sections[index]?.id ?? '';
+  }
+
+  private sectionRenderKey(index: number): string {
+    return `${this.sectionPlaybackKeys[index] ?? 'section'}-${index}`;
   }
 
   private editorPatternLabel(): string {
     const section = this.sections[this.selectedSection];
-    const label = this.editorMode === 0 ?
-      drumPatternNames(this.styleKey)[section.patternIndex] : drumFillNames(this.styleKey)[section.fillIndex];
+    const presetLabel = this.editorMode === 0 ?
+      drumPatternNames(this.sectionStyleKey(this.selectedSection))[section.patternIndex] : drumFillNames(this.sectionStyleKey(this.selectedSection))[section.fillIndex];
     const custom = this.editorMode === 0 ? this.hasCustomPattern(section) : this.hasCustomFill(section);
+    const label = custom ? EDITED_LABEL : presetLabel;
     const description = custom ? '自定义鼓点，保留原始位置和力度' :
-      (this.editorMode === 0 ? drumPatternDescription(this.styleKey, section.patternIndex) :
-        drumFillDescription(this.styleKey, section.fillIndex));
-    return `${styleByKey(this.styleKey).name} · ${label} · ${description}`;
+      (this.editorMode === 0 ? drumPatternDescription(this.sectionStyleKey(this.selectedSection), section.patternIndex) :
+        drumFillDescription(this.sectionStyleKey(this.selectedSection), section.fillIndex));
+    return `${styleByKey(this.sectionStyleKey(this.selectedSection)).name} · ${label} · ${description}`;
   }
 
   private updateRepeats(index: number, delta: number): void {
+    if (index < 0 || index >= this.sections.length) { return; }
     const section = this.copySection(this.sections[index]);
     section.repeats = Math.max(1, Math.min(16, section.repeats + delta));
     this.replaceSection(index, section);
@@ -601,6 +953,7 @@ struct DrumMachinePage {
   }
 
   private updateFill(index: number, fillIndex: number): void {
+    if (index < 0 || index >= this.sections.length) { return; }
     const section = this.copySection(this.sections[index]);
     section.fillIndex = fillIndex;
     section.customFillRows = undefined;
@@ -611,6 +964,7 @@ struct DrumMachinePage {
   }
 
   private updateFillEvery(index: number, delta: number): void {
+    if (index < 0 || index >= this.sections.length) { return; }
     const section = this.copySection(this.sections[index]);
     section.fillEvery = Math.max(1, Math.min(16, section.fillEvery + delta));
     this.replaceSection(index, section);
@@ -618,7 +972,7 @@ struct DrumMachinePage {
   }
 
   private selectFillEvery(index: number, optionIndex: number): void {
-    if (optionIndex < 0 || optionIndex >= FILL_FREQUENCIES.length) {
+    if (index < 0 || index >= this.sections.length || optionIndex < 0 || optionIndex >= FILL_FREQUENCIES.length) {
       return;
     }
     const section = this.copySection(this.sections[index]);
@@ -637,15 +991,35 @@ struct DrumMachinePage {
     return 0;
   }
 
+  /** Cycle preset indices so a newly appended section differs from its predecessor when options exist. */
+  private nextSectionPresetIndex(current: number, optionCount: number): number {
+    if (optionCount <= 1) {
+      return 0;
+    }
+    return (current + 1) % optionCount;
+  }
+
   private addSection(): void {
     if (this.sections.length >= 8) {
       return;
     }
+    const previousIndex = this.sections.length - 1;
+    const previous = this.sections[previousIndex];
+    const styleKey = this.sectionStyleKey(previousIndex);
+    const patternCount = drumPatternNames(styleKey).length;
+    const fillCount = drumFillNames(styleKey).length;
     const id = String.fromCharCode(65 + this.sections.length);
     const expanded = this.sections.map((_section: DrumSection, index: number) => this.isSectionExpanded(index));
     this.playbackSectionKeys();
     const next = this.sections.slice();
-    next.push({ id: id, patternIndex: 0, repeats: 4, fillIndex: 0, fillEvery: 4 });
+    next.push({
+      id: id,
+      styleKey: styleKey,
+      patternIndex: this.nextSectionPresetIndex(previous.patternIndex, patternCount),
+      repeats: 4,
+      fillIndex: this.nextSectionPresetIndex(previous.fillIndex, fillCount),
+      fillEvery: 4
+    });
     this.sections = next;
     this.playbackSectionKeys();
     this.expandedSections = [...expanded, true];
@@ -654,7 +1028,7 @@ struct DrumMachinePage {
   }
 
   private deleteSection(index: number): void {
-    if (this.sections.length <= 1) {
+    if (this.sections.length <= 1 || index < 0 || index >= this.sections.length) {
       return;
     }
     const next: DrumSection[] = [];
@@ -670,7 +1044,8 @@ struct DrumMachinePage {
         nextPlaybackKeys.push(playbackKeys[i]);
       }
     }
-    this.sections = next;
+    this.closeDropdown();
+    this.pendingStyleKey = '';
     this.sectionPlaybackKeys = nextPlaybackKeys;
     // Letters are renumbered after deletion; carry fold state with each
     // surviving card instead of accidentally transferring it to the next ID.
@@ -680,6 +1055,9 @@ struct DrumMachinePage {
     } else if (this.selectedSection === index) {
       this.selectedSection = Math.min(index, next.length - 1);
     }
+    // Retiring card observers may run before ForEach unmounts them. Render reads
+    // tolerate missing indices, and moved cards get a new key to drop old closures.
+    this.sections = next;
     this.afterSectionsStructureChanged(index);
   }
 
@@ -998,9 +1376,10 @@ struct DrumMachinePage {
       return 4;
     }
     let preferred = 4;
-    if (this.styleKey === 'jazz') {
+    const style = section.styleKey ?? this.styleKey;
+    if (style === 'jazz') {
       preferred = mode === 1 && section.fillIndex === 1 ? 6 : 3;
-    } else if (this.styleKey === 'trap' &&
+    } else if (style === 'trap' &&
       (mode === 0 ? section.patternIndex === 1 : section.fillIndex === 1)) {
       preferred = 6;
     }
@@ -1022,6 +1401,7 @@ struct DrumMachinePage {
   }
 
   private openEditor(index: number, mode: number): void {
+    if (index < 0 || index >= this.sections.length) { return; }
     // The overlay only owns its own audition. Keep the song's transport and
     // pending preparation alive until the user explicitly auditions this draft.
     this.clearEditorFillFocusTimer();
@@ -1030,6 +1410,7 @@ struct DrumMachinePage {
     } else {
       this.stopActivePreview();
     }
+    this.closeDropdown();
     this.selectedSection = index;
     this.editorMode = mode;
     const section = this.sections[index];
@@ -1097,6 +1478,7 @@ struct DrumMachinePage {
       beatUnit: this.beatUnit,
       sections: [{
         id: this.sections[this.selectedSection].id,
+        styleKey: this.sectionStyleKey(this.selectedSection),
         patternIndex: 0,
         repeats: 1,
         fillIndex: 0,
@@ -1556,6 +1938,9 @@ struct DrumMachinePage {
     const section = this.copySection(sectionSource);
     if (!withFill) {
       section.fillEvery = 0;
+    } else {
+      // A one-shot fill audition must reach its first fill even when the saved section is shorter.
+      section.repeats = Math.max(section.repeats, section.fillEvery);
     }
     return {
       styleKey: this.styleKey,
@@ -1573,11 +1958,13 @@ struct DrumMachinePage {
   }
 
   private async previewSection(index: number, withFill: boolean): Promise<void> {
+    if (index < 0 || index >= this.sections.length) { return; }
+    const section = this.copySection(this.sections[index]);
     const target = `${withFill ? 'fill' : 'pattern'}-${index}`;
     const started = await this.previewProgram(
-      this.buildSectionPreviewProgram(this.sections[index], withFill), target, false);
+      this.buildSectionPreviewProgram(section, withFill), target, false);
     if (started && this.previewTarget === target) {
-      this.armSectionPreviewStop(target, this.sectionPreviewBarCount(this.sections[index], withFill));
+      this.armSectionPreviewStop(target, this.sectionPreviewBarCount(section, withFill));
     }
   }
 
@@ -1607,21 +1994,24 @@ struct DrumMachinePage {
   }
 
   private async changeBpm(delta: number): Promise<void> {
-    const controller = AppSession.get()?.controller;
-    if (controller === undefined || !controller.isLeader) {
-      return;
-    }
-    await this.setBpm(controller.bpm + delta);
+    await this.setBpm(this.bpm + delta);
   }
 
   private async setBpm(value: number): Promise<void> {
-    const controller = AppSession.get()?.controller;
-    if (controller === undefined || !controller.isLeader) {
+    if (!Number.isFinite(value)) {
       return;
     }
+    const controller = AppSession.get()?.controller;
+    this.bpm = Math.max(40, Math.min(240, Math.round(value)));
+    this.rememberEditedTempoAndMeter();
     const revision = ++this.bpmUpdateRevision;
+    // Everyone may edit a local draft; only the leader may publish live team tempo.
+    if (controller === undefined || !controller.isLeader) {
+      void this.refreshActivePreview();
+      return;
+    }
     try {
-      await controller.updateBpm(value);
+      await controller.updateBpm(this.bpm);
       if (revision !== this.bpmUpdateRevision || AppSession.get()?.controller !== controller) {
         return;
       }
@@ -1650,12 +2040,13 @@ struct DrumMachinePage {
     this.saving = true;
     try {
       const raw = serializeDrumProgram(this.currentProgram());
-      AppStorage.setOrCreate('myDrumProgram', raw);
       if (controller.rhythm >= 0 && controller.rhythm <= 2) {
         AppStorage.setOrCreate('lastBasicRhythm', controller.rhythm);
       }
       session.stopDrumPreview();
-      await controller.updateMeter(this.beatsPerBar, this.beatUnit);
+      const libraryId = this.loadedProgram()?.id ?? '';
+      const applied = await controller.updateDrumArrangement(raw, libraryId);
+      if (!applied) { return; }
       if (lifetime !== this.pageLifetimeRevision || AppSession.get() !== session || session.controller !== controller) {
         return;
       }
@@ -1663,12 +2054,12 @@ struct DrumMachinePage {
         showUserNotice('鼓机权益已到期，编排已保留，请解锁后再应用', 'drum.apply.entitlement');
         return;
       }
-      await controller.updateDrumProgram(raw);
       // Applying spans network awaits; only the page and session that started
       // it may publish its result or navigate away from the current screen.
       if (lifetime !== this.pageLifetimeRevision || AppSession.get() !== session || session.controller !== controller) {
         return;
       }
+      this.rememberRecentProgram(raw, libraryId);
       showUserNotice('鼓机编排已应用到队伍', 'drum.apply');
       router.back();
     } catch (error) {
@@ -1683,236 +2074,415 @@ struct DrumMachinePage {
     }
   }
 
+  private popoverOutline(): string {
+    const w = vp2px(this.dropdownMenuWidth);
+    const h = vp2px(this.dropdownHeight());
+    const r = vp2px(DRUM_OUTER_RADIUS);
+    const t = vp2px(DRUM_POPOVER_TAIL);
+    const x = vp2px(this.dropdownTailX);
+    const top = this.dropdownAbove ? 0 : t;
+    const bottom = this.dropdownAbove ? h - t : h;
+    const upper = this.dropdownAbove ? '' : ` H ${x - t} L ${x} 0 L ${x + t} ${top}`;
+    const lower = this.dropdownAbove ? ` H ${x + t} L ${x} ${h} L ${x - t} ${bottom}` : '';
+    return `M ${r} ${top}${upper} H ${w - r} Q ${w} ${top} ${w} ${top + r}` +
+      ` V ${bottom - r} Q ${w} ${bottom} ${w - r} ${bottom}${lower}` +
+      ` H ${r} Q 0 ${bottom} 0 ${bottom - r} V ${top + r} Q 0 ${top} ${r} ${top} Z`;
+  }
+
+  private dropdownTitle(): string {
+    const label = this.dropdownKind === 'style' ? '选择风格' : this.dropdownKind === 'pattern' ?
+      '选择节奏型' : this.dropdownKind === 'fill' ? '选择加花' : '加花频率';
+    return `段落 ${this.sections[this.dropdownSectionIndex]?.id ?? ''} · ${label}`;
+  }
+
+  private dropdownSelectionColor(): string {
+    return styleByKey(this.sectionStyleKey(this.dropdownSectionIndex)).color;
+  }
+
+  private sectionTabOutline(): string {
+    const w = vp2px(DRUM_SECTION_TAB_WIDTH);
+    const h = vp2px(DRUM_SECTION_HEADER_HEIGHT);
+    const r = vp2px(DRUM_OUTER_RADIUS);
+    return `M ${r} 0 H ${w - vp2px(15)} Q ${w - vp2px(11)} 0 ${w - vp2px(9)} ${vp2px(5)}` +
+      ` L ${w - vp2px(1)} ${h - vp2px(6)} Q ${w + vp2px(1)} ${h} ${w - vp2px(5)} ${h}` +
+      ` H 0 V ${r} Q 0 0 ${r} 0 Z`;
+  }
+
   @Builder
-  private smallStepper(value: number, minus: () => void, plus: () => void) {
-    Row({ space: 8 }) {
-      Button({ type: ButtonType.Normal }) {
-        Text('-').fontSize(22).fontWeight(900).fontColor(INK).lineHeight(24)
-      }.width(34).height(32).padding(0).backgroundColor(PAPER)
-        .border({ width: 1, color: INK }).borderRadius(4).shadow(CONTROL_SHADOW).onClick(minus)
-      Text(`${value}`).width(30).textAlign(TextAlign.Center).fontSize(19).fontWeight(900)
-      Button({ type: ButtonType.Normal }) {
-        Text('+').fontSize(21).fontWeight(900).fontColor(INK).lineHeight(24)
-      }.width(34).height(32).padding(0).backgroundColor(PAPER)
-        .border({ width: 1, color: INK }).borderRadius(4).shadow(CONTROL_SHADOW).onClick(plus)
+  private chevron(open: boolean) {
+    Path().commands(`M ${vp2px(2)} ${vp2px(3)} L ${vp2px(6)} ${vp2px(7)} L ${vp2px(10)} ${vp2px(3)}`)
+      .width(12).height(10).fill('#00000000').stroke(INK).strokeWidth(2)
+      .strokeLineCap(LineCapStyle.Round).rotate({ angle: open ? 180 : 0 })
+      .hitTestBehavior(HitTestMode.None)
+  }
+
+  @Builder
+  private stepButton(index: number, delta: number) {
+    Column() {
+      ActionButton({ label: delta < 0 ? '−' : '+',
+        active: delta < 0 ? this.sectionRepeats(index) > 1 : this.sectionRepeats(index) < 16,
+        controlHeight: 28, fill: WHITE, labelSize: 21, labelWeight: 900,
+        cornerRadius: DRUM_INNER_RADIUS, lineWidth: 1,
+        hardShadow: { offsetX: 1, offsetY: 1, color: INK },
+        accessibilityLabel: `${delta < 0 ? '减少' : '增加'}段落 ${this.sectionDisplayId(index)} 的重复小节数`,
+        action: () => this.updateRepeats(index, delta)
+      })
+    }.width(30)
+  }
+
+  @Builder
+  private smallStepper(index: number) {
+    Row({ space: 3 }) {
+      this.stepButton(index, -1)
+      Column() {
+        DrumPaper({ fill: WHITE, cornerRadius: DRUM_INNER_RADIUS, paperLineWidth: 1,
+        offsetX: 1, offsetY: 1 }) {
+        Text(`${this.sectionRepeats(index)}`).width('100%').height(28).textAlign(TextAlign.Center)
+          .fontSize(17).fontWeight(900).fontColor(INK)
+      }
+      }.width(30)
+      this.stepButton(index, 1)
     }
   }
 
   @Builder
+  private dropdownOption(label: string, selected: boolean, fill: string, action: () => void) {
+    Button({ type: ButtonType.Normal }) {
+      Row({ space: 3 }) {
+        Text(label).fontSize(13).fontWeight(900)
+          .fontColor(selected ? '#FFFFFF' : INK).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+        Blank()
+        if (selected) { Text('✓').fontSize(17).fontWeight(900).fontColor('#FFFFFF') }
+      }.width('100%')
+    }.width('100%').height(DRUM_POPOVER_ROW_HEIGHT).padding({ left: 8, right: 8 })
+      .fontColor(selected ? '#FFFFFF' : INK)
+      .backgroundColor(selected && this.dropdownKind !== 'style' ? this.dropdownSelectionColor() : fill)
+      .border({ width: 0 }).borderRadius(DRUM_INNER_RADIUS).onClick(action)
+  }
+
+  @Builder
+  private styleDropdownPanel(sectionIndex: number) {
+    Column({ space: DRUM_POPOVER_OPTION_GAP }) {
+      ForEach(this.styleDropdownRows(), (row: number) => {
+        Row({ space: DRUM_POPOVER_OPTION_GAP }) {
+          ForEach(DRUM_STYLES.slice(row * this.styleDropdownColumns(), (row + 1) * this.styleDropdownColumns()), (style: DrumStyle) => {
+            Column() {
+              this.dropdownOption(style.name, this.sectionStyleKey(sectionIndex) === style.key,
+                style.color, () => this.chooseSectionStyle(sectionIndex, style.key))
+            }.layoutWeight(1)
+          }, (style: DrumStyle) => style.key)
+        }.width('100%')
+      }, (row: number) => `${row}`)
+    }.width('100%')
+  }
+
+  @Builder
   private patternDropdownPanel(sectionIndex: number) {
-    Column({ space: 3 }) {
-      ForEach(drumPatternNames(this.styleKey), (name: string, patternIndex: number) => {
-        Button({ type: ButtonType.Normal }) {
-          Row() {
-            Text(name).fontSize(13).fontWeight(FontWeight.Bold)
-            Blank()
-            if (!this.hasCustomPattern(this.sections[sectionIndex]) &&
-              this.sections[sectionIndex].patternIndex === patternIndex) {
-              Text('✓').fontSize(13).fontWeight(900)
-            }
-          }.width('100%')
-        }.width('100%').height(32).padding({ left: 10, right: 8 }).fontColor(INK)
-        .backgroundColor(!this.hasCustomPattern(this.sections[sectionIndex]) &&
-          this.sections[sectionIndex].patternIndex === patternIndex ? CORAL : PAPER)
-        .border({ width: 1, color: INK }).borderRadius(4).shadow(CONTROL_SHADOW)
-        .onClick(() => this.updatePattern(sectionIndex, patternIndex))
+    Column({ space: DRUM_POPOVER_OPTION_GAP }) {
+      ForEach(drumPatternNames(this.sectionStyleKey(sectionIndex)), (name: string, index: number) => {
+        this.dropdownOption(name, !this.hasCustomPattern(this.sections[sectionIndex]) &&
+          this.sections[sectionIndex]?.patternIndex === index, '#FFFFFF', () => this.updatePattern(sectionIndex, index))
       })
-    }.width(this.dropdownMenuWidth).padding({ left: 4, right: 4, top: 5, bottom: 5 })
-    .backgroundColor(PAPER).border({ width: 1.5, color: INK }).borderRadius(6).shadow(CARD_SHADOW)
+    }.width('100%')
   }
 
   @Builder
   private fillDropdownPanel(sectionIndex: number) {
-    Column({ space: 3 }) {
-      ForEach(drumFillNames(this.styleKey), (name: string, fillIndex: number) => {
-        Button({ type: ButtonType.Normal }) {
-          Row() {
-            Text(name).fontSize(13).fontWeight(FontWeight.Bold)
-            Blank()
-            if (!this.hasCustomFill(this.sections[sectionIndex]) &&
-              this.sections[sectionIndex].fillIndex === fillIndex) {
-              Text('✓').fontSize(13).fontWeight(900)
-            }
-          }.width('100%')
-        }.width('100%').height(32).padding({ left: 10, right: 8 }).fontColor(INK)
-        .backgroundColor(!this.hasCustomFill(this.sections[sectionIndex]) &&
-          this.sections[sectionIndex].fillIndex === fillIndex ? '#FFD36A' : PAPER)
-        .border({ width: 1, color: INK }).borderRadius(4).shadow(CONTROL_SHADOW)
-        .onClick(() => this.updateFill(sectionIndex, fillIndex))
+    Column({ space: DRUM_POPOVER_OPTION_GAP }) {
+      ForEach(drumFillNames(this.sectionStyleKey(sectionIndex)), (name: string, index: number) => {
+        this.dropdownOption(name, !this.hasCustomFill(this.sections[sectionIndex]) &&
+          this.sections[sectionIndex]?.fillIndex === index, '#FFFFFF', () => this.updateFill(sectionIndex, index))
       })
-    }.width(this.dropdownMenuWidth).padding({ left: 4, right: 4, top: 5, bottom: 5 })
-    .backgroundColor(PAPER).border({ width: 1.5, color: INK }).borderRadius(6).shadow(CARD_SHADOW)
+    }.width('100%')
   }
 
   @Builder
   private frequencyDropdownPanel(sectionIndex: number) {
-    Column({ space: 3 }) {
-      ForEach(FILL_FREQUENCIES, (frequency: number, optionIndex: number) => {
-        Button({ type: ButtonType.Normal }) {
-          Row() {
-            Text(`每${frequency}小节`).fontSize(13).fontWeight(FontWeight.Bold)
-            Blank()
-            if (this.sections[sectionIndex].fillEvery === frequency) {
-              Text('✓').fontSize(13).fontWeight(900)
-            }
-          }.width('100%')
-        }.width('100%').height(32).padding({ left: 10, right: 8 }).fontColor(INK)
-        .backgroundColor(this.sections[sectionIndex].fillEvery === frequency ? LILAC : PAPER)
-        .border({ width: 1, color: INK }).borderRadius(4).shadow(CONTROL_SHADOW)
-        .onClick(() => this.selectFillEvery(sectionIndex, optionIndex))
+    Column({ space: DRUM_POPOVER_OPTION_GAP }) {
+      ForEach(FILL_FREQUENCIES, (frequency: number, index: number) => {
+        this.dropdownOption(`每 ${frequency} 小节`, this.sections[sectionIndex]?.fillEvery === frequency,
+          '#FFFFFF', () => this.selectFillEvery(sectionIndex, index))
       })
-    }.width(this.dropdownMenuWidth).padding({ left: 4, right: 4, top: 5, bottom: 5 })
-    .backgroundColor(PAPER).border({ width: 1.5, color: INK }).borderRadius(6).shadow(CARD_SHADOW)
+    }.width('100%')
   }
 
   @Builder
   private sectionDropdownOverlay() {
     Stack({ alignContent: Alignment.TopStart }) {
-      Column()
-        .width('100%')
-        .height('100%')
-        .backgroundColor('#00000000')
-        .onClick(() => this.closeDropdown())
-      Column() {
-        if (this.dropdownKind === 'pattern') {
-          this.patternDropdownPanel(this.dropdownSectionIndex);
-        } else if (this.dropdownKind === 'fill') {
-          this.fillDropdownPanel(this.dropdownSectionIndex);
-        } else if (this.dropdownKind === 'frequency') {
-          this.frequencyDropdownPanel(this.dropdownSectionIndex);
+      Path().commands(this.popoverOutline()).width(this.dropdownMenuWidth).height(this.dropdownHeight())
+        .fill(INK).translate({ x: DRUM_POPOVER_SHADOW_OFFSET, y: DRUM_POPOVER_SHADOW_OFFSET })
+        .hitTestBehavior(HitTestMode.None)
+      Path().commands(this.popoverOutline()).width(this.dropdownMenuWidth).height(this.dropdownHeight())
+        .fill('#FFFDF7').stroke(INK).strokeWidth(1.5).hitTestBehavior(HitTestMode.None)
+      Column({ space: DRUM_POPOVER_HEADER_GAP }) {
+        if (this.dropdownKind === 'style') {
+          Text(this.dropdownTitle()).fontSize(13).fontWeight(900).fontColor(INK).width('100%')
+            .height(DRUM_POPOVER_HEADER_HEIGHT).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
         }
+        if (this.dropdownKind === 'style') {
+          this.styleDropdownPanel(this.dropdownSectionIndex)
+        } else if (this.dropdownKind === 'pattern') {
+          this.patternDropdownPanel(this.dropdownSectionIndex)
+        } else if (this.dropdownKind === 'fill') {
+          this.fillDropdownPanel(this.dropdownSectionIndex)
+        } else {
+          this.frequencyDropdownPanel(this.dropdownSectionIndex)
+        }
+      }.width('100%').padding(DRUM_POPOVER_PADDING)
+        .position({ x: 0, y: this.dropdownAbove ? 0 : DRUM_POPOVER_TAIL })
+    }.id('dm-open-dropdown').width(this.dropdownMenuWidth).height(this.dropdownHeight())
+      .position({ x: this.dropdownAnchorX, y: this.dropdownAnchorY }).zIndex(85)
+  }
+
+  @Builder
+  private phraseAction(index: number, fill: boolean, edit: boolean) {
+    ActionButton({
+      active: edit || this.previewTarget.length === 0 || this.previewTarget === `${fill ? 'fill' : 'pattern'}-${index}`,
+      controlWidth: DRUM_PHRASE_ACTION_WIDTH, controlHeight: DRUM_FORM_ROW_HEIGHT,
+      fill: '#00000000', cornerRadius: DRUM_INNER_RADIUS,
+      accessibilityLabel: `${edit ? '编辑' : '试听'}${fill ? '加花' : '主节奏'}，段落 ${this.sectionDisplayId(index)}`,
+      action: () => {
+        if (edit) { this.openEditor(index, fill ? 1 : 0); }
+        else { void this.previewSection(index, fill); }
       }
-      .position({ x: this.dropdownAnchorX, y: this.dropdownAnchorY })
+    }) {
+      if (edit) {
+        Stack() {
+          Path().commands(`M ${vp2px(2)} ${vp2px(12)} L ${vp2px(1)} ${vp2px(17)} ` +
+            `L ${vp2px(6)} ${vp2px(16)} L ${vp2px(17)} ${vp2px(5)} ` +
+            `L ${vp2px(13)} ${vp2px(1)} Z`).width(DRUM_PHRASE_ICON_SIZE).height(DRUM_PHRASE_ICON_SIZE).fill(INK)
+          Path().commands(`M ${vp2px(11)} ${vp2px(3)} L ${vp2px(15)} ${vp2px(7)}`)
+            .width(DRUM_PHRASE_ICON_SIZE).height(DRUM_PHRASE_ICON_SIZE).stroke(WHITE).strokeWidth(1)
+        }.width(DRUM_PHRASE_ICON_SIZE).height(DRUM_PHRASE_ICON_SIZE)
+      } else if (this.previewTarget === `${fill ? 'fill' : 'pattern'}-${index}`) {
+        Rect().width(13).height(13).fill(INK).radius(1)
+      } else {
+        Path().commands(`M ${vp2px(4)} ${vp2px(2)} L ${vp2px(16)} ${vp2px(9)} ` +
+          `L ${vp2px(4)} ${vp2px(16)} Z`).width(DRUM_PHRASE_ICON_SIZE).height(DRUM_PHRASE_ICON_SIZE).fill(INK)
+      }
     }
-    .width('100%')
-    .height('100%')
-    .zIndex(85)
+  }
+
+  @Builder
+  private phraseField(index: number, fill: boolean) {
+    Column() {
+      DrumPaper({ fill: this.isSongPhrasePlaying(index, fill) ? styleByKey(this.sectionStyleKey(index)).color : PAPER,
+      cornerRadius: DRUM_INNER_RADIUS, paperLineWidth: 1, offsetX: 1, offsetY: 1 }) {
+      Button({ type: ButtonType.Normal }) {
+        Row() {
+          Text(fill ? (this.hasCustomFill(this.sections[index]) ? EDITED_LABEL :
+            drumFillNames(this.sectionStyleKey(index))[this.sections[index]?.fillIndex ?? 0]) :
+            (this.hasCustomPattern(this.sections[index]) ? EDITED_LABEL :
+            drumPatternNames(this.sectionStyleKey(index))[this.sections[index]?.patternIndex ?? 0]))
+            .fontSize(13).fontWeight(FontWeight.Bold).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+          Blank()
+          this.chevron(this.dropdownTarget === `menu-${fill ? 'fill' : 'pattern'}-${index}`)
+        }.width('100%')
+      }.id(`dm-${fill ? 'fill' : 'pattern'}-${index}`).width('100%').height(DRUM_FIELD_HEIGHT)
+        .padding({ left: 8, right: 7 }).fontColor(INK).backgroundColor('#00000000')
+        .borderRadius(DRUM_INNER_RADIUS)
+        .onClick(() => this.openDropdownFromAnchor(`menu-${fill ? 'fill' : 'pattern'}-${index}`,
+          `dm-${fill ? 'fill' : 'pattern'}-${index}`))
+    }
+    }.layoutWeight(1)
+  }
+
+  @Builder
+  private formRule() {
+    Divider().strokeWidth(0.6).color('#D6D0C7').width('100%')
   }
 
   @Builder
   private sectionCard(index: number) {
-    Column({ space: 11 }) {
-      Row() {
-        Row({ space: DRUM_SECTION_TITLE_GAP }) {
-          Text(`段落 ${this.sections[index].id}`).fontSize(19).fontWeight(900).fontStyle(FontStyle.Italic)
-          Text(this.isSectionExpanded(index) ? '⌃' : '⌄').fontSize(22)
-            .width(DRUM_SECTION_TOGGLE_WIDTH).textAlign(TextAlign.Center)
-          Blank()
+    Column() {
+      DrumPaper({ fill: this.playingSongSection === index ? DRUM_SECTION_PLAYING_COLOR : '#FFFDF7',
+      cornerRadius: DRUM_OUTER_RADIUS, clipContent: true }) {
+      Column() {
+        Row({ space: 6 }) {
+          Row() {
+            Stack({ alignContent: Alignment.Center }) {
+              Path().commands(this.sectionTabOutline()).width(DRUM_SECTION_TAB_WIDTH).height(DRUM_SECTION_HEADER_HEIGHT)
+                .fill(styleByKey(this.sectionStyleKey(index)).color).stroke(INK).strokeWidth(1)
+                .hitTestBehavior(HitTestMode.None)
+              Row({ space: DRUM_SECTION_TITLE_GAP }) {
+                Text(`段落 ${this.sectionDisplayId(index)}`).fontSize(20).fontWeight(900).fontStyle(FontStyle.Italic)
+                this.chevron(this.isSectionExpanded(index))
+              }.padding({ right: 5 })
+            }.width(DRUM_SECTION_TAB_WIDTH).height(DRUM_SECTION_HEADER_HEIGHT)
+            Blank()
+          }.layoutWeight(1).height(DRUM_SECTION_HEADER_HEIGHT)
+            .accessibilityText(`${this.isSectionExpanded(index) ? '收起' : '展开'}段落 ${this.sectionDisplayId(index)}`)
+            .onClick(() => this.toggleSectionExpanded(index))
+          if (!this.isSectionExpanded(index)) {
+            Text(`${this.sectionRepeats(index)}小节`).fontSize(11).fontWeight(FontWeight.Bold).fontColor('#6D7073')
+          }
+          Column() {
+            DrumPaper({ fill: styleByKey(this.sectionStyleKey(index)).color,
+            cornerRadius: DRUM_INNER_RADIUS, paperLineWidth: 1, offsetX: 1, offsetY: 1 }) {
+            Button({ type: ButtonType.Normal }) {
+              Row({ space: 7 }) {
+                Text(styleByKey(this.sectionStyleKey(index)).name).fontSize(13).fontWeight(900)
+                this.chevron(this.dropdownTarget === `menu-style-${index}`)
+              }
+            }.id(`dm-style-${index}`).width('100%').height(22).padding(0).fontColor(INK)
+              .backgroundColor('#00000000').borderRadius(DRUM_INNER_RADIUS)
+              .accessibilityText(`段落 ${this.sectionDisplayId(index)}，风格 ${styleByKey(this.sectionStyleKey(index)).name}`)
+              .onClick(() => this.openDropdownFromAnchor(`menu-style-${index}`, `dm-style-${index}`))
+          }
+          }.width(DRUM_SECTION_STYLE_WIDTH)
+          Divider().vertical(true).height(17).strokeWidth(0.6).color('#BFC0BB')
+          ActionButton({ label: '×', active: this.sections.length > 1,
+            controlWidth: 24, controlHeight: 28, fill: '#00000000', labelSize: 23, labelWeight: 900,
+            cornerRadius: DRUM_INNER_RADIUS, accessibilityLabel: `删除段落 ${this.sectionDisplayId(index)}`,
+            action: () => this.requestDeleteSection(index)
+          })
+        }.width('100%').height(DRUM_SECTION_HEADER_HEIGHT).padding({ right: 5 })
+        if (this.isSectionExpanded(index)) {
+          this.formRule()
+          Column() {
+            Row({ space: 8 }) {
+              Text('节奏型').fontSize(13).fontWeight(900).width(DRUM_FIELD_LABEL_WIDTH)
+              this.phraseField(index, false)
+              this.phraseAction(index, false, false)
+              this.phraseAction(index, false, true)
+            }.width('100%').height(DRUM_FORM_ROW_HEIGHT)
+            this.formRule()
+            Row({ space: 8 }) {
+              Text('重复').fontSize(13).fontWeight(900).width(DRUM_FIELD_LABEL_WIDTH)
+              this.smallStepper(index)
+              Text('小节').fontSize(13)
+              Blank()
+            }.width('100%').height(DRUM_FORM_ROW_HEIGHT)
+            this.formRule()
+            Row({ space: 8 }) {
+              Text('加花').fontSize(13).fontWeight(900).width(DRUM_FIELD_LABEL_WIDTH)
+              this.phraseField(index, true)
+              this.phraseAction(index, true, false)
+              this.phraseAction(index, true, true)
+            }.width('100%').height(DRUM_FORM_ROW_HEIGHT)
+            this.formRule()
+            Row({ space: 8 }) {
+              Text('频率').fontSize(13).fontWeight(900).width(DRUM_FIELD_LABEL_WIDTH)
+              Column() {
+                DrumPaper({ fill: PAPER, cornerRadius: DRUM_INNER_RADIUS,
+                paperLineWidth: 1, offsetX: 1, offsetY: 1 }) {
+                Button({ type: ButtonType.Normal }) {
+                  Row() {
+                    Text(`每 ${this.sections[index]?.fillEvery ?? 4} 小节`).fontSize(13).fontWeight(FontWeight.Bold)
+                    Blank()
+                    this.chevron(this.dropdownTarget === `menu-frequency-${index}`)
+                  }.width('100%')
+                }.id(`dm-frequency-${index}`).width('100%').height(DRUM_FIELD_HEIGHT)
+                  .padding({ left: 8, right: 7 }).fontColor(INK).backgroundColor('#00000000')
+                  .borderRadius(DRUM_INNER_RADIUS)
+                  .onClick(() => this.openDropdownFromAnchor(`menu-frequency-${index}`, `dm-frequency-${index}`))
+              }
+              }.layoutWeight(1)
+              Blank().width(DRUM_PHRASE_ACTION_WIDTH * 2 + 8)
+            }.width('100%').height(DRUM_FORM_ROW_HEIGHT)
+          }.width('100%').padding({ left: 8, right: 8, top: 2, bottom: 5 })
         }
-        .layoutWeight(1).height(28)
-        .accessibilityText(`${this.isSectionExpanded(index) ? '收起' : '展开'}段落 ${this.sections[index].id}`)
-        .onClick(() => this.toggleSectionExpanded(index))
-        // Keep deletion outside the title hit area, including its disabled state.
-        Button({ type: ButtonType.Normal }) {
-          Text('×').fontSize(20).fontWeight(900).fontColor('#D83A2E').lineHeight(22)
-        }.width(28).height(28).padding(0).backgroundColor('#FFF1E8')
-          .border({ width: 1, color: INK }).borderRadius(5).shadow(CONTROL_SHADOW)
-          .enabled(this.sections.length > 1)
-          .opacity(this.sections.length > 1 ? 1 : 0.4)
-          .accessibilityText(this.sections.length > 1 ? `删除段落 ${this.sections[index].id}` : '至少保留一个段落')
-          .onClick(() => this.requestDeleteSection(index))
       }.width('100%')
-      if (this.isSectionExpanded(index)) {
-        Row({ space: 7 }) {
-          Text('节奏型').fontSize(13).fontWeight(FontWeight.Bold).width(52)
-          Button({ type: ButtonType.Normal }) {
-            Row() {
-              Text(this.hasCustomPattern(this.sections[index]) ? EDITED_LABEL :
-                drumPatternNames(this.styleKey)[this.sections[index].patternIndex]).fontSize(13).fontWeight(FontWeight.Bold)
-              Blank()
-              Text(this.dropdownTarget === `menu-pattern-${index}` ? '⌃' : '⌄').fontSize(15)
-            }.width('100%')
-          }.id(`dm-pattern-${index}`).layoutWeight(1).height(34).padding({ left: 8, right: 7 })
-          .fontColor(INK).backgroundColor(this.isSongPhrasePlaying(index, false) ? DRUM_PHRASE_PLAYING_COLOR : PAPER)
-          .border({ width: 1, color: INK }).borderRadius(5).shadow(CONTROL_SHADOW)
-          .onClick(() => this.openDropdownFromAnchor(`menu-pattern-${index}`, `dm-pattern-${index}`, 126))
-          Button(this.previewTarget === `pattern-${index}` ? '停止' : '试听', { type: ButtonType.Normal })
-            .width(54).height(34).padding(0).fontSize(13).fontWeight(FontWeight.Bold)
-            .fontColor(INK).backgroundColor(LILAC).border({ width: 1, color: INK }).borderRadius(5).shadow(CONTROL_SHADOW)
-            .enabled(this.previewTarget.length === 0 || this.previewTarget === `pattern-${index}`)
-            .onClick(() => { void this.previewSection(index, false); })
-          Button('编辑', { type: ButtonType.Normal }).width(54).height(34).padding(0)
-            .fontSize(13).fontWeight(FontWeight.Bold)
-            .fontColor(INK).backgroundColor(LILAC).border({ width: 1, color: INK }).borderRadius(5).shadow(CONTROL_SHADOW)
-            .onClick(() => this.openEditor(index, 0))
-        }.width('100%')
-        Row({ space: 8 }) {
-          Text('重复').fontSize(13).fontWeight(FontWeight.Bold).width(52)
-          this.smallStepper(this.sections[index].repeats,
-            () => this.updateRepeats(index, -1), () => this.updateRepeats(index, 1))
-          Text('小节').fontSize(13)
-          Blank()
-        }.width('100%')
-        Row({ space: 7 }) {
-          Text('加花').fontSize(13).fontWeight(FontWeight.Bold).width(52)
-          Button({ type: ButtonType.Normal }) {
-            Row() {
-              Text(this.hasCustomFill(this.sections[index]) ? EDITED_LABEL :
-                drumFillNames(this.styleKey)[this.sections[index].fillIndex]).fontSize(13).fontWeight(FontWeight.Bold)
-              Blank()
-              Text(this.dropdownTarget === `menu-fill-${index}` ? '⌃' : '⌄').fontSize(15)
-            }.width('100%')
-          }.id(`dm-fill-${index}`).layoutWeight(1).height(34).padding({ left: 8, right: 7 })
-          .fontColor(INK).backgroundColor(this.isSongPhrasePlaying(index, true) ? DRUM_PHRASE_PLAYING_COLOR : PAPER)
-          .border({ width: 1, color: INK }).borderRadius(5).shadow(CONTROL_SHADOW)
-          .onClick(() => this.openDropdownFromAnchor(`menu-fill-${index}`, `dm-fill-${index}`, 126))
-          Button(this.previewTarget === `fill-${index}` ? '停止' : '试听', { type: ButtonType.Normal })
-            .width(54).height(34).padding(0).fontSize(13).fontWeight(FontWeight.Bold)
-            .fontColor(INK).backgroundColor(LILAC).border({ width: 1, color: INK }).borderRadius(5).shadow(CONTROL_SHADOW)
-            .enabled(this.previewTarget.length === 0 || this.previewTarget === `fill-${index}`)
-            .onClick(() => { void this.previewSection(index, true); })
-          Button('编辑', { type: ButtonType.Normal }).width(54).height(34).padding(0)
-            .fontSize(13).fontWeight(FontWeight.Bold)
-            .fontColor(INK).backgroundColor(LILAC).border({ width: 1, color: INK }).borderRadius(5).shadow(CONTROL_SHADOW)
-            .onClick(() => this.openEditor(index, 1))
-        }.width('100%')
-        Row({ space: 7 }) {
-          Text('频率').fontSize(13).fontWeight(FontWeight.Bold).width(52)
-          Button({ type: ButtonType.Normal }) {
-            Row() {
-              Text(`每${this.sections[index].fillEvery}小节`).fontSize(13).fontWeight(FontWeight.Bold)
-              Blank()
-              Text(this.dropdownTarget === `menu-frequency-${index}` ? '⌃' : '⌄').fontSize(15)
-            }.width('100%')
-          }.id(`dm-frequency-${index}`).width(122).height(34).padding({ left: 8, right: 7 })
-          .fontColor(INK).backgroundColor(PAPER)
-          .border({ width: 1, color: INK }).borderRadius(5).shadow(CONTROL_SHADOW)
-          .onClick(() => this.openDropdownFromAnchor(`menu-frequency-${index}`, `dm-frequency-${index}`, 122))
-          Blank()
-        }.width('100%')
-      }
     }
-    .width('100%').padding(12)
-    .backgroundColor(this.playingSongSection === index ? DRUM_SECTION_PLAYING_COLOR : '#FFFDF7')
-    .border({ width: 1.5, color: INK }).borderRadius(7)
-    .shadow(CARD_SHADOW)
+    }.id(`dm-section-${index}`).width('100%')
+  }
+
+  @Builder
+  private savedStyleChips(saved: SavedDrumProgram) {
+    Row({ space: 3 }) {
+      ForEach(drumProgramStyleKeys(parseDrumProgram(saved.program)).slice(0, 2), (key: string) => {
+        Text(styleByKey(key).name).fontSize(9).fontWeight(900).maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis }).textAlign(TextAlign.Center).layoutWeight(1)
+          .padding({ left: 3, right: 3, top: 3, bottom: 3 })
+          .backgroundColor(styleByKey(key).color).borderRadius(DRUM_INNER_RADIUS)
+      }, (key: string) => key)
+      if (drumProgramStyleKeys(parseDrumProgram(saved.program)).length > 2) {
+        Text('…').fontSize(12).fontWeight(900).width(10)
+      }
+    }.width('100%')
   }
 
   @Builder
   private savedProgramCard(saved: SavedDrumProgram) {
+    Column() {
+      DrumPaper({ fill: '#FFFDF7', cornerRadius: DRUM_OUTER_RADIUS }) {
     Stack({ alignContent: Alignment.TopEnd }) {
-      Column({ space: 5 }) {
-        Text(saved.name).fontSize(13).fontWeight(900).maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis }).width(76)
-        Row() {
-          Text('♪').fontSize(16).fontWeight(900)
-          Text(this.savedProgramMeter(saved)).fontSize(12).fontWeight(FontWeight.Bold).margin({ left: 4 })
-          Blank()
-          Text(this.savedProgramStyle(saved)).fontSize(10).fontColor('#615B53')
-        }.width('100%')
-        Button('载入', { type: ButtonType.Normal }).width(48).height(20).padding(0).fontSize(9)
+      Column({ space: 7 }) {
+        Text(saved.name).fontSize(13).fontWeight(900).maxLines(1).width('100%').padding({ right: 19 })
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+        Text(this.savedProgramMeter(saved)).fontSize(11).fontColor('#615B53').width('100%')
+        this.savedStyleChips(saved)
+        Blank()
+        Button('载入', { type: ButtonType.Normal }).width('100%').height(24).padding(0).fontSize(11)
           .fontWeight(FontWeight.Bold).fontColor(INK).backgroundColor(WHITE)
-          .border({ width: 1, color: INK }).borderRadius(10).shadow(CONTROL_SHADOW)
+          .border({ width: 1, color: INK }).borderRadius(DRUM_INNER_RADIUS)
           .onClick(() => this.loadSavedProgram(saved))
       }.width('100%').height('100%').padding(9)
-      Button('×', { type: ButtonType.Normal }).width(23).height(23).padding(0).fontSize(18).fontWeight(900)
-        .fontColor(INK).backgroundColor(CORAL).border({ width: 1.2, color: INK }).borderRadius(12)
-        .position({ x: 89, y: 4 }).zIndex(2)
-        .onClick(() => this.deleteSavedProgram(saved.id))
+      Button('×', { type: ButtonType.Normal }).width(24).height(24).padding(0).fontSize(20).fontWeight(900)
+        .fontColor(INK).backgroundColor('#00000000').margin({ top: 3, right: 3 })
+        .accessibilityText(`删除我的编排 ${saved.name}`).onClick(() => this.deleteSavedProgram(saved.id))
+    }.width('100%').height(DRUM_SAVED_CARD_SIZE)
     }
-    .width(116).height(82).backgroundColor('#FFFDF7')
-    .border({ width: 1.3, color: INK }).borderRadius(6)
-    .shadow(CARD_SHADOW)
+    }.width(DRUM_SAVED_CARD_SIZE)
+  }
+
+  @Builder
+  private styleChangeOverlay() {
+    Stack({ alignContent: Alignment.Center }) {
+      Column({ space: 12 }) {
+        Text('保留写好的鼓点？').fontSize(23).fontWeight(900).width('100%')
+        Text(`切换为${styleByKey(this.pendingStyleKey).name}，只影响段落 ${this.sections[this.pendingStyleSection]?.id ?? ''}。`)
+          .fontSize(14).width('100%')
+        Button('保留已编辑鼓点', { type: ButtonType.Normal }).width('100%').height(44)
+          .fontColor(INK).fontWeight(900).backgroundColor(LILAC).border({ width: 1, color: INK })
+          .borderRadius(DRUM_INNER_RADIUS).shadow(DRUM_CONTROL_HARD_SHADOW)
+          .onClick(() => this.applySectionStyle(this.pendingStyleSection, this.pendingStyleKey, true))
+        Button('使用新风格预设', { type: ButtonType.Normal }).width('100%').height(44)
+          .fontColor(INK).fontWeight(900).backgroundColor(CORAL).border({ width: 1, color: INK })
+          .borderRadius(DRUM_INNER_RADIUS).shadow(DRUM_CONTROL_HARD_SHADOW)
+          .onClick(() => this.applySectionStyle(this.pendingStyleSection, this.pendingStyleKey, false))
+        Text('取消').fontSize(14).fontWeight(FontWeight.Bold).padding(8).onClick(() => this.pendingStyleKey = '')
+      }.width('86%').padding(18).backgroundColor(PAPER).border({ width: 2, color: INK })
+        .borderRadius(DRUM_OUTER_RADIUS).shadow(DRUM_CARD_HARD_SHADOW)
+    }.width('100%').height('100%').backgroundColor('#66000000').zIndex(110)
+  }
+
+  @Builder
+  private newProgramDialogOverlay() {
+    Stack({ alignContent: Alignment.Center }) {
+      Column() {
+        DrumPaper({ fill: PAPER, cornerRadius: DRUM_OUTER_RADIUS }) {
+          Column({ space: 14 }) {
+            Row({ space: 8 }) {
+              Text('先保存当前编排吗？').fontSize(22).fontWeight(900).fontColor(INK).layoutWeight(1)
+                .maxLines(2)
+              Button('×', { type: ButtonType.Normal }).id('dm-new-close').width(28).height(28).padding(0)
+                .fontSize(25).fontWeight(900).fontColor(INK).backgroundColor('#00000000')
+                .accessibilityText('取消新建编排').onClick(() => this.cancelNewProgram())
+            }.width('100%')
+            Text(this.loadedProgramName().length > 0 ?
+              `保存会更新「${this.loadedProgramName()}」，然后开始新编排。` : '保存到“我的编排”，再开始新编排。')
+              .width('100%').fontSize(13).lineHeight(20).fontColor('#625D55')
+            Column() {
+              DrumPaper({ fill: CORAL, cornerRadius: DRUM_INNER_RADIUS, offsetX: 2, offsetY: 2 }) {
+                Button('保存并新建', { type: ButtonType.Normal }).id('dm-new-save').width('100%')
+                  .height(DRUM_NEW_PROGRAM_DIALOG_BUTTON_HEIGHT).padding(0).fontSize(14).fontWeight(900)
+                  .fontColor(INK).backgroundColor('#00000000').borderRadius(DRUM_INNER_RADIUS)
+                  .onClick(() => this.saveBeforeNewProgram())
+              }
+            }.width('100%')
+            Column() {
+              DrumPaper({ fill: WHITE, cornerRadius: DRUM_INNER_RADIUS, offsetX: 2, offsetY: 2 }) {
+                Button('不保存，直接新建', { type: ButtonType.Normal }).id('dm-new-discard').width('100%')
+                  .height(DRUM_NEW_PROGRAM_DIALOG_BUTTON_HEIGHT).padding(0).fontSize(14).fontWeight(900)
+                  .fontColor(INK).backgroundColor('#00000000').borderRadius(DRUM_INNER_RADIUS)
+                  .onClick(() => this.beginNewProgram())
+              }
+            }.width('100%')
+          }.width('100%').padding(DRUM_NEW_PROGRAM_DIALOG_PADDING)
+        }
+      }.width('88%').constraintSize({ maxWidth: DRUM_NEW_PROGRAM_DIALOG_MAX_WIDTH })
+    }.width('100%').height('100%').backgroundColor('#66000000').zIndex(110)
   }
 
   @Builder
@@ -1920,36 +2490,47 @@ struct DrumMachinePage {
     Stack({ alignContent: Alignment.Center }) {
       Column({ space: 12 }) {
         Row() {
-          Text('保存到我的节奏').fontSize(23).fontWeight(900).fontStyle(FontStyle.Italic)
+          Text('保存到我的编排').fontSize(23).fontWeight(900).fontStyle(FontStyle.Italic)
           Blank()
-          Text('×').fontSize(27).fontWeight(900).onClick(() => this.saveDialogVisible = false)
+          Text('×').fontSize(27).fontWeight(900).onClick(() => this.cancelSaveFlow())
         }.width('100%')
         Divider().strokeWidth(1).color('#CEC4B6')
         Column({ space: 4 }) {
-          TextInput({ text: this.saveName, placeholder: '节奏名称，例如：夜跑推进' })
-            .height(44).fontSize(15).fontColor(INK).backgroundColor(PAPER)
-            .border({ width: 1.5, color: this.saveNameError.length > 0 ? '#B32E23' : INK })
-            .borderRadius(5).shadow(CONTROL_SHADOW).maxLength(16)
-            .onChange((value: string) => {
-              this.saveName = value;
-              this.saveNameError = '';
-            })
+          DrumPaper({ fill: PAPER, cornerRadius: DRUM_INNER_RADIUS,
+            paperLineColor: this.saveNameError.length > 0 ? '#B32E23' : INK, offsetX: 2, offsetY: 2 }) {
+            TextInput({ text: this.saveName, placeholder: '节奏名称，例如：夜跑推进' })
+              .width('100%').height(44).fontSize(15).fontColor(INK).backgroundColor('#00000000')
+              .padding({ left: 10, right: 10 }).border({ width: 0 }).borderRadius(DRUM_INNER_RADIUS).maxLength(16)
+              .onChange((value: string) => {
+                this.saveName = value;
+                this.saveNameError = '';
+              })
+          }
           if (this.saveNameError.length > 0) {
             Text(this.saveNameError).width('100%').fontSize(12).lineHeight(16).fontColor('#B32E23')
           }
         }.width('100%')
         Row({ space: 9 }) {
-          Button('取消', { type: ButtonType.Normal }).layoutWeight(1).height(42).fontSize(13).fontWeight(900)
-            .fontColor(INK).backgroundColor(PAPER).border({ width: 1.5, color: INK }).borderRadius(5).shadow(CONTROL_SHADOW)
-            .onClick(() => this.saveDialogVisible = false)
-          Button('保存', { type: ButtonType.Normal }).layoutWeight(1.4).height(42).fontSize(13).fontWeight(900)
-            .fontColor(INK).backgroundColor(CORAL).border({ width: 1.5, color: INK }).borderRadius(5).shadow(CONTROL_SHADOW)
-            .onClick(() => this.confirmNamedSave())
+          Column() {
+            DrumPaper({ fill: PAPER, cornerRadius: DRUM_INNER_RADIUS, offsetX: 2, offsetY: 2 }) {
+              Button('取消', { type: ButtonType.Normal }).width('100%').height(42).padding(0).fontSize(13).fontWeight(900)
+                .fontColor(INK).backgroundColor('#00000000').borderRadius(DRUM_INNER_RADIUS)
+                .onClick(() => this.cancelSaveFlow())
+            }
+          }.layoutWeight(1)
+          Column() {
+            DrumPaper({ fill: CORAL, cornerRadius: DRUM_INNER_RADIUS, offsetX: 2, offsetY: 2 }) {
+              Button(this.newProgramAfterSave ? '保存并新建' : '保存', { type: ButtonType.Normal })
+                .width('100%').height(42).padding(0).fontSize(13).fontWeight(900)
+                .fontColor(INK).backgroundColor('#00000000').borderRadius(DRUM_INNER_RADIUS)
+                .onClick(() => this.confirmNamedSave())
+            }
+          }.layoutWeight(1.4)
         }.width('100%')
       }
       .width('88%').padding(16).backgroundColor('#FFF9EE')
       .border({ width: 2, color: INK }).borderRadius(8)
-      .shadow({ radius: INK_SHADOW_RADIUS, offsetX: 6, offsetY: 7, color: INK })
+      .shadow({ radius: 0, offsetX: 6, offsetY: 7, color: INK })
     }
     .width('100%').height('100%').backgroundColor('#77000000').zIndex(110)
   }
@@ -1964,16 +2545,17 @@ struct DrumMachinePage {
         Divider().strokeWidth(1).color('#C8BFB1')
         Row({ space: 9 }) {
           Button('返回改名', { type: ButtonType.Normal }).layoutWeight(1).height(44).fontSize(13).fontWeight(900)
-            .fontColor(INK).backgroundColor(LILAC).border({ width: 1.5, color: INK }).borderRadius(5).shadow(CONTROL_SHADOW)
+            .fontColor(INK).backgroundColor(LILAC).border({ width: 1.5, color: INK }).borderRadius(DRUM_INNER_RADIUS).shadow(DRUM_CONTROL_HARD_SHADOW)
             .onClick(() => this.returnToRename())
-          Button('覆盖保存', { type: ButtonType.Normal }).layoutWeight(1).height(44).fontSize(13).fontWeight(900)
-            .fontColor(INK).backgroundColor(CORAL).border({ width: 1.5, color: INK }).borderRadius(5).shadow(CONTROL_SHADOW)
+          Button(this.newProgramAfterSave ? '覆盖并新建' : '覆盖保存', { type: ButtonType.Normal })
+            .layoutWeight(1).height(44).fontSize(13).fontWeight(900)
+            .fontColor(INK).backgroundColor(CORAL).border({ width: 1.5, color: INK }).borderRadius(DRUM_INNER_RADIUS).shadow(DRUM_CONTROL_HARD_SHADOW)
             .onClick(() => this.persistNamedSave(true))
         }.width('100%')
       }
       .width('88%').padding(17).backgroundColor('#FFF1D7')
       .border({ width: 2.5, color: INK }).borderRadius(8)
-      .shadow({ radius: INK_SHADOW_RADIUS, offsetX: 7, offsetY: 8, color: INK })
+      .shadow({ radius: 0, offsetX: 7, offsetY: 8, color: INK })
     }
     .width('100%').height('100%').backgroundColor('#77000000').zIndex(120)
   }
@@ -1993,10 +2575,10 @@ struct DrumMachinePage {
                 .onClick(() => this.closeEditor())
             }.width('100%')
             Row({ space: 16 }) {
-              Text(`段落 ${this.sections[this.selectedSection].id}`)
+              Text(`段落 ${this.sectionDisplayId(this.selectedSection)}`)
                 .fontSize(14).fontWeight(900).fontColor(CORAL)
                 .padding({ left: 9, right: 9, top: 3, bottom: 3 })
-                .border({ width: 1.5, color: CORAL }).borderRadius(7)
+                .border({ width: 1.5, color: CORAL }).borderRadius(DRUM_OUTER_RADIUS)
               Text(`${this.beatsPerBar}/${this.beatUnit}`).fontSize(21).fontWeight(900).fontColor(PAPER)
             }.width('100%')
           }.width('100%').padding({ left: 20, right: 16, top: 14, bottom: 18 }).backgroundColor(INK)
@@ -2015,13 +2597,18 @@ struct DrumMachinePage {
                 Text('每拍细分').fontSize(12).fontWeight(FontWeight.Bold).fontColor(INK)
                 Row({ space: DRUM_EDITOR_SUBDIVISION_GAP }) {
                   ForEach(DRUM_EDITOR_SUBDIVISIONS, (subdivision: number) => {
-                    Button(subdivision === 4 ? '4 等分' : `${subdivision} 连音`, { type: ButtonType.Normal })
-                      .layoutWeight(1).height(DRUM_EDITOR_SUBDIVISION_HEIGHT).padding(0)
-                      .fontSize(12).fontWeight(900).fontColor(INK)
-                      .backgroundColor(this.editorSubdivision === subdivision ? CORAL : PAPER)
-                      .border({ width: 1.2, color: INK }).borderRadius(6)
-                      .accessibilityText(`每拍${subdivision}等分${this.editorSubdivision === subdivision ? '，已选择' : ''}`)
-                      .onClick(() => this.chooseEditorSubdivision(subdivision))
+                    Column() {
+                      DrumPaper({ fill: this.editorSubdivision === subdivision ? CORAL : WHITE,
+                        cornerRadius: DRUM_INNER_RADIUS, paperLineWidth: 1.2,
+                        offsetX: DRUM_EDITOR_CONTROL_SHADOW_OFFSET, offsetY: DRUM_EDITOR_CONTROL_SHADOW_OFFSET }) {
+                        Button(subdivision === 4 ? '4 等分' : `${subdivision} 连音`, { type: ButtonType.Normal })
+                          .width('100%').height(DRUM_EDITOR_SUBDIVISION_HEIGHT).padding(0)
+                          .fontSize(12).fontWeight(900).fontColor(INK).backgroundColor('#00000000')
+                          .borderRadius(DRUM_INNER_RADIUS)
+                          .accessibilityText(`每拍${subdivision}等分${this.editorSubdivision === subdivision ? '，已选择' : ''}`)
+                          .onClick(() => this.chooseEditorSubdivision(subdivision))
+                      }
+                    }.layoutWeight(1)
                   }, (subdivision: number) => `${subdivision}`)
                 }.layoutWeight(1)
               }.width('100%')
@@ -2031,16 +2618,21 @@ struct DrumMachinePage {
                 Text('点格子编辑 · 点数字定位').fontSize(11).fontColor('#625D55')
               }.width('100%')
               if (this.editorOffGridCount() > 0) {
-                Button({ type: ButtonType.Normal }) {
-                  Row({ space: 6 }) {
-                    Rect().width(6).height(6).fill(INK).rotate({ angle: 45 })
-                    Text(`就近保留 ${this.editorOffGridCount()} 个细分鼓点`)
-                      .fontSize(12).fontWeight(FontWeight.Bold).fontColor(INK)
-                  }.width('100%').justifyContent(FlexAlign.Start)
-                }.width('100%').height(30).padding({ left: 8, right: 8 }).backgroundColor('#E8DFF2')
-                  .border({ width: 0.8, color: '#A89BB6' }).borderRadius(5)
-                  .accessibilityText(`就近保留 ${this.editorOffGridCount()} 个细分鼓点，将全部菱形吸附到当前网格`)
-                  .onClick(() => this.snapAllEditorOffGridEvents())
+                Column() {
+                  DrumPaper({ fill: '#E8DFF2', cornerRadius: DRUM_INNER_RADIUS, paperLineWidth: 1,
+                    offsetX: DRUM_EDITOR_CONTROL_SHADOW_OFFSET, offsetY: DRUM_EDITOR_CONTROL_SHADOW_OFFSET }) {
+                    Button({ type: ButtonType.Normal }) {
+                      Row({ space: 6 }) {
+                        Rect().width(6).height(6).fill(INK).rotate({ angle: 45 })
+                        Text(`就近保留 ${this.editorOffGridCount()} 个细分鼓点`)
+                          .fontSize(12).fontWeight(FontWeight.Bold).fontColor(INK)
+                      }.width('100%').justifyContent(FlexAlign.Start)
+                    }.width('100%').height(30).padding({ left: 8, right: 8 }).backgroundColor('#00000000')
+                      .borderRadius(DRUM_INNER_RADIUS)
+                      .accessibilityText(`就近保留 ${this.editorOffGridCount()} 个细分鼓点，将全部菱形吸附到当前网格`)
+                      .onClick(() => this.snapAllEditorOffGridEvents())
+                  }
+                }.width('100%')
               }
             }.width('100%').padding({ left: 16, right: 16 })
             Scroll() {
@@ -2085,17 +2677,18 @@ struct DrumMachinePage {
                           Row() {
                             ForEach(this.editorStepIndexes(), (step: number) => {
                               Row() {
-                                Button('', { type: ButtonType.Normal }).width(DRUM_EDITOR_BUTTON_WIDTH)
-                                  .height(this.editorTrackRowHeight - 8).padding(0)
-                                  .backgroundColor(this.editorCellColor(trackIndex, step))
-                                  .border({ width: 0.8, color: '#776F65', radius: DRUM_EDITOR_CELL_RADIUS })
-                                  .borderRadius(DRUM_EDITOR_CELL_RADIUS).clip(true)
-                                  .enabled(this.editorStepEditable(step))
-                                  .opacity(this.editorStepEditable(step) ? 1 : DRUM_EDITOR_LOCKED_CELL_OPACITY)
-                                  .accessibilityText(this.editorStepEditable(step) ?
+                                // Fixed cell geometry keeps shadow rendering free of per-cell area observers.
+                                ActionButton({ active: this.editorStepEditable(step),
+                                  controlWidth: DRUM_EDITOR_BUTTON_WIDTH, controlHeight: this.editorTrackRowHeight - 8,
+                                  fill: this.editorCellColor(trackIndex, step), cornerRadius: DRUM_EDITOR_CELL_RADIUS,
+                                  lineWidth: 0.8, lineColor: '#776F65',
+                                  hardShadow: { offsetX: DRUM_EDITOR_CELL_SHADOW_OFFSET,
+                                    offsetY: DRUM_EDITOR_CELL_SHADOW_OFFSET, color: INK },
+                                  accessibilityLabel: this.editorStepEditable(step) ?
                                     `${_track.name}，第 ${Math.floor(step / this.editorSubdivision) + 1} 拍第 ${step % this.editorSubdivision + 1} 格，${this.editorCellEnabled(trackIndex, step) ? '关闭' : '添加'}鼓点` :
-                                    `${_track.name}，第 ${Math.floor(step / this.editorSubdivision) + 1} 拍第 ${step % this.editorSubdivision + 1} 格，主节奏，不可编辑`)
-                                  .onClick(() => this.toggleStep(trackIndex, step))
+                                    `${_track.name}，第 ${Math.floor(step / this.editorSubdivision) + 1} 拍第 ${step % this.editorSubdivision + 1} 格，主节奏，不可编辑`,
+                                  action: () => this.toggleStep(trackIndex, step)
+                                })
                               }.width(DRUM_EDITOR_CELL_WIDTH).height(this.editorTrackRowHeight)
                                 .justifyContent(FlexAlign.Center)
                                 .border({ width: { left: step % this.editorSubdivision === 0 ? 1 :
@@ -2104,18 +2697,20 @@ struct DrumMachinePage {
                             }, (step: number) => `${step}`)
                           }.height(this.editorTrackRowHeight).width(this.editorGridWidth())
                           ForEach(this.editorOffGridEvents(trackIndex), (event: SequencerEvent) => {
-                            Button({ type: ButtonType.Normal }) {
+                            Stack() {
+                            ActionButton({ active: this.editorEventTickEditable(event.tick),
+                              controlWidth: DRUM_EDITOR_OFF_GRID_HIT_SIZE, controlHeight: this.editorTrackRowHeight,
+                              fill: '#00000000', cornerRadius: 0,
+                              accessibilityLabel: this.editorEventTickEditable(event.tick) ?
+                                `${_track.name}，第 ${(event.tick / DEFAULT_TICKS_PER_BEAT + 1).toFixed(2)} 拍，点按就近保留到当前格子` :
+                                `${_track.name}，第 ${(event.tick / DEFAULT_TICKS_PER_BEAT + 1).toFixed(2)} 拍，主节奏，不可编辑`,
+                              action: () => this.snapEditorEventToGrid(trackIndex, event.tick)
+                            }) {
                               Rect().width(DRUM_EDITOR_OFF_GRID_SIZE).height(DRUM_EDITOR_OFF_GRID_SIZE)
                                 .fill(INK).stroke(PAPER).strokeWidth(1).rotate({ angle: 45 })
-                            }.width(DRUM_EDITOR_OFF_GRID_HIT_SIZE).height(this.editorTrackRowHeight).padding(0)
-                              .backgroundColor('#00000000').borderRadius(0)
-                              .enabled(this.editorEventTickEditable(event.tick))
-                              .opacity(this.editorEventTickEditable(event.tick) ? 1 : DRUM_EDITOR_LOCKED_CELL_OPACITY)
+                            }
+                            }.width(DRUM_EDITOR_OFF_GRID_HIT_SIZE).height(this.editorTrackRowHeight)
                               .position({ x: this.editorOffGridX(event), y: 0 })
-                              .accessibilityText(this.editorEventTickEditable(event.tick) ?
-                                `${_track.name}，第 ${(event.tick / DEFAULT_TICKS_PER_BEAT + 1).toFixed(2)} 拍，点按就近保留到当前格子` :
-                                `${_track.name}，第 ${(event.tick / DEFAULT_TICKS_PER_BEAT + 1).toFixed(2)} 拍，主节奏，不可编辑`)
-                              .onClick(() => this.snapEditorEventToGrid(trackIndex, event.tick))
                           }, (event: SequencerEvent) => `${event.sampleKey}-${event.tick}`)
                         }.height(this.editorTrackRowHeight).width(this.editorGridWidth())
                           .border({ width: { bottom: 0.7 }, color: '#B9B0A2' })
@@ -2148,19 +2743,29 @@ struct DrumMachinePage {
               .onAreaChange((_old: Area, area: Area) => this.updateEditorGridViewport(Number(area.height)))
           }.width('100%').layoutWeight(1).backgroundColor(PAPER)
           Row({ space: 8 }) {
-            Button({ type: ButtonType.Normal }) {
-              Row({ space: 6 }) {
-                Image($rawfile(this.previewTarget === 'editor' ? 'comic/icons/stop.svg' : 'comic/icons/play.svg'))
-                  .width(17).height(17).objectFit(ImageFit.Contain)
-                Text(this.previewTarget === 'editor' ? '停止' : '试听').fontSize(14).fontWeight(900).fontColor(INK)
-              }.justifyContent(FlexAlign.Center)
-            }.layoutWeight(1.2).height(DRUM_EDITOR_ACTION_HEIGHT).padding(0)
-              .backgroundColor(LILAC).border({ width: 1.5, color: INK }).borderRadius(7).shadow(CONTROL_SHADOW)
-              .onClick(() => { void this.toggleEditorPreview(); })
-            Button(this.editorMode === 0 ? '应用到节奏型' : '应用到加花', { type: ButtonType.Normal })
-              .layoutWeight(2).height(DRUM_EDITOR_ACTION_HEIGHT).padding(0).fontSize(14).fontWeight(900).fontColor(INK)
-              .backgroundColor(CORAL).border({ width: 1.5, color: INK }).borderRadius(7).shadow(CONTROL_SHADOW)
-              .onClick(() => this.saveEditor())
+            Column() {
+              DrumPaper({ fill: LILAC, cornerRadius: DRUM_OUTER_RADIUS,
+                offsetX: DRUM_EDITOR_ACTION_SHADOW_OFFSET, offsetY: DRUM_EDITOR_ACTION_SHADOW_OFFSET }) {
+                Button({ type: ButtonType.Normal }) {
+                  Row({ space: 6 }) {
+                    Image($rawfile(this.previewTarget === 'editor' ? 'comic/icons/stop.svg' : 'comic/icons/play.svg'))
+                      .width(17).height(17).objectFit(ImageFit.Contain)
+                    Text(this.previewTarget === 'editor' ? '停止' : '试听').fontSize(14).fontWeight(900).fontColor(INK)
+                  }.justifyContent(FlexAlign.Center)
+                }.width('100%').height(DRUM_EDITOR_ACTION_HEIGHT).padding(0)
+                  .backgroundColor('#00000000').borderRadius(DRUM_OUTER_RADIUS)
+                  .onClick(() => { void this.toggleEditorPreview(); })
+              }
+            }.layoutWeight(1.2)
+            Column() {
+              DrumPaper({ fill: CORAL, cornerRadius: DRUM_OUTER_RADIUS,
+                offsetX: DRUM_EDITOR_ACTION_SHADOW_OFFSET, offsetY: DRUM_EDITOR_ACTION_SHADOW_OFFSET }) {
+                Button(this.editorMode === 0 ? '应用到节奏型' : '应用到加花', { type: ButtonType.Normal })
+                  .width('100%').height(DRUM_EDITOR_ACTION_HEIGHT).padding(0).fontSize(14).fontWeight(900).fontColor(INK)
+                  .backgroundColor('#00000000').borderRadius(DRUM_OUTER_RADIUS)
+                  .onClick(() => this.saveEditor())
+              }
+            }.layoutWeight(2)
           }.width('100%').padding({ left: 12, right: 14, top: 14, bottom: 16 })
             .backgroundColor(PAPER).border({ width: { top: 2 }, color: INK })
         }.width('100%').height('100%').backgroundColor(PAPER)
@@ -2169,7 +2774,7 @@ struct DrumMachinePage {
         .constraintSize({ maxWidth: DRUM_EDITOR_PANEL_MAX_WIDTH, maxHeight: DRUM_EDITOR_PANEL_MAX_HEIGHT })
         .backgroundColor(PAPER).border({ width: 2, color: INK, radius: DRUM_EDITOR_PANEL_RADIUS })
         .borderRadius(DRUM_EDITOR_PANEL_RADIUS)
-        .shadow({ radius: INK_SHADOW_RADIUS, offsetX: 4, offsetY: 6, color: INK })
+        .shadow({ radius: 0, offsetX: 4, offsetY: 6, color: INK })
     }.width('100%').height('100%')
       .padding({ left: DRUM_EDITOR_OVERLAY_SIDE_INSET, right: DRUM_EDITOR_OVERLAY_SIDE_INSET,
         top: this.topSafeInset + DRUM_EDITOR_OVERLAY_VERTICAL_INSET,
@@ -2177,144 +2782,218 @@ struct DrumMachinePage {
       .backgroundColor('#66000000').zIndex(100)
   }
 
+  @Builder
+  private pageHeader() {
+    Row({ space: 5 }) {
+      Button({ type: ButtonType.Normal }) {
+        Path().commands(`M ${vp2px(13)} ${vp2px(3)} L ${vp2px(5)} ${vp2px(11)} L ${vp2px(13)} ${vp2px(19)}`)
+          .width(18).height(22).fill('#00000000').stroke(INK).strokeWidth(3)
+      }.width(25).height(32).padding(0).backgroundColor('#00000000').onClick(() => router.back())
+      Text('定制鼓机').fontSize(26).fontWeight(900).fontStyle(FontStyle.Italic).fontColor(INK)
+      Text('PRO').fontSize(10).fontWeight(900).fontColor(INK).backgroundColor('#FFD05A')
+        .padding({ left: 5, right: 5, top: 2, bottom: 2 }).borderRadius(3)
+      Blank()
+    }.width('100%').height(DRUM_HEADER_HEIGHT)
+  }
+
+  @Builder
+  private settingsHeader() {
+    Row({ space: 8 }) {
+      Text('拍号').fontSize(13).fontWeight(900).fontColor(INK)
+      Column() {
+        DrumPaper({ fill: WHITE, cornerRadius: DRUM_INNER_RADIUS, paperLineWidth: 1,
+          offsetX: 1, offsetY: 1 }) {
+          Button({ type: ButtonType.Normal }) {
+            Row() {
+              Text(`${this.beatsPerBar}/${this.beatUnit}`).fontSize(17).fontWeight(900)
+              Blank()
+              this.chevron(false)
+            }.width('100%')
+          }.width('100%').height(26).padding({ left: 9, right: 6 }).fontColor(INK).backgroundColor('#00000000')
+            .borderRadius(DRUM_INNER_RADIUS)
+            .accessibilityText('编辑拍号')
+            .onClick(() => { this.closeDropdown(); this.meterEditorVisible = true; })
+        }
+      }.layoutWeight(1.1)
+      Divider().vertical(true).height(22).strokeWidth(0.6).color('#BFC0BB')
+      Text('BPM').fontSize(13).fontWeight(900).fontColor(INK)
+      this.tempoStepButton('−', -1)
+      Column() {
+        DrumPaper({ fill: WHITE, cornerRadius: DRUM_INNER_RADIUS, paperLineWidth: 1,
+          offsetX: 1, offsetY: 1 }) {
+          EditableBpm({
+            value: this.bpm, editable: true, inputId: 'drum-machine-bpm-input',
+            controlWidth: '100%', controlHeight: 26, valueFontSize: 18, italicValue: false,
+            controlCornerRadius: DRUM_INNER_RADIUS, controlShadow: { radius: 0, color: '#00000000' },
+            onCommit: (value: number): void => { void this.setBpm(value); }
+          })
+        }
+      }.layoutWeight(0.8)
+      this.tempoStepButton('+', 1)
+    }.width('100%').height(DRUM_SETTINGS_HEIGHT).padding({ bottom: 6 })
+      .border({ width: { bottom: 0.7 }, color: '#CBC5BB' })
+  }
+
+  @Builder
+  private tempoStepButton(label: string, delta: number) {
+    Column() {
+      ActionButton({ label: label, active: delta < 0 ? this.bpm > 40 : this.bpm < 240,
+        controlHeight: 26, fill: WHITE, labelSize: 20, labelWeight: 900,
+        cornerRadius: DRUM_INNER_RADIUS, lineWidth: 1,
+        hardShadow: { offsetX: 1, offsetY: 1, color: INK },
+        action: () => { void this.changeBpm(delta); }
+      })
+    }.width(27)
+  }
+
+  @Builder
+  private addSectionAction() {
+    ActionButton({ label: '+ 新增段落', active: this.sections.length < 8,
+      controlHeight: DRUM_ADD_SECTION_HEIGHT, fill: LILAC, labelSize: 17, labelWeight: 900,
+      cornerRadius: DRUM_INNER_RADIUS, lineWidth: 1.5,
+      hardShadow: { offsetX: 4, offsetY: 4, color: INK },
+      accessibilityLabel: this.sections.length < 8 ? '新增段落' : '最多编排 8 个段落',
+      action: () => this.addSection()
+    })
+  }
+
+  @Builder
+  private programActions() {
+    Row({ space: 8 }) {
+      Column() {
+        ActionButton({ label: this.previewTarget === 'song' ? '停止整曲' : '试听整曲',
+          active: this.previewTarget.length === 0 || this.previewTarget === 'song',
+          controlHeight: DRUM_ACTION_HEIGHT, fill: WHITE, cornerRadius: DRUM_INNER_RADIUS, lineWidth: 1.5,
+          hardShadow: { offsetX: 4, offsetY: 4, color: INK },
+          action: () => { void this.togglePreview(); }
+        }) {
+          Row({ space: 6 }) {
+            Image($rawfile(this.previewTarget === 'song' ? 'comic/icons/stop.svg' : 'comic/icons/play.svg'))
+              .width(14).height(14).objectFit(ImageFit.Contain)
+            Text(this.previewTarget === 'song' ? '停止整曲' : '试听整曲').fontSize(14).fontWeight(900).fontColor(INK)
+          }
+        }
+      }.layoutWeight(1)
+      Column() {
+        ActionButton({ label: this.saving ? '应用中…' : '应用到队伍 ›', active: this.isLeader() && !this.saving,
+          controlHeight: DRUM_ACTION_HEIGHT, fill: CORAL, labelSize: 14, labelWeight: 900,
+          cornerRadius: DRUM_INNER_RADIUS, lineWidth: 1.5,
+          hardShadow: { offsetX: 4, offsetY: 4, color: INK },
+          action: () => { void this.applyToTeam(); }
+        })
+      }.layoutWeight(1)
+    }.width('100%')
+  }
+
+  @Builder
+  private arrangementHeaderAction(save: boolean) {
+    Column() {
+      ActionButton({ label: save ? '保存' : '＋ 新建', active: !this.saving,
+        buttonId: save ? 'dm-save-program' : 'dm-new-program',
+        controlHeight: DRUM_ARRANGEMENT_ACTION_HEIGHT, fill: LILAC, labelSize: 13, labelWeight: 900,
+        cornerRadius: DRUM_INNER_RADIUS, lineWidth: 1,
+        hardShadow: { offsetX: 2, offsetY: 2, color: INK },
+        accessibilityLabel: save ? '保存编排' : '新建编排',
+        action: () => {
+            if (save) { this.openSaveDialog(); }
+            else { this.requestNewProgram(); }
+        }
+      })
+    }.width(DRUM_ARRANGEMENT_ACTION_WIDTH)
+  }
+
+  @Builder
+  private arrangementHeader() {
+    Column({ space: DRUM_ARRANGEMENT_HEADING_GAP }) {
+      Row({ space: 5 }) {
+        Text('编排').fontSize(24).fontWeight(900).fontStyle(FontStyle.Italic).fontColor(INK)
+        if (this.arrangementTitleName().length > 0) {
+          Text('·').fontSize(14).fontWeight(900).fontColor(INK)
+        }
+        Text(this.arrangementTitleName()).fontSize(14).fontWeight(FontWeight.Bold).fontColor(INK)
+          .layoutWeight(1).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+        Row({ space: DRUM_ARRANGEMENT_ACTION_GAP }) {
+          this.arrangementHeaderAction(false)
+          this.arrangementHeaderAction(true)
+        }.width(DRUM_ARRANGEMENT_ACTION_WIDTH * 2 + DRUM_ARRANGEMENT_ACTION_GAP)
+      }.width('100%').height(DRUM_ARRANGEMENT_TITLE_HEIGHT)
+      Row() {
+        Row({ space: 4 }) {
+          Text('风格跟着段落走').fontSize(10).fontWeight(FontWeight.Bold).fontColor('#656B70')
+          Image($rawfile('comic/icons/info.svg')).width(11).height(11).objectFit(ImageFit.Contain)
+        }.height(DRUM_ARRANGEMENT_META_HEIGHT)
+          .onClick(() => showUserNotice('每个段落可以单独选择风格，拍号和 BPM 由整曲共用。', 'drum.section-style-help'))
+        Blank()
+        Text(`${drumProgramStyleKeys(this.currentProgram()).length}种风格 · ${this.sections.length}/8段`)
+          .fontSize(11).fontWeight(900).fontColor(INK)
+      }.width('100%').height(DRUM_ARRANGEMENT_META_HEIGHT)
+    }.width('100%')
+  }
+
+  @Builder
+  private myPrograms() {
+    Column({ space: 8 }) {
+      Row() {
+        Text('我的编排').fontSize(18).fontWeight(900).fontColor(INK)
+        Blank()
+        Text(`${this.savedPrograms.length}个编排`).fontSize(11).fontWeight(900).fontColor('#555B60')
+      }.width('100%')
+      if (this.savedPrograms.length === 0) {
+        Text('点击“保存”，命名后会出现在这里。').fontSize(11).fontColor('#716A61')
+          .width('100%').height(42)
+      } else {
+        Scroll() {
+          Row({ space: 9 }) {
+            ForEach(this.savedPrograms, (saved: SavedDrumProgram) => {
+              this.savedProgramCard(saved)
+            }, (saved: SavedDrumProgram) => `${saved.id}:${this.savedProgramsRevision}`)
+          }.padding({ left: 1, right: 5, bottom: 5 }).justifyContent(FlexAlign.Start)
+        }.scrollable(ScrollDirection.Horizontal).scrollBar(BarState.Auto).width('100%').align(Alignment.TopStart)
+      }
+    }.width('100%').padding({ top: 12, bottom: 4 })
+      .border({ width: { top: 0.7 }, color: '#CBC5BB' })
+  }
+
   build() {
     Stack() {
-      Scroll() {
-        Column({ space: 14 }) {
-          Row() {
-            Text('‹').fontSize(32).width(32).onClick(() => router.back())
-            Text('定制鼓机').fontSize(30).fontWeight(900).fontStyle(FontStyle.Italic)
-            Text(' PRO ').fontSize(10).fontWeight(FontWeight.Bold).fontColor(PAPER).backgroundColor(INK)
-              .padding({ left: 5, right: 5, top: 3, bottom: 3 }).rotate({ angle: -4 })
-              .shadow(CONTROL_SHADOW)
-            Blank()
-            Button('保存', { type: ButtonType.Normal }).height(36).fontColor(INK).backgroundColor(CORAL)
-              .border({ width: 1.5, color: INK }).borderRadius(18).shadow(CONTROL_SHADOW).onClick(() => this.openSaveDialog())
-          }.width('100%')
-          Divider().strokeWidth(1).color('#D4CBBE')
-          Row() {
-            Text('选择风格').fontSize(16).fontWeight(900)
-            Blank()
-            Row({ space: 3 }) {
-              Text('横滑查看更多').fontSize(10).fontColor('#655E55')
-              Text('→').fontSize(16).fontWeight(900).fontColor('#655E55')
+      Column() {
+        Column() {
+          this.pageHeader()
+          this.settingsHeader()
+        }.width('100%').padding({ left: DRUM_PAGE_SIDE_INSET, right: DRUM_PAGE_SIDE_INSET,
+          top: this.topSafeInset + 8, bottom: 4 })
+        Scroll(this.pageScroller) {
+          // The menu shares the content coordinate system so page pans also move its pointer.
+          Stack({ alignContent: Alignment.TopStart }) {
+            Column() {
+              Column({ space: DRUM_BLOCK_GAP }) {
+                this.arrangementHeader()
+                ForEach(this.sections, (_section: DrumSection, index: number) => {
+                  this.sectionCard(index)
+                }, (_section: DrumSection, index: number) => this.sectionRenderKey(index))
+                this.addSectionAction()
+                if (this.previewTarget === 'song' && this.songPreviewMessage.length > 0) {
+                  Text(this.songPreviewMessage).width('100%').fontSize(12).lineHeight(18).fontColor('#B32E23')
+                }
+                this.myPrograms()
+              }.width('100%').padding({ left: DRUM_BODY_INSET, right: DRUM_BODY_INSET,
+                top: DRUM_CONTENT_TOP_INSET })
+            }.padding({ left: DRUM_PAGE_SIDE_INSET, right: DRUM_PAGE_SIDE_INSET,
+              bottom: DRUM_CONTENT_BOTTOM_INSET }).width('100%')
+            if (this.dropdownTarget.length > 0 && this.dropdownSectionIndex < this.sections.length) {
+              this.sectionDropdownOverlay()
             }
-          }.width('100%')
-          Scroll() {
-            Row({ space: 8 }) {
-              ForEach(DRUM_STYLES, (style: DrumStyle) => {
-                Column({ space: 2 }) {
-                  Text(style.name).fontSize(13).fontWeight(900)
-                  Text(style.caption).fontSize(9)
-                }.padding({ left: 12, right: 12, top: 7, bottom: 7 })
-                .backgroundColor(this.styleKey === style.key ? style.color : PAPER)
-                .border({ width: 1, color: INK }).borderRadius(5).shadow(CONTROL_SHADOW)
-                .onClick(() => this.chooseStyle(style.key))
-              }, (style: DrumStyle) => style.key)
-            }.padding({ bottom: 4 })
-          }.scrollable(ScrollDirection.Horizontal).width('100%')
-          Divider().strokeWidth(1).color('#D4CBBE')
-          Row() {
-            Text('拍号').fontSize(16).fontWeight(900).width(58)
-            EditableMeter({
-              beats: this.beatsPerBar,
-              unit: this.beatUnit,
-              editable: this.isLeader(),
-              controlWidth: '100%',
-              controlHeight: 38,
-              valueFontSize: 20,
-              onEdit: (): void => { this.meterEditorVisible = true; }
-            })
-            .layoutWeight(1)
-          }.width('100%')
-          Divider().strokeWidth(1).color('#D4CBBE')
-          Row({ space: 8 }) {
-            Text('BPM').fontSize(16).fontWeight(900).width(58)
-            Button({ type: ButtonType.Normal }) {
-              Text('−').fontSize(22).fontWeight(900).fontColor(INK).lineHeight(24)
-            }.width(38).height(38).padding(0).backgroundColor(PAPER)
-              .border({ width: 1, color: INK }).borderRadius(4).shadow(CONTROL_SHADOW)
-              .enabled(this.isLeader() && this.bpm > 40)
-              .onClick(() => { void this.changeBpm(-1); })
-            EditableBpm({
-              value: this.bpm,
-              editable: this.isLeader(),
-              inputId: 'drum-machine-bpm-input',
-              controlWidth: '100%',
-              controlHeight: 38,
-              valueFontSize: 32,
-              onCommit: (value: number): void => { void this.setBpm(value); }
-            }).layoutWeight(1)
-            Button({ type: ButtonType.Normal }) {
-              Text('+').fontSize(21).fontWeight(900).fontColor(INK).lineHeight(24)
-            }.width(38).height(38).padding(0).backgroundColor(PAPER)
-              .border({ width: 1, color: INK }).borderRadius(4).shadow(CONTROL_SHADOW)
-              .enabled(this.isLeader() && this.bpm < 240)
-              .onClick(() => { void this.changeBpm(1); })
-          }.width('100%')
-          Text(`每分钟 ${this.bpm} 个${beatUnitLabel(this.beatUnit)}音符拍点`)
-            .fontSize(11).fontColor('#66615A').width('100%')
-          Divider().strokeWidth(1).color('#D4CBBE')
-          Row() {
-            Text('编排').fontSize(16).fontWeight(900)
-            Blank()
-            Text(`${styleByKey(this.styleKey).name} · ${this.sections.length} 段`).fontSize(11).fontColor('#655E55')
-          }.width('100%')
-          ForEach(this.sections, (_section: DrumSection, index: number) => {
-            this.sectionCard(index)
-          }, (section: DrumSection) => `${section.id}-${section.patternIndex}-${section.repeats}-${section.fillEvery}`)
-          Button('+ 新增段落', { type: ButtonType.Normal }).width('100%').height(46).fontSize(17).fontWeight(900)
-            .fontColor(INK).backgroundColor(LILAC).border({ width: 1.5, color: INK }).borderRadius(6).shadow(CONTROL_SHADOW)
-            .enabled(this.sections.length < 8)
-            .opacity(this.sections.length < 8 ? 1 : 0.4)
-            .accessibilityText(this.sections.length < 8 ? '新增段落' : '最多编排 8 个段落')
-            .onClick(() => this.addSection())
-          Row({ space: 8 }) {
-            Button({ type: ButtonType.Normal }) {
-              Row({ space: 6 }) {
-                Image($rawfile(this.previewTarget === 'song' ?
-                  'comic/icons/stop.svg' : 'comic/icons/play.svg'))
-                  .width(19).height(19).objectFit(ImageFit.Contain)
-                Text(this.previewTarget === 'song' ? '停止整曲' : '试听整曲')
-                  .fontSize(14).fontWeight(900).fontColor(INK)
-              }.justifyContent(FlexAlign.Center)
-            }.layoutWeight(1).height(48).padding(0)
-              .fontColor(INK).backgroundColor(WHITE).border({ width: 1.5, color: INK }).borderRadius(6).shadow(CONTROL_SHADOW)
-              .enabled(this.previewTarget.length === 0 || this.previewTarget === 'song')
-              .onClick(() => { void this.togglePreview(); })
-            Button(this.saving ? '应用中…' : '应用到队伍 ›', { type: ButtonType.Normal }).layoutWeight(1.4).height(48)
-              .fontColor(INK).fontWeight(900).backgroundColor(CORAL).border({ width: 1.5, color: INK }).borderRadius(6).shadow(CONTROL_SHADOW)
-              .enabled(!this.saving).onClick(() => { void this.applyToTeam(); })
-          }.width('100%')
-          if (this.previewTarget === 'song' && this.songPreviewMessage.length > 0) {
-            Text(this.songPreviewMessage).width('100%').fontSize(12).lineHeight(18).fontColor('#B32E23')
-          }
-          Divider().strokeWidth(1).color('#D4CBBE')
-          Row() {
-            Text('我的节奏').fontSize(16).fontWeight(900)
-            Blank()
-            Text(`${this.savedPrograms.length} 个编排`).fontSize(11).fontWeight(FontWeight.Bold).fontColor('#655E55')
-          }.width('100%')
-          if (this.savedPrograms.length === 0) {
-            Row() {
-              Text('点击右上角“保存”，命名后会出现在这里。').fontSize(12).fontColor('#716A61')
-            }.width('100%').height(58).padding({ left: 12, right: 12 })
-            .backgroundColor('#FFFDF7').border({ width: 1, color: '#C8BFB1' }).borderRadius(6).shadow(CONTROL_SHADOW)
-          } else {
-            Scroll() {
-              Row({ space: 9 }) {
-                ForEach(this.savedPrograms, (saved: SavedDrumProgram) => {
-                  this.savedProgramCard(saved)
-                }, (saved: SavedDrumProgram) => saved.id)
-              }.padding({ bottom: 4 })
-            }.scrollable(ScrollDirection.Horizontal).width('100%')
-          }
-        }.padding({ left: 16, right: 16, top: this.topSafeInset + 12,
-          bottom: this.bottomSafeInset + 28 }).width('100%')
-      }.width('100%').height('100%').backgroundColor(PAPER)
-      if (this.dropdownTarget.length > 0) {
-        this.sectionDropdownOverlay()
-      }
+          }.id('dm-scroll-content').width('100%').clip(false)
+        }.id('dm-page-scroll').width('100%').layoutWeight(1).backgroundColor(PAPER)
+          // A short arrangement must start under the parameters rather than center in the spare viewport.
+          .align(Alignment.TopStart)
+          .onTouch((event: TouchEvent) => this.observePageTouch(event))
+        Column() {
+          this.programActions()
+        }.width('100%').padding({ left: DRUM_PAGE_SIDE_INSET, right: DRUM_PAGE_SIDE_INSET,
+          top: DRUM_FOOTER_INSET, bottom: this.bottomSafeInset + DRUM_FOOTER_INSET })
+          .backgroundColor(PAPER).border({ width: { top: 0.7 }, color: '#CBC5BB' })
+      }.width('100%').height('100%')
       if (this.editorVisible) {
         this.editorOverlay()
       }
@@ -2323,6 +3002,12 @@ struct DrumMachinePage {
       }
       if (this.overwriteDialogVisible) {
         this.overwriteDialogOverlay()
+      }
+      if (this.newProgramDialogVisible) {
+        this.newProgramDialogOverlay()
+      }
+      if (this.pendingStyleKey.length > 0) {
+        this.styleChangeOverlay()
       }
       if (this.meterEditorVisible) {
         MeterEditorOverlay({

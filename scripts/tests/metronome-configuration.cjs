@@ -17,7 +17,8 @@ const mocks = {
     },
     BuiltInRhythmFactory: { create: () => ({ beatsPerBar: 4 }) }
   },
-  './DrumMachineCatalog': { parseDrumProgram: raw => ({ styleKey: raw }), buildProgramSequence: () => [{}] },
+  './DrumMachineCatalog': { parseDrumProgram: raw => ({ styleKey: raw, sections: [] }),
+    drumProgramStyleKeys: program => [program.styleKey], buildProgramSequence: () => [{}] },
   './DrumSampleBank': { DrumSampleBank: { loadStyle: () => new Promise(resolve => loads.push(resolve)) } },
   '../common/MeterModel': { defaultBeatPointStates: () => [] }
 };

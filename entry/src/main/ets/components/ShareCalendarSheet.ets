@@ -1,6 +1,9 @@
+import { ActionButton } from './ActionButton';
+import { COMIC_CARD_INK_OFFSET } from './ComicInkSurface';
+import { DrumPaper } from './DrumPaper';
 import { getShareCheckInSummary, ShareCheckInDay } from '../store/ShareCheckInStore';
 import { formatTrialExpiry, resolveDrumAccess } from '../store/EntitlementStore';
-import { CARD_SHADOW, CONTROL_SHADOW, CORAL, INK, LILAC, PAPER, WHITE } from './ComicKit';
+import { CORAL, INK, LILAC, PAPER, WHITE } from './ComicKit';
 
 const SHARE_CALENDAR_SIDE_INSET: number = 18;
 const SHARE_CALENDAR_BOTTOM: number = 28;
@@ -174,9 +177,13 @@ export struct ShareCalendarSheet {
         Blank()
         Text(this.monthTitle).fontSize(15).fontWeight(900).fontColor(INK)
         Blank()
-        Text('›').fontSize(28).fontWeight(900).width(32).textAlign(TextAlign.Center)
-          .opacity(this.monthOffset < 0 ? 1 : 0.25).enabled(this.monthOffset < 0)
-          .onClick(() => this.moveMonth(1))
+        ActionButton({
+          label: '›', active: this.monthOffset < 0, controlWidth: 32, controlHeight: 'auto',
+          fill: Color.Transparent, cornerRadius: 0, accessibilityLabel: '下个月',
+          action: () => this.moveMonth(1)
+        }) {
+          Text('›').fontSize(28).fontWeight(900).width('100%').textAlign(TextAlign.Center)
+        }
       }.width('100%')
       Row() {
         ForEach(SHARE_CALENDAR_WEEKDAYS, (label: string) => {
@@ -229,59 +236,85 @@ export struct ShareCalendarSheet {
   build() {
     Stack({ alignContent: Alignment.Bottom }) {
       Column().width('100%').height('100%').backgroundColor('#400F0D09').onClick(() => this.onClose())
-      Column({ space: 11 }) {
-        Row() {
-          Text('打卡日历').fontSize(22).fontWeight(900).fontStyle(FontStyle.Italic).fontColor(INK)
-          Blank()
-          Text('×').fontSize(25).fontWeight(FontWeight.Bold).fontColor(INK).width(32).height(32)
-            .textAlign(TextAlign.Center).onClick(() => this.onClose())
-        }.width('100%')
-        Text() {
-          Span(`${this.accessLabel()} `)
-          ImageSpan($rawfile('comic/icons/info.svg')).width(SHARE_CALENDAR_INFO_SIZE).height(SHARE_CALENDAR_INFO_SIZE)
-            .verticalAlign(ImageSpanAlignment.CENTER)
-        }.fontSize(12).fontWeight(900).fontColor('#61566F').lineHeight(23).width('100%')
-          .accessibilityText(`${this.accessLabel()}，查看玩法说明`).onClick(() => { this.tab = 1; })
-        Text(`已连续 ${this.streakDays} 天 · ${this.todayCompleted ? '今日已打卡' : '今日待打卡'}`)
-          .fontSize(13).fontWeight(900).fontColor(INK).width('100%')
-        if (!this.ledgerReady || this.clockBlocked) {
-          Text(this.clockBlocked ? '设备时间发生回拨，请恢复自动时间后再打卡。已有记录会保留。' : '本机记录正在恢复，请稍后重试。')
-            .fontSize(11).fontColor('#A34530').lineHeight(18).width('100%')
-        }
-        Row() {
-          Text(this.tab === 0 ? '打卡记录' : '玩法说明').fontSize(13).fontWeight(900).fontColor(INK)
-          Blank()
-          if (this.tab === 1) {
-            Button('‹ 返回日历', { type: ButtonType.Normal }).width(94).height(SHARE_CALENDAR_SECTION_HEIGHT)
-              .padding({ left: 8, right: 8 }).fontSize(12).fontWeight(900).fontColor(INK)
-              .backgroundColor(PAPER).border({ width: 1, color: INK }).borderRadius(4)
-              .onClick(() => { this.tab = 0; })
+      Column() {
+        DrumPaper({
+          fill: '#FFF9EC',
+          paperWidth: '100%',
+          cornerRadius: 10,
+          paperLineWidth: 1.5,
+          offsetX: COMIC_CARD_INK_OFFSET,
+          offsetY: COMIC_CARD_INK_OFFSET
+        }) {
+          Column({ space: 11 }) {
+          Row() {
+            Text('打卡日历').fontSize(22).fontWeight(900).fontStyle(FontStyle.Italic).fontColor(INK)
+            Blank()
+            Text('×').fontSize(25).fontWeight(FontWeight.Bold).fontColor(INK).width(32).height(32)
+              .textAlign(TextAlign.Center).onClick(() => this.onClose())
+          }.width('100%')
+          Text() {
+            Span(`${this.accessLabel()} `)
+            ImageSpan($rawfile('comic/icons/info.svg')).width(SHARE_CALENDAR_INFO_SIZE).height(SHARE_CALENDAR_INFO_SIZE)
+              .verticalAlign(ImageSpanAlignment.CENTER)
+          }.fontSize(12).fontWeight(900).fontColor('#61566F').lineHeight(23).width('100%')
+            .accessibilityText(`${this.accessLabel()}，查看玩法说明`).onClick(() => { this.tab = 1; })
+          Text(`已连续 ${this.streakDays} 天 · ${this.todayCompleted ? '今日已打卡' : '今日待打卡'}`)
+            .fontSize(13).fontWeight(900).fontColor(INK).width('100%')
+          if (!this.ledgerReady || this.clockBlocked) {
+            Text(this.clockBlocked ? '设备时间发生回拨，请恢复自动时间后再打卡。已有记录会保留。' : '本机记录正在恢复，请稍后重试。')
+              .fontSize(11).fontColor('#A34530').lineHeight(18).width('100%')
           }
-        }.width('100%').height(SHARE_CALENDAR_SECTION_HEIGHT)
-        // Keep the shell and controls stationary; only the active tab scrolls on short screens.
-        // Separate scroll nodes also open each tab at its own beginning instead of reusing an old offset.
-        if (this.tab === 0) {
-          Scroll() {
-            this.calendar()
-          }.width('100%').layoutWeight(1).scrollBar(BarState.Off)
-        } else {
-          Scroll() {
-            this.rules()
-          }.width('100%').layoutWeight(1).scrollBar(BarState.Off)
-        }
-        if (this.showShareAction) {
-          Button('去分享作品', { type: ButtonType.Normal }).width('100%').height(42).fontSize(13).fontWeight(900).fontColor(INK)
-            .backgroundColor(LILAC).border({ width: 1, color: INK }).borderRadius(5).shadow(CONTROL_SHADOW)
-            .onClick(() => this.onShare())
-        }
-        if (this.showStoreAction && this.accessSource === 'locked') {
-          Text('畅游月卡也可直接解锁 ›').fontSize(12).fontWeight(FontWeight.Bold).fontColor('#61566F')
-            .onClick(() => this.onOpenStore())
+          Row() {
+            Text(this.tab === 0 ? '打卡记录' : '玩法说明').fontSize(13).fontWeight(900).fontColor(INK)
+            Blank()
+            if (this.tab === 1) {
+              DrumPaper({
+                fill: PAPER,
+                paperWidth: 'auto',
+                cornerRadius: 4,
+                paperLineWidth: 1,
+                offsetX: COMIC_CARD_INK_OFFSET,
+                offsetY: COMIC_CARD_INK_OFFSET
+              }) {
+                Button('‹ 返回日历', { type: ButtonType.Normal }).width(94).height(SHARE_CALENDAR_SECTION_HEIGHT)
+                  .padding({ left: 8, right: 8 }).fontSize(12).fontWeight(900).fontColor(INK)
+                  .backgroundColor('#00000000').onClick(() => { this.tab = 0; })
+              }
+            }
+          }.width('100%').height(SHARE_CALENDAR_SECTION_HEIGHT)
+          // Keep the shell and controls stationary; only the active tab scrolls on short screens.
+          // Separate scroll nodes also open each tab at its own beginning instead of reusing an old offset.
+          if (this.tab === 0) {
+            Scroll() {
+              this.calendar()
+            }.width('100%').layoutWeight(1).scrollBar(BarState.Off)
+          } else {
+            Scroll() {
+              this.rules()
+            }.width('100%').layoutWeight(1).scrollBar(BarState.Off)
+          }
+          if (this.showShareAction) {
+            DrumPaper({
+              fill: LILAC,
+              paperWidth: '100%',
+              cornerRadius: 5,
+              paperLineWidth: 1,
+              offsetX: COMIC_CARD_INK_OFFSET,
+              offsetY: COMIC_CARD_INK_OFFSET
+            }) {
+              Button('去分享作品', { type: ButtonType.Normal }).width('100%').height(42).fontSize(13).fontWeight(900)
+                .fontColor(INK).backgroundColor('#00000000').onClick(() => this.onShare())
+            }
+          }
+          if (this.showStoreAction && this.accessSource === 'locked') {
+            Text('畅游月卡也可直接解锁 ›').fontSize(12).fontWeight(FontWeight.Bold).fontColor('#61566F')
+              .onClick(() => this.onOpenStore())
+          }
+          }.width('100%').height(SHARE_CALENDAR_HEIGHT).constraintSize({ maxHeight: SHARE_CALENDAR_MAX_HEIGHT })
+            .padding(16)
         }
       }.width(`calc(100% - ${SHARE_CALENDAR_SIDE_INSET * 2}vp)`)
-        .height(SHARE_CALENDAR_HEIGHT).constraintSize({ maxHeight: SHARE_CALENDAR_MAX_HEIGHT }).padding(16)
-        .backgroundColor('#FFF9EC').border({ width: 1.5, color: INK }).borderRadius(10).shadow(CARD_SHADOW)
-        .margin({ bottom: SHARE_CALENDAR_BOTTOM + this.bottomInset })
+        .margin({ bottom: SHARE_CALENDAR_BOTTOM + this.bottomInset, right: COMIC_CARD_INK_OFFSET })
     }.width('100%').height('100%').zIndex(120)
   }
 }

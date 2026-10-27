@@ -31,8 +31,8 @@ const aec = { ...clip, micCaptureMode: 'system-aec', captureMappingVersion: 3 };
   assert.equal(mixer.processedMicPath(clip.micPath), `${clip.micPath}.clean-v3.f32`);
   assert.equal(mixer.processedMicPath(clip.micPath, 'screen-mic'), `${clip.micPath}.clean-v3.f32`);
   assert.equal(mixer.mixVersion(clip), 6, 'The legacy export version must remain unchanged');
-  assert.equal(mixer.mixVersion(aec), 7, 'Existing AEC exports must adopt the level fix once');
-  assert.equal(mixer.processedMicPath(clip.micPath, 'system-aec'), `${clip.micPath}.system-aec-v2.f32`,
+  assert.equal(mixer.mixVersion(aec), 8, 'Existing AEC exports must adopt the transient-safe level fix once');
+  assert.equal(mixer.processedMicPath(clip.micPath, 'system-aec'), `${clip.micPath}.system-aec-v3.f32`,
     'System AEC stems must never reuse a legacy echo-cleaned sidecar');
   mixer.validateCaptureTiming(clip);
   mixer.validateCaptureTiming({ ...clip, micCaptureMode: 'screen-mic' });
@@ -73,7 +73,7 @@ const aec = { ...clip, micCaptureMode: 'system-aec', captureMappingVersion: 3 };
       assert.equal(options.autoMicShiftConfidence, 0);
       assert.equal(options.micShiftUs, shift);
       assert.equal(options.gain, gain);
-      assert.equal(options.processedMicPath, `${clip.micPath}.system-aec-v2.f32`);
+      assert.equal(options.processedMicPath, `${clip.micPath}.system-aec-v3.f32`);
       assert.equal(options.innerPath, clip.innerPath);
       assert.equal(options.sourcePath, clip.sourcePath);
       assert.equal(options.innerOffsetUs, clip.innerOffsetUs,

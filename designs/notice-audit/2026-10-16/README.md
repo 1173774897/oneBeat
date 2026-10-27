@@ -64,7 +64,7 @@
 |---|---|---|
 | “PRO 定制鼓机包含在畅游月卡中”。[LeaderLobbyPage:969](/Users/lizhe/work/oneBeat/entry/src/main/ets/pages/LeaderLobbyPage.ets:969)、[DrumMachinePage:144](/Users/lizhe/work/oneBeat/entry/src/main/ets/pages/DrumMachinePage.ets:144) | 保留一次，入口体现权益 | 大厅阻止后不会再进入鼓机，因此这两个守卫不是一次操作必弹两次。可以把入口锁定状态做好，路由守卫保留为兜底。 |
 | “请填写节奏名称”。[DrumMachinePage:221](/Users/lizhe/work/oneBeat/entry/src/main/ets/pages/DrumMachinePage.ets:221) | 改为字段错误 | 名称输入框附近显示“请输入名称”，不漂浮。 |
-| “已保存／已更新我的节奏”。[DrumMachinePage:256](/Users/lizhe/work/oneBeat/entry/src/main/ets/pages/DrumMachinePage.ets:256) | 保留轻反馈或保存态 | 持久化结果值得确认；和列表更新、按钮状态三者择一，不要叠加。 |
+| “已保存／已更新我的编排”。[DrumMachinePage:256](/Users/lizhe/work/oneBeat/entry/src/main/ets/pages/DrumMachinePage.ets:256) | 保留轻反馈或保存态 | 持久化结果值得确认；和列表更新、按钮状态三者择一，不要叠加。 |
 | “已删除这个节奏”“已载入 …”。[DrumMachinePage:273](/Users/lizhe/work/oneBeat/entry/src/main/ets/pages/DrumMachinePage.ets:273)、[290](/Users/lizhe/work/oneBeat/entry/src/main/ets/pages/DrumMachinePage.ets:290) | 删除重复成功 Toast | 列表消失或编排切换已经直接可见。 |
 | “最多编排 8 个段落”“至少保留一个段落”。[DrumMachinePage:624](/Users/lizhe/work/oneBeat/entry/src/main/ets/pages/DrumMachinePage.ets:624)、[641](/Users/lizhe/work/oneBeat/entry/src/main/ets/pages/DrumMachinePage.ets:641) | 用边界控件状态表达 | 达到上限禁用新增、只剩一段禁用删除；必要时在控件附近给短说明。 |
 | “节奏型已编辑／加花已编辑”。[DrumMachinePage:1137](/Users/lizhe/work/oneBeat/entry/src/main/ets/pages/DrumMachinePage.ets:1137) | 删除成功 Toast | 关闭浮层、名称变“已编辑”已经能反馈应用成功；编辑频繁，打扰累积明显。 |
@@ -73,7 +73,7 @@
 | 覆盖同名节奏的“这个名字已经存在／继续保存会覆盖原有编排”。[DrumMachinePage:1780](/Users/lizhe/work/oneBeat/entry/src/main/ets/pages/DrumMachinePage.ets:1780) | 保留确认，标题缩短 | 覆盖已有数据需要明确后果；“同名警告”可改“覆盖已有节奏？”，避免重复三个标题。 |
 | 节奏型／加花名后的微时值、八格、混合细分说明。见 [editorPatternLabel:574](/Users/lizhe/work/oneBeat/entry/src/main/ets/pages/DrumMachinePage.ets:574) | 保留 | 用户之前明确要求；解释为何出现菱形游离鼓点，是当前乐句信息。 |
 | “点格子编辑 · 点数字定位”“就近保留 N 个其他细分鼓点”。[DrumMachinePage:1853](/Users/lizhe/work/oneBeat/entry/src/main/ets/pages/DrumMachinePage.ets:1853) | 保留简短帮助和条件操作 | 数字定位不容易发现；游离鼓点操作只在确实有游离点时出现，不能当通用提醒删掉。 |
-| “横滑查看更多”、我的节奏空态、命名说明。见 [DrumMachinePage:2013](/Users/lizhe/work/oneBeat/entry/src/main/ets/pages/DrumMachinePage.ets:2013)、[2111](/Users/lizhe/work/oneBeat/entry/src/main/ets/pages/DrumMachinePage.ets:2111) | 保留低干扰／条件说明 | 空态帮助用户完成首次保存；横滑说明可仅在首次使用显示，命名说明可并入占位文字。 |
+| “横滑查看更多”、我的编排空态、命名说明。见 [DrumMachinePage:2013](/Users/lizhe/work/oneBeat/entry/src/main/ets/pages/DrumMachinePage.ets:2013)、[2111](/Users/lizhe/work/oneBeat/entry/src/main/ets/pages/DrumMachinePage.ets:2111) | 保留低干扰／条件说明 | 空态帮助用户完成首次保存；横滑说明可仅在首次使用显示，命名说明可并入占位文字。 |
 | “节奏、加花与段落会作为轻量事件同步；每台设备使用本地鼓组采样播放。”[DrumMachinePage:2101](/Users/lizhe/work/oneBeat/entry/src/main/ets/pages/DrumMachinePage.ets:2101) | 删除或移到帮助 | 纯实现说明，对应用编排的决策没有帮助。 |
 | 旧 `saveLocal()` 的“已保存编排”。[DrumMachinePage:1466](/Users/lizhe/work/oneBeat/entry/src/main/ets/pages/DrumMachinePage.ets:1466) | 清理未调用代码时删除 | 当前不是用户打扰来源，不作为精简效果计数。 |
 

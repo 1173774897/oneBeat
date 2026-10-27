@@ -930,8 +930,11 @@ ProcessedMicInfo EnsureProcessedMic(const MixOptions &options, int innerFd, int 
                                 echo = oldEcho * (1 - blend) + newEcho * blend;
                             }
                             const int index = (processed + frame) * CHANNELS + channel;
-                            residual[index] = static_cast<float>(
-                                (static_cast<double>(microphone[index]) - echo) * micLevelGain);
+                            // Only quiet system-AEC stems use the static peak guard;
+                            // legacy FIR residuals and unity-gain captures stay unchanged.
+                            const double sample = static_cast<double>(microphone[index]) - echo;
+                            residual[index] = static_cast<float>(options.normalizeSystemMic ?
+                                onebeat_recording::ApplySystemMicLevel(sample, micLevelGain) : sample);
                         }
                     }
                     processed += count;

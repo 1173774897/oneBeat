@@ -3,11 +3,13 @@ import { router } from '@kit.ArkUI';
 import { fileUri } from '@kit.CoreFileKit';
 import { AppSession } from '../app/AppSession';
 import { logUserFailure, showUserNotice, userErrorMessage } from '../common/UserFeedback';
-import { CARD_SHADOW, CONTROL_SHADOW, CORAL, INK, LILAC, PAPER, WHITE } from '../components/ComicKit';
+import { comicInkSurface, COMIC_CARD_INK_OFFSET } from '../components/ComicInkSurface';
+import { CORAL, INK, LILAC, PAPER, WHITE } from '../components/ComicKit';
 import { RecordingClip, RecordingScope } from '../recording/RecordingModels';
 import { RecordingRepository } from '../recording/RecordingRepository';
 import { RecordingShareService } from '../sharing/RecordingShareService';
 import { ShareCalendarSheet } from '../components/ShareCalendarSheet';
+import { ActionButton } from '../components/ActionButton';
 import { getShareCheckInSummary, getShareCheckInTodayKey } from '../store/ShareCheckInStore';
 import { SHARE_CHECK_IN_DAY_MS } from '../store/ShareCheckInRules';
 
@@ -21,8 +23,8 @@ const SAVED_TICKET_INSET: number = 14;
 const SAVED_TICKET_FOOTER_HEIGHT: number = 132;
 const SAVED_TICKET_NOTCH: number = 8;
 const SAVED_TICKET_RADIUS: number = 14;
-const SAVED_TICKET_SHADOW_X: number = 5;
-const SAVED_TICKET_SHADOW_Y: number = 6;
+const SAVED_TICKET_SHADOW_X: number = COMIC_CARD_INK_OFFSET;
+const SAVED_TICKET_SHADOW_Y: number = COMIC_CARD_INK_OFFSET;
 const SAVED_COVER_MIN_HEIGHT: number = 180;
 const SAVED_COVER_MAX_HEIGHT: number = 420;
 const SAVED_SHARE_HEIGHT: number = 56;
@@ -315,27 +317,26 @@ struct SavedRecordingPage {
           .padding({ left: 8, right: 8, top: 5, bottom: 5 }).backgroundColor('#A6171B1F')
           .borderRadius(5).margin(10)
       }
-    }.width('100%').height(this.coverHeight()).backgroundColor('#F0EADD').borderRadius(10)
+    }.width('100%').height(this.coverHeight()).backgroundColor('#F0EADD').borderRadius(8)
       .clip(true).accessibilityText('已保存视频的静态缩略图')
   }
 
   @Builder
   private shareButton() {
-    Stack() {
-      Row().width('100%').height(SAVED_SHARE_HEIGHT).backgroundColor(INK).borderRadius(14)
-        .translate({ x: 1, y: 4 }).hitTestBehavior(HitTestMode.None).accessibilityLevel('no')
-      Button({ type: ButtonType.Normal }) {
-        Row({ space: this.canCheckInToday ? 8 : 12 }) {
-          Image($rawfile('comic/icons/share_video.svg')).width(SAVED_SHARE_ICON_SIZE).height(SAVED_SHARE_ICON_SIZE)
-            .objectFit(ImageFit.Contain).accessibilityLevel('no')
-          Text(this.busy && !this.checkingIn ? '准备中…' : '分享').fontSize(this.canCheckInToday ? 18 : 22).fontWeight(900).fontColor(WHITE)
-        }.justifyContent(FlexAlign.Center)
-      }.width('100%').height(SAVED_SHARE_HEIGHT).padding({ left: 12, right: 12 })
-        .backgroundColor(CORAL).border({ width: 1.5, color: INK }).borderRadius(14)
-        .enabled(!this.busy && this.savedClip !== undefined).opacity(this.busy ? 0.65 : 1)
-        .accessibilityText(this.busy && !this.checkingIn ? '正在准备分享视频' : '分享视频，打开系统分享面板')
-        .onClick(() => this.requestShare())
-    }.width('100%').height(SAVED_SHARE_HEIGHT)
+    ActionButton({
+      active: !this.busy && this.savedClip !== undefined, controlHeight: SAVED_SHARE_HEIGHT,
+      fill: CORAL, cornerRadius: 8, lineWidth: 1.5, lineColor: INK,
+      contentPadding: { left: 12, right: 12 },
+      hardShadow: { offsetX: COMIC_CARD_INK_OFFSET, offsetY: COMIC_CARD_INK_OFFSET, color: INK },
+      accessibilityLabel: this.busy && !this.checkingIn ? '正在准备分享视频' : '分享视频，打开系统分享面板',
+      action: () => this.requestShare()
+    }) {
+      Row({ space: this.canCheckInToday ? 8 : 12 }) {
+        Image($rawfile('comic/icons/share_video.svg')).width(SAVED_SHARE_ICON_SIZE).height(SAVED_SHARE_ICON_SIZE)
+          .objectFit(ImageFit.Contain).accessibilityLevel('no')
+        Text(this.busy && !this.checkingIn ? '准备中…' : '分享').fontSize(this.canCheckInToday ? 18 : 22).fontWeight(900).fontColor(WHITE)
+      }.justifyContent(FlexAlign.Center)
+    }
   }
 
   @Builder
@@ -345,18 +346,18 @@ struct SavedRecordingPage {
         this.shareButton()
       }.layoutWeight(1)
       if (this.canCheckInToday) {
-        Stack() {
-          Row().width('100%').height(SAVED_SHARE_HEIGHT).backgroundColor(INK).borderRadius(14)
-            .translate({ x: 1, y: 4 }).hitTestBehavior(HitTestMode.None).accessibilityLevel('no')
-          Button(this.checkingIn ? '记卡中…' : '去打卡', { type: ButtonType.Normal })
-            .width('100%').height(SAVED_SHARE_HEIGHT).padding({ left: 8, right: 8 })
-            .fontSize(17).fontWeight(900).fontColor(INK).backgroundColor(LILAC)
-            .border({ width: 1.5, color: INK }).borderRadius(14).enabled(!this.busy)
-            .accessibilityText(this.checkingIn ? '正在保存今日打卡' : '确认已发布并查看分享日历')
-            .onClick(() => { void this.confirmToday(); })
-        }.width(SAVED_CHECK_IN_WIDTH).height(SAVED_SHARE_HEIGHT)
+        ActionButton({
+          label: this.checkingIn ? '记卡中…' : '去打卡', active: !this.busy,
+          controlWidth: SAVED_CHECK_IN_WIDTH, controlHeight: SAVED_SHARE_HEIGHT,
+          contentPadding: { left: 8, right: 8 }, labelSize: 17, labelWeight: 900, labelColor: INK,
+          fill: LILAC, lineWidth: 1.5, lineColor: INK, cornerRadius: 8,
+          hardShadow: { offsetX: COMIC_CARD_INK_OFFSET, offsetY: COMIC_CARD_INK_OFFSET, color: INK },
+          accessibilityLabel: this.checkingIn ? '正在保存今日打卡' : '确认已发布并查看分享日历',
+          action: () => { void this.confirmToday(); }
+        })
       }
     }.width('100%').height(SAVED_SHARE_HEIGHT)
+      .padding({ right: COMIC_CARD_INK_OFFSET, bottom: COMIC_CARD_INK_OFFSET })
   }
 
   @Builder
@@ -403,26 +404,37 @@ struct SavedRecordingPage {
         Text('先让练习停一拍').fontSize(23).fontWeight(900).fontStyle(FontStyle.Italic).fontColor(INK).width('100%')
         Text('分享会切换到其他应用。请先暂停练习，再打开系统分享面板；视频已经保存到相册。')
           .fontSize(13).fontColor('#625C54').lineHeight(21).width('100%')
-        Button('暂停练习并分享', { type: ButtonType.Normal }).width('100%').height(48)
-          .fontSize(16).fontWeight(900).fontColor(INK).backgroundColor(CORAL)
-          .border({ width: 1.5, color: INK }).borderRadius(6).shadow(CONTROL_SHADOW)
-          .enabled(!this.busy).onClick(() => { void this.pauseAndShare(); })
-        Text('继续练习，稍后再分享').fontSize(12).fontWeight(900).fontColor(INK).padding(6)
-          .enabled(!this.busy).onClick(() => { this.pauseConfirmVisible = false; })
+        ActionButton({
+          label: '暂停练习并分享', active: !this.busy, controlHeight: 48,
+          labelSize: 16, labelWeight: 900, labelColor: INK, fill: CORAL,
+          lineWidth: 1.5, lineColor: INK, cornerRadius: 6,
+          hardShadow: { offsetX: COMIC_CARD_INK_OFFSET, offsetY: COMIC_CARD_INK_OFFSET, color: INK },
+          action: () => { void this.pauseAndShare(); }
+        })
+        ActionButton({
+          label: '继续练习，稍后再分享', active: !this.busy, controlWidth: 'auto', controlHeight: 'auto',
+          labelSize: 12, labelWeight: 900, labelColor: INK, fill: Color.Transparent, contentPadding: 6,
+          action: () => { this.pauseConfirmVisible = false; }
+        })
       }.width(SAVED_PAUSE_SHEET_WIDTH).padding(20).backgroundColor(PAPER)
-        .border({ width: 2, color: INK }).borderRadius(9).shadow(CARD_SHADOW)
+        .border({ width: 2, color: INK }).borderRadius(9)
+        .background(comicInkSurface(PAPER, 9, COMIC_CARD_INK_OFFSET)).clip(false)
     }.width('100%').height('100%').backgroundColor('#82000000').zIndex(110)
+      .padding({ right: COMIC_CARD_INK_OFFSET, bottom: COMIC_CARD_INK_OFFSET })
   }
 
   build() {
     Stack() {
       Column() {
         Row() {
-          Button({ type: ButtonType.Normal }) {
-            Text('‹').fontSize(34).fontWeight(900).fontColor(INK).textAlign(TextAlign.Center)
-          }.width(44).height(44).padding(0).backgroundColor('#00000000')
-            .margin({ left: -10 }).enabled(!this.busy).accessibilityText('返回我的作品')
-            .onClick(() => router.back())
+          Row() {
+            ActionButton({
+              active: !this.busy, controlWidth: 44, controlHeight: 44,
+              fill: '#00000000', accessibilityLabel: '返回我的作品', action: () => router.back()
+            }) {
+              Text('‹').fontSize(34).fontWeight(900).fontColor(INK).textAlign(TextAlign.Center)
+            }
+          }.margin({ left: -10 })
           Blank()
           Text('同拍').fontSize(16).fontWeight(900).fontStyle(FontStyle.Italic).fontColor(INK)
         }.width('100%').height(44).margin({ top: this.topSafeInset + SAVED_HEADER_TOP })

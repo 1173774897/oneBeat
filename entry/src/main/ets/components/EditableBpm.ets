@@ -1,6 +1,8 @@
 import { FrameCallback } from '@kit.ArkUI';
 import { showUserNotice } from '../common/UserFeedback';
 import { CORAL, INK, PAPER, CONTROL_SHADOW } from './ComicKit';
+import { ActionButton } from './ActionButton';
+import { COMIC_CONTROL_INK_OFFSET } from './ComicInkSurface';
 
 const BPM_MIN: number = 40;
 const BPM_MAX: number = 240;
@@ -32,8 +34,12 @@ export struct EditableBpm {
   @Prop controlWidth: Length = 96;
   @Prop controlHeight: number = 50;
   @Prop valueFontSize: number = 40;
+  @Prop italicValue: boolean = true;
   @Prop valueColor: string = INK;
   @Prop valueShadow: ShadowOptions = { radius: 0, color: '#00000000' };
+  @Prop controlCornerRadius: number = 5;
+  @Prop controlShadow: ShadowOptions = CONTROL_SHADOW;
+  @Prop solidInk: boolean = false;
   @State editing: boolean = false;
   @State draft: string = '';
   @State inputAreaWidth: number = 0;
@@ -165,6 +171,11 @@ export struct EditableBpm {
 
   build() {
     Stack({ alignContent: Alignment.Center }) {
+      if (this.solidInk && this.editing) {
+        Rect().width('100%').height('100%').radius(this.controlCornerRadius).fill(INK)
+          .translate({ x: COMIC_CONTROL_INK_OFFSET, y: COMIC_CONTROL_INK_OFFSET })
+          .hitTestBehavior(HitTestMode.None).accessibilityLevel('no')
+      }
       if (this.editing) {
         TextInput({ text: this.draft, controller: this.inputController })
           .id(this.inputId)
@@ -177,7 +188,7 @@ export struct EditableBpm {
           .fontSize(this.inputFontSize())
           .maxLines(1)
           .fontWeight(900)
-          .fontStyle(FontStyle.Italic)
+          .fontStyle(this.italicValue ? FontStyle.Italic : FontStyle.Normal)
           .fontColor(INK)
           .textAlign(TextAlign.Center)
           .caretColor(CORAL)
@@ -185,8 +196,9 @@ export struct EditableBpm {
           .selectedBackgroundColor('#55FF7056')
           .backgroundColor(PAPER)
           .border({ width: BPM_INPUT_BORDER_WIDTH, color: INK })
-          .borderRadius(5)
-          .shadow(CONTROL_SHADOW)
+          .borderRadius(this.controlCornerRadius)
+          .shadow(this.solidInk ? { radius: 0, color: '#00000000' } : this.controlShadow)
+          .clip(false)
           .enabled(this.editable)
           .opacity(1)
           .onAppear(() => this.requestEditingFocus())
@@ -194,6 +206,10 @@ export struct EditableBpm {
           .onSubmit(() => this.commitEditing())
           .onBlur(() => this.commitEditing())
       } else {
+        ActionButton({ label: `${this.value}`, active: this.editable,
+          controlHeight: this.controlHeight, fill: '#00000000', cornerRadius: this.controlCornerRadius,
+          accessibilityLabel: `${this.value} BPM`, action: () => this.startEditing()
+        }) {
           Text(`${this.value}`)
             .width('100%')
             .height('100%')
@@ -202,13 +218,14 @@ export struct EditableBpm {
             .minFontSize(14)
             .maxLines(1)
             .fontWeight(900)
-            .fontStyle(FontStyle.Italic)
+            .fontStyle(this.italicValue ? FontStyle.Italic : FontStyle.Normal)
             .fontColor(this.valueColor)
             .textAlign(TextAlign.Center)
-            .textShadow(this.valueShadow)
-            .onClick(() => this.startEditing())
+            .textShadow(this.editable ? this.valueShadow : { radius: 0, color: '#00000000' })
+        }
       }
-    }.width(this.controlWidth).height(this.controlHeight)
+    }.width(this.controlWidth).height(this.controlHeight).clip(false)
       .onAreaChange((_previous: Area, area: Area) => this.updateInputArea(Number(area.width), Number(area.height)))
   }
+
 }

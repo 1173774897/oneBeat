@@ -85,6 +85,7 @@ function harness(options = {}) {
     }
   };
   const mocks = {
+    '../components/ComicInkSurface': { COMIC_CARD_INK_OFFSET: 4, COMIC_CONTROL_INK_OFFSET: 2 },
     '@kit.ArkTS': { util: { generateRandomUUID: () => 'synthetic-uuid-' + ++uuid } },
     '@kit.ArkUI': { router: {} },
     '../common/UserFeedback': feedback.exports,

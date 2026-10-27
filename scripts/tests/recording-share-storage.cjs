@@ -203,8 +203,8 @@ function services(environment = durableEnvironment()) {
     } } },
     './RecordingMixer': { RECORDING_MIX_VERSION: 6, MAX_MIC_SHIFT_US: 300000,
       RecordingMixer: {
-      mixVersion: clip => clip.micCaptureMode === 'system-aec' ? 7 : 6,
-      processedMicPath: (micPath, mode) => mode === 'system-aec' ? `${micPath}.system-aec-v2.f32` : `${micPath}.clean-v3.f32`,
+      mixVersion: clip => clip.micCaptureMode === 'system-aec' ? 8 : 6,
+      processedMicPath: (micPath, mode) => mode === 'system-aec' ? `${micPath}.system-aec-v3.f32` : `${micPath}.clean-v3.f32`,
       async exportMixed(clip, gain, output, micShiftUs) {
       mixCalls.push({ clip: plain(clip), gain, output, micShiftUs });
       environment.files.set(output, Buffer.from(
@@ -764,10 +764,10 @@ async function testSystemAecProvenanceAndRecovery() {
   const h = services(); await h.initialize();
   const oldAec = await addStemClip(h, 'team', { micCaptureMode: 'system-aec', captureSyncValid: true,
     captureMappingVersion: 3, videoTimestampDivisor: 1000, audioSampleRate: 48000,
-    renderedMixVersion: 6, autoMicShiftUs: 0, autoMicShiftConfidence: 0, autoMicShiftReliable: false });
+    renderedMixVersion: 7, autoMicShiftUs: 0, autoMicShiftConfidence: 0, autoMicShiftReliable: false });
   const aec = await h.repository.render(oldAec, 1);
   assert.notEqual(aec.path, oldAec.path, 'Previously quiet AEC exports upgrade at the same user gain');
-  assert.equal(aec.renderedMixVersion, 7);
+  assert.equal(aec.renderedMixVersion, 8);
   assert.equal(h.mixCalls.length, 1);
   assert.equal(aec.micCaptureMode, 'system-aec', 'Indexing and public clip copies retain capture provenance');
   assert.equal(h.repository.list('team')[0].micCaptureMode, 'system-aec');
@@ -805,15 +805,20 @@ async function testSystemAecProvenanceAndRecovery() {
   assert.equal(recovered.path, recoveryPath);
   assert.equal(recovered.micCaptureMode, 'system-aec', 'Failed-index render recovery must not fall back to legacy FIR processing');
   assert.equal(recovered.renderedMicShiftUs, -43000);
-  const processed = `${aec.micPath}.system-aec-v2.f32`;
+  const processed = `${aec.micPath}.system-aec-v3.f32`;
   h.environment.files.set(processed, Buffer.from('raw-system-aec-float-cache'));
   h.environment.files.set(`${processed}.tmp`, Buffer.from('interrupted-aec-cache-write'));
   const oldProcessed = `${aec.micPath}.system-aec-v1.f32`;
   h.environment.files.set(oldProcessed, Buffer.from('old-aec-cache'));
+  const peakCappedProcessed = `${aec.micPath}.system-aec-v2.f32`;
+  h.environment.files.set(peakCappedProcessed, Buffer.from('peak-capped-aec-cache'));
+  h.environment.files.set(`${peakCappedProcessed}.tmp`, Buffer.from('interrupted-old-aec-cache'));
   await restart.repository.remove(aec.id);
   assert.equal(h.environment.files.has(processed), false);
   assert.equal(h.environment.files.has(`${processed}.tmp`), false);
   assert.equal(h.environment.files.has(oldProcessed), false);
+  assert.equal(h.environment.files.has(peakCappedProcessed), false);
+  assert.equal(h.environment.files.has(`${peakCappedProcessed}.tmp`), false);
 
   const pendingTarget = await restart.repository.createTarget();
   const base = pendingTarget.path.substring(0, pendingTarget.path.length - 4);
@@ -944,7 +949,8 @@ function testLobbyToast() {
   assert.equal(result.diagnostics.filter(item => item.category === ts.DiagnosticCategory.Error).length, 0);
   let access = { allowed: false, source: 'locked', expiresAt: 0 };
   const routes = [], animations = [], notices = [];
-  const context = { exports: {}, Scroller: class {}, Map,
+  const context = { exports: {}, Scroller: class {}, Map, INK: '#171B1F',
+    COMIC_CONTROL_INK_OFFSET: 2, COMIC_CARD_INK_OFFSET: 4,
     resolveDrumAccess: () => access, isProDrumMachineAccessible: () => access.allowed,
     formatTrialExpiry: () => '10/19 20:00',
     showUserNotice: message => notices.push(message),

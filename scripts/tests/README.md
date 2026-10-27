@@ -12,10 +12,11 @@
 node /path/to/oneBeat/scripts/tests/run-sync-regressions.cjs /path/to/typescript/lib/typescript.js
 ```
 
-入口依次运行 25 个测试脚本，任何脚本失败、超过 60 秒，或未完成断言就退出，整个命令返回非零。优先使用已安装的 TypeScript，其次查找 DevEco 自带版本，不联网或安装依赖。播放基线测试需要本地 Git 中保留 `56c9e55`；缺少时直接报错，不跳过。
+入口依次运行所列回归脚本，任何脚本失败、超过 60 秒，或未完成断言就退出，整个命令返回非零。优先使用已安装的 TypeScript，其次查找 DevEco 自带版本，不联网或安装依赖。原生录音测试需要本地 C++17 编译器，macOS 默认使用 `clang++`，其他系统默认使用 `c++`，也可通过 `CXX` 指定可执行文件路径；缺少时明确失败，不跳过。播放基线测试需要本地 Git 中保留 `56c9e55`；缺少时直接报错，不跳过。
 
 | 保护点 | 主要测试 |
 |---|---|
+| 大厅蓝牙关闭时码位替换，二维码保留；真实蓝牙和广播双门槛、权限与设置回包隔离、开关事件合并，以及旧会话/邀请/广播结果不误报可用 | `lobby-bluetooth-invite.cjs`、`leader-invite-readiness.cjs` |
 | 写音频回调不能生成整段倒数或重建主序列；预热后重复配置、开始和恢复不重新生成；音色异步乱序；准备失效时静音并可恢复 | `metronome-count-in-realtime.cjs`、`metronome-configuration.cjs` |
 | 全员时钟准备成功后才发布共享开始；失败、超时、离开、旧回包与挂起发送不能误启动或破坏已排暂停；播放中改配置须先下发配置再准备，不能紧贴 TRANSPORT | `transport-start-readiness.cjs`、`transport-start-diagnostics.cjs`、`transport-restart-configuration-order.cjs` |
 | 慢 ping 不能污染拟合；可靠新样本纠正失效历史；原始 ping 不提前进入 Session 的时钟估计 | `clock-sync-fit.cjs` |
@@ -26,6 +27,8 @@ node /path/to/oneBeat/scripts/tests/run-sync-regressions.cjs /path/to/typescript
 | 整曲编辑保留当前小节、原点与播放归属，在后续小节边界切换真实 PCM；稳定段落／重复映射、增删、最新请求、失败保留旧音频、路由及普通音频恢复与共享配置隔离 | `drum-preview-live-update.cjs` |
 | 4／3／6 细分的音频长度与落点；十音色事件、力度与空白节奏保存；十二风格编排与旧八行格子兼容；爵士 Swing／Shuffle／六连滚奏；叮叮镲跨小节尾音；旧版队员拦截 | `drum-subdivision-model.cjs` |
 | 编辑器细分切换只改草稿；单个／全部菱形就近吸附、冲突合并；试听定位、停止续播、异步取消与横向跟随 | `drum-editor-preview.cjs` |
+| 行进页鼓机拍点只显示并拦截穿透点击；节拍器拍点保留三态循环、队长权限、忙碌与退出保护；切换模式后旧回调不改鼓机重音 | `walk-beat-point-mode.cjs` |
+| 行进页载入按上/下来源显示，编排同时显示卡内微环；原生延迟动画先提交帧，短任务防闪、长任务提示、并发/离页/旧回包隔离；本机PCM等待有界且不改变试听或transport归属 | `walk-loading-feedback.cjs`、`session-audio-configuration-readiness.cjs` |
 | 出口试音完整播放一强一弱；打卡测量的倒数、保存、取消与会话归属 | `route-probe-playback.cjs`、`time-card-calibration.cjs` |
 | 分享打卡按北京时间连续计日，同日幂等且只领一次、月卡期间不消耗领取机会；落盘后才投影 UI、崩溃重放与回拨边界；鼓机启动／恢复／试听到期验权且不异步切断播放 | `share-check-in.cjs` |
 
@@ -63,9 +66,13 @@ node /path/to/oneBeat/scripts/tests/run-sync-regressions.cjs /path/to/typescript
 
 统一入口还运行以下真实业务状态回归：
 
+- `recording-native-audio.cjs`：编译并执行生产 C++ 音频辅助函数。覆盖安静人声补偿、启动尖峰不压低整条录音、持续峰值保护、正常音量/静音/底噪不放大、软限幅连续性、左右声道和分块一致性、原轨不改写、伴奏增益不变，以及 PCM/时间戳转换。
+- `team-acoustic-probe.cjs`：调试包固定命令、录制/权限/会话边界、10 秒被动 MIC 采集、输出变化取消与发布包拒绝；现场抓取步骤见 `docs/design/headphone-speaker-sync-debug-2026-10-22.md`。
 - `recording-capture-lifecycle.cjs`：系统授权 STARTED 握手、运行时 MIC 权限、实际输入能量、停止幂等、后台/路由/电话中断与保存失败重试。
 - `recording-share-storage.cjs`：系统分享不自动打卡，显式发布确认、pending恢复与重复确认、成片索引失败的恢复文件、首帧封面提取/补齐/删除、相册复制；团队播放/连接与录制长时任务的联合所有权。
 - `recording-page-flow.cjs`：实际页面业务方法的授权隐藏/销毁差异、取消准备、停止不暂停练习、真实录制层状态、保存重试、播放中不创建视频播放器、队长明确暂停后再预览/分享、队员不能暂停全队，以及MIC音量/提前延后编辑的串行合并与续播。
 - `share-check-in.cjs`：北京时间自然日连续与断签、同日幂等、24h非累计、月卡跳过/到期、冷启动会员摘要、未知状态保留pending、旧bootstrap响应不覆盖新状态、交易与崩溃重放。
 
 这些模拟测试不证明打开麦克风或系统录屏后蓝牙实际输出不变，也不证明系统内录时序与可闻时间一致；必须用两台真机、已校准耳机做录制关→仅MIC开→关→完整录制开→关的声学对照，并检查成片画面、内音、MIC首尾相位。
+
+收音/AEC/混音算法或系统版本变更时，真机额外覆盖两种机型的“外放／耳机 × 普通节拍／鼓机”。每组保持同一声源、距离和说话音量，录下伴奏关闭和开启的同一句话；用共同内录事件和轨道起始偏移对齐后比较同源 MIC 电平，不能只比较整段 RMS 或成片总音量。记录输出及输入路由、原轨活跃电平、峰值、自动补偿和用户 MIC 音量。安静设备应补偿，正常设备不得被改响；伴奏开启前后若近端人声被系统抑制，保留原轨单独分析，不用提升伴奏或更改组队时间线来掩盖。

@@ -1,3 +1,4 @@
+import { ActionButton, ACTION_DISABLED_OPACITY } from '../components/ActionButton';
 import { router, promptAction } from '@kit.ArkUI';
 import { AppSession } from '../app/AppSession';
 import { MonotonicClock } from '../common/MonotonicClock';
@@ -623,24 +624,34 @@ struct AudioCalibrationPage {
 
   @Builder
   private tapPad() {
-    Stack({ alignContent: Alignment.Center }) {
-      Column({ space: 8 }) {
-        Text(this.phase === 'arming' ? '准备中' : '敲这里')
-          .fontSize(31).fontWeight(900).fontStyle(FontStyle.Italic).fontColor(INK)
-        Text(this.activeInstruction())
-          .fontSize(12).fontWeight(800).fontColor('#5C554D').textAlign(TextAlign.Center)
-        this.tapDotBoard()
+    Stack({ alignContent: Alignment.TopStart }) {
+      Stack({ alignContent: Alignment.TopStart }) {
+        Stack({ alignContent: Alignment.Center }) {
+          Column({ space: 8 }) {
+            Text(this.phase === 'arming' ? '准备中' : '敲这里')
+              .fontSize(31).fontWeight(900).fontStyle(FontStyle.Italic).fontColor(INK)
+            Text(this.activeInstruction())
+              .fontSize(12).fontWeight(800).fontColor('#5C554D').textAlign(TextAlign.Center)
+            this.tapDotBoard()
+          }
+        }
+        .width('100%')
+        .height(TAP_PAD_HEIGHT)
+        .backgroundColor(this.punchImpact > 0 ? '#FFD95E' : '#FFF0B8')
+        .border({ width: 2, color: INK })
+        .borderRadius({ topLeft: 16, topRight: 16 })
+        .shadow({ radius: 1, offsetX: 0, offsetY: -4, color: INK })
+        .enabled(this.phase !== 'arming')
+        .onTouch((event: TouchEvent): void => this.onTapTouch(event))
       }
-    }
-    .width('100%')
-    .height(TAP_PAD_HEIGHT)
-    .backgroundColor(this.punchImpact > 0 ? '#FFD95E' : '#FFF0B8')
-    .border({ width: 2, color: INK })
-    .borderRadius({ topLeft: 16, topRight: 16 })
-    .shadow({ radius: 1, offsetX: 0, offsetY: -4, color: INK })
-    .enabled(this.phase !== 'arming')
-    .opacity(this.phase === 'arming' ? 0.65 : 1)
-    .onTouch((event: TouchEvent): void => this.onTapTouch(event))
+      // This pad samples TouchEvent.Down rather than clicks. Keep that path intact
+      // and only share the disabled composition; include the 1px blur and -4px ink.
+      .width(`calc(100% + ${px2vp(8)}vp)`).height(TAP_PAD_HEIGHT + px2vp(8))
+      .padding({ left: px2vp(4), right: px2vp(4), top: px2vp(8) })
+      .margin({ left: -px2vp(4), right: -px2vp(4), top: -px2vp(8) })
+      .renderGroup(this.phase === 'arming')
+      .opacity(this.phase === 'arming' ? ACTION_DISABLED_OPACITY : 1)
+    }.width('100%').height(TAP_PAD_HEIGHT).clip(false)
   }
 
   @Builder
@@ -795,11 +806,11 @@ struct AudioCalibrationPage {
       .backgroundColor(this.btAudioActive ? '#FFF6D8' : '#FFE4DE')
       .border({ width: 1.5, color: INK }).borderRadius(7)
 
-      Button('保存并生效', { type: ButtonType.Normal })
-        .width('100%').height(56).fontSize(19).fontWeight(900).fontColor(INK)
-        .backgroundColor(CORAL).border({ width: 1.5, color: INK }).borderRadius(7)
-        .shadow(CONTROL_SHADOW).enabled(!this.saving).opacity(this.saving ? 0.55 : 1)
-        .onClick(() => { void this.finishAndSave(); })
+      ActionButton({
+        label: '保存并生效', active: !this.saving, controlHeight: 56,
+        labelSize: 19, labelWeight: 900, fill: CORAL, lineWidth: 1.5, cornerRadius: 7,
+        inkShadow: CONTROL_SHADOW, action: () => { void this.finishAndSave(); }
+      })
       Button('重新测量', { type: ButtonType.Normal })
         .width('100%').height(46).fontSize(15).fontWeight(900).fontColor(INK)
         .backgroundColor(LILAC).border({ width: 1.5, color: INK }).borderRadius(7)

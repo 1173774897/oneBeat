@@ -53,7 +53,7 @@ import {
   nextBeatPointState,
   normalizeBeatPointStates
 } from '../common/MeterModel';
-import { parseDrumProgram, serializeDrumProgram } from '../audio/DrumMachineCatalog';
+import { DrumProgram, parseDrumProgram, serializeDrumProgram } from '../audio/DrumMachineCatalog';
 import {
   defaultSessionAvatar,
   getExclusiveAvatarsLockedByReadyMembers,
@@ -76,6 +76,17 @@ export interface ProDrumEditorSettings {
   beatsPerBar: number;
   beatUnit: number;
   bpm: number;
+}
+
+interface DrumArrangementConfiguration {
+  program: string;
+  libraryId: string | undefined;
+  rhythm: number;
+  beatsPerBar: number;
+  beatUnit: number;
+  beatPointStates: BeatPointState[];
+  editorSettings: ProDrumEditorSettings | undefined;
+  state: TransportState;
 }
 
 type TransportPreparationResult = 'ready' | 'timeout' | 'failed' | 'cancelled' | 'disconnected';
@@ -128,6 +139,11 @@ export class SessionController {
   // An exited or superseded command cannot publish after its preparation promise
   // settles, including the microtask gap after a successful READY.
   private transportRequestGeneration: number = 0;
+  private drumArrangementUpdateId: number = 0;
+  private configurationTransportPublished: number = -1;
+  private drumArrangementBaseline: DrumArrangementConfiguration | undefined = undefined;
+  private drumArrangementPendingRaw: string = '';
+  private transportPreparationHandler: (() => Promise<boolean>) | undefined = undefined;
   private clockSyncWork: Promise<SyncSample> | undefined = undefined;
   // Diagnostic metadata only: transport preparation can inherit an in-flight
   // light resync, so the requested count does not prove how many samples ran.
@@ -146,6 +162,9 @@ export class SessionController {
   beatPointStates: BeatPointState[] = defaultBeatPointStates(4);
   rhythm: number = 0;
   drumProgram: string = '';
+  // Install-local library identity never enters the audio program or the wire protocol.
+  // undefined is an unknown origin; '' is an explicitly unnamed arrangement.
+  drumProgramLibraryId: string | undefined = undefined;
   avatarKey: string = defaultSessionAvatar();
   lobbyDeparted: boolean = false;
   localMemberId: string = '';
@@ -205,6 +224,19 @@ export class SessionController {
       beatUnit: beatUnit,
       bpm: Math.max(40, Math.min(240, bpm))
     };
+  }
+
+  /** Saving an identical applied draft may name it without preparing audio or restarting transport. */
+  rememberDrumProgramLibraryId(raw: string, libraryId: string): boolean {
+    if (!this.isLeader || this.rhythm !== 3 || this.drumProgram !== raw ||
+      this.drumArrangementPendingRaw === raw) { return false; }
+    if (this.drumProgramLibraryId !== libraryId) {
+      this.drumProgramLibraryId = libraryId;
+      // Identity is presentation-only. The full UI listener also configures audio
+      // and transport, so publish only the observed revision for this local change.
+      AppStorage.setOrCreate('sessionEpoch', (AppStorage.get<number>('sessionEpoch') ?? 0) + 1);
+    }
+    return true;
   }
 
   getLocalMemberId(): string {
@@ -526,6 +558,26 @@ export class SessionController {
     return Array.from(this.connectionMembers.values());
   }
 
+  /** Solo lobby only: member order follows Map insertion order and drives walk layout. */
+  async reorderSoloMembers(fromIndex: number, toIndex: number): Promise<void> {
+    if (!this.isLeader || !this.soloTeam) {
+      return;
+    }
+    const members = this.getMembers();
+    if (fromIndex < 0 || toIndex < 0 || fromIndex >= members.length || toIndex >= members.length ||
+      fromIndex === toIndex) {
+      return;
+    }
+    const next = members.slice();
+    const moved = next.splice(fromIndex, 1)[0];
+    next.splice(toIndex, 0, moved);
+    this.connectionMembers.clear();
+    for (let i = 0; i < next.length; i++) {
+      this.connectionMembers.set(next[i].id, next[i]);
+    }
+    await this.broadcastSnapshot();
+  }
+
   updateLeaderDisplayName(name: string): void {
     const leader = this.connectionMembers.get('leader');
     if (leader !== undefined) {
@@ -733,6 +785,10 @@ export class SessionController {
 
   async disconnect(): Promise<void> {
     this.transportRequestGeneration += 1;
+    this.drumArrangementUpdateId += 1;
+    this.drumArrangementBaseline = undefined;
+    this.drumArrangementPendingRaw = '';
+    this.drumProgramLibraryId = undefined;
     this.randomAvatarRevealsActive = false;
     this.stopRandomAvatarRevealTimer();
     this.revealedRandomAvatars.clear();
@@ -883,7 +939,7 @@ export class SessionController {
     await this.restartRunningTransportAfterConfiguration();
   }
 
-  private async restartRunningTransportAfterConfiguration(): Promise<void> {
+  private async restartRunningTransportAfterConfiguration(strictReady: boolean = false): Promise<boolean> {
     // Configure every peer first, then restart on a shared future downbeat. Applying
     // on packet receipt would let network latency put devices in different bars.
     // 发送前先强制队员重采样时钟偏移，避免重启时刻 offset 陈旧导致即使有充足 preroll 仍偏。
@@ -899,16 +955,19 @@ export class SessionController {
     // The engine keeps looping the old sequence until the shared boundary.
     await this.broadcastSnapshot();
     if (generation !== this.transportRequestGeneration) {
-      return;
+      return false;
     }
-    await this.prepareConnectedMembersForTransport();
+    const prepared = await this.prepareConnectedMembersForTransport(strictReady);
     if (generation !== this.transportRequestGeneration) {
-      return;
+      return false;
+    }
+    if (strictReady && prepared !== 'ready') {
+      throw new Error('播放准备未完成，编排未切换，请稍后重试');
     }
     this.state = 'countdown';
     await this.broadcastSnapshot();
     if (generation !== this.transportRequestGeneration) {
-      return;
+      return false;
     }
     const nextBarBeatIndex = (Math.floor(this.beatIndex / this.beatsPerBar) + 1) * this.beatsPerBar;
     this.beatIndex = nextBarBeatIndex;
@@ -923,9 +982,19 @@ export class SessionController {
       countInBeats: 0
     };
     const wire = createMessage('TRANSPORT', payload);
+    // Once published locally, a future transport may already be in flight to peers;
+    // callers must not roll its configuration back after a partial send failure.
+    this.configurationTransportPublished = generation;
+    // This configuration is now committed even if a later send fails or a new
+    // arrangement request starts while delivery is still pending.
+    if (this.drumArrangementPendingRaw === this.drumProgram) {
+      this.drumArrangementBaseline = undefined;
+      this.drumArrangementPendingRaw = '';
+    }
     AppStorage.setOrCreate('lastTransportMessage', JSON.stringify(wire));
     this.notifyUi();
     await this.sendToAll(wire);
+    return true;
   }
 
   async updateRhythm(rhythm: number): Promise<void> {
@@ -942,16 +1011,91 @@ export class SessionController {
     await this.restartRunningTransportAfterConfiguration();
   }
 
-  async updateDrumProgram(program: string): Promise<void> {
-    if (!this.isLeader || program.length === 0) { return; }
-    const restartRunningTransport = this.state === 'playing' || this.state === 'countdown';
-    this.drumProgram = program;
-    this.rhythm = 3;
-    if (!restartRunningTransport) {
-      await this.broadcastSnapshot();
-      return;
+  /** Meter and all section styles are one configuration; BPM and transport intent stay owned by the room. */
+  async updateDrumArrangement(raw: string, libraryId: string | undefined = undefined): Promise<boolean> {
+    if (!this.isLeader || raw.length === 0) { return false; }
+    const decoded = JSON.parse(raw) as DrumProgram;
+    if (decoded === null || !Array.isArray(decoded.sections) || decoded.sections.length === 0 ||
+      !isValidMeter(decoded.beatsPerBar, decoded.beatUnit)) {
+      throw new Error('编排内容无效，请重新保存后再试');
     }
-    await this.restartRunningTransportAfterConfiguration();
+    const program = parseDrumProgram(raw);
+    const next = serializeDrumProgram(program);
+    if (this.rhythm === 3 && next === this.drumProgram &&
+      this.beatsPerBar === program.beatsPerBar && this.beatUnit === program.beatUnit) {
+      // A candidate already rendered during preparation is not committed playback.
+      if (this.drumArrangementPendingRaw === next) { return false; }
+      if (libraryId !== undefined) { this.rememberDrumProgramLibraryId(next, libraryId); }
+      return true;
+    }
+    const updateId = ++this.drumArrangementUpdateId;
+    const baseline: DrumArrangementConfiguration = this.drumArrangementBaseline ?? {
+      program: this.drumProgram,
+      libraryId: this.drumProgramLibraryId,
+      rhythm: this.rhythm,
+      beatsPerBar: this.beatsPerBar,
+      beatUnit: this.beatUnit,
+      beatPointStates: this.beatPointStates.slice(),
+      editorSettings: this.getProDrumEditorSettings(),
+      state: this.state
+    };
+    // Superseding selections share the last committed baseline, not the previous
+    // uncommitted candidate; A then B failing must never leave A silently applied.
+    this.drumArrangementBaseline = baseline;
+    this.drumArrangementPendingRaw = next;
+    const running = this.state === 'playing' || this.state === 'countdown';
+    const restartGeneration = this.transportRequestGeneration + 1;
+    this.drumProgram = next;
+    this.drumProgramLibraryId = libraryId;
+    this.rhythm = 3;
+    this.beatsPerBar = program.beatsPerBar;
+    this.beatUnit = program.beatUnit;
+    this.beatPointStates = normalizeBeatPointStates(this.beatPointStates, this.beatsPerBar);
+    this.rememberProDrumEditorSettings(this.beatsPerBar, this.beatUnit, this.bpm);
+    try {
+      if (running) {
+        const applied = await this.restartRunningTransportAfterConfiguration(true);
+        if (!applied) {
+          throw new Error('编排切换已取消，请重试');
+        }
+      } else {
+        await this.broadcastSnapshot();
+      }
+      if (updateId !== this.drumArrangementUpdateId) { return false; }
+      this.drumArrangementBaseline = undefined;
+      this.drumArrangementPendingRaw = '';
+      return true;
+    } catch (error) {
+      // Preparation may finish after another selection/room action. Restore only
+      // our own pending configuration, never a newer edit or an emitted transport.
+      if (updateId === this.drumArrangementUpdateId && this.drumArrangementBaseline === baseline &&
+        this.drumProgram === next && this.beatsPerBar === program.beatsPerBar &&
+        this.beatUnit === program.beatUnit &&
+        (!running || this.configurationTransportPublished !== restartGeneration)) {
+        this.drumProgram = baseline.program;
+        this.drumProgramLibraryId = baseline.libraryId;
+        this.rhythm = baseline.rhythm;
+        this.beatsPerBar = baseline.beatsPerBar;
+        this.beatUnit = baseline.beatUnit;
+        this.beatPointStates = baseline.beatPointStates;
+        this.proDrumEditorSettings = baseline.editorSettings;
+        this.drumArrangementBaseline = undefined;
+        this.drumArrangementPendingRaw = '';
+        if (this.transportRequestGeneration === restartGeneration) {
+          this.state = baseline.state;
+        }
+        try {
+          await this.broadcastSnapshot();
+        } catch (_rollbackError) {
+          // Keep local truth restored even if the failed connection also rejects rollback.
+        }
+      }
+      throw new Error((error as Error).message ?? '编排切换未完成，请重试');
+    }
+  }
+
+  async updateDrumProgram(program: string): Promise<void> {
+    await this.updateDrumArrangement(program);
   }
 
   async updateSceneKey(key: string): Promise<void> {
@@ -1418,6 +1562,7 @@ export class SessionController {
     this.beatPointStates = normalizeBeatPointStates(
       snapshot.beatPointStates ?? beatPointStatesForRhythm(this.rhythm, this.beatsPerBar),
       this.beatsPerBar);
+    if (this.drumProgram !== (snapshot.drumProgram ?? '')) { this.drumProgramLibraryId = undefined; }
     this.drumProgram = snapshot.drumProgram ?? '';
     this.sceneKey = this.normalizeSceneKey(snapshot.sceneKey ?? 'sunset_coast');
     AppStorage.setOrCreate('selectedSceneKey', this.sceneKey);
@@ -1444,7 +1589,51 @@ export class SessionController {
     return key === 'neon_street' ? 'neon_street' : 'sunset_coast';
   }
 
-  private async prepareConnectedMembersForTransport(requireClockReady: boolean = false): Promise<TransportPreparationResult> {
+  /** The renderer prepares the current complete PCM program before a shared start can be acknowledged. */
+  setTransportPreparationHandler(handler: () => Promise<boolean>): void {
+    this.transportPreparationHandler = handler;
+  }
+
+  private async prepareLocalTransportConfiguration(): Promise<boolean> {
+    const handler = this.transportPreparationHandler;
+    if (handler === undefined) { return true; }
+    // A blocked native/resource request cannot extend the existing strict-start
+    // budget; its eventual result belongs only to this preparation attempt.
+    return await new Promise<boolean>((resolve: (ready: boolean) => void) => {
+      let settled = false;
+      const finish = (ready: boolean): void => {
+        if (settled) { return; }
+        settled = true;
+        clearTimeout(timer);
+        resolve(ready);
+      };
+      const timer = setTimeout(() => finish(false), TRANSPORT_START_PREPARE_TIMEOUT_MS);
+      try {
+        void handler().then((ready: boolean) => finish(ready), () => finish(false));
+      } catch (_error) {
+        finish(false);
+      }
+    });
+  }
+
+  private prepareConnectedMembersForTransport(requireClockReady: boolean = false): Promise<TransportPreparationResult> {
+    if (!requireClockReady || this.transportPreparationHandler === undefined) {
+      return this.prepareConnectedPeersForTransport(requireClockReady);
+    }
+    return this.prepareConnectedMembersAndLocalAudio();
+  }
+
+  private async prepareConnectedMembersAndLocalAudio(): Promise<TransportPreparationResult> {
+    const generation = this.transportRequestGeneration;
+    const local = this.prepareLocalTransportConfiguration();
+    const peers = this.prepareConnectedPeersForTransport(true);
+    const localReady = await local;
+    const peersReady = await peers;
+    if (generation !== this.transportRequestGeneration) { return 'cancelled'; }
+    return localReady ? peersReady : 'failed';
+  }
+
+  private async prepareConnectedPeersForTransport(requireClockReady: boolean = false): Promise<TransportPreparationResult> {
     this.finishTransportPreparation();
     if (this.soloTeam || this.authenticatedConnections.size === 0) {
       return 'ready';
@@ -1549,6 +1738,8 @@ export class SessionController {
     const offsetBeforeMs = this.clockSync.getOffsetMs();
     const reused = this.clockSyncWork !== undefined;
     const actualSampleCount = reused ? this.clockSyncWorkSampleCount : PING_SAMPLES;
+    const audioReadyWork = payload.requireClockReady === true && this.transportPreparationHandler !== undefined ?
+      this.prepareLocalTransportConfiguration() : undefined;
     let result = 'failure';
     let sampleOffset = 'unavailable';
     let sampleRtt = 'unavailable';
@@ -1564,6 +1755,8 @@ export class SessionController {
       // Best-effort pause preparation can retain the last valid offset. A strict
       // start instead receives an explicit failure ACK and publishes no deadline.
     }
+    const audioReady = audioReadyWork === undefined || await audioReadyWork;
+    if (!audioReady) { result = 'failure'; }
     console.info(`[TransportPrepareDiag] role=member stage=finish id=${payload.id} result=${result} ` +
       `requestedSampleCount=${PING_SAMPLES} actualSampleCount=${actualSampleCount} reused=${reused} ` +
       `elapsedMs=${(MonotonicClock.nowMs() - startedAtMs).toFixed(1)} ` +

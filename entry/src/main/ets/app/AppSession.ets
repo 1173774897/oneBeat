@@ -13,7 +13,7 @@ import {
   invitationWithGroupCredentials,
   P2pRoomInvitation
 } from '../network/p2p/P2pInvitation';
-import { PROTOCOL_VERSION } from '../common/Constants';
+import { PROTOCOL_VERSION, TRANSPORT_START_PREPARE_TIMEOUT_MS } from '../common/Constants';
 import { MonotonicClock } from '../common/MonotonicClock';
 import { defaultBeatPointStates } from '../common/MeterModel';
 import { SessionBackgroundKeeper } from '../session/SessionBackgroundKeeper';
@@ -61,6 +61,9 @@ export class AppSession {
   private latencyRouteProbeToken: number = 0;
   private latencyRouteProbeOwner: number = -1;
   private teamJoinedForWarmup: boolean = false;
+  // Bootstrap and foreground/radio refreshes may overlap; only their latest
+  // completed invitation can publish that manual-code discovery is available.
+  private leaderInviteRevision: number = 0;
   private memberJoinFeedbackAttempt: BleMemberJoinFeedbackAttempt | undefined = undefined;
   private shutdownOperation: Promise<void> | undefined = undefined;
   // Once calibration is saved or walking starts, the physical stream belongs
@@ -144,6 +147,7 @@ export class AppSession {
       }
     });
     this.controller = controller;
+    this.controller.setTransportPreparationHandler(() => this.prepareCurrentAudioConfiguration());
     SessionBackgroundKeeper.setControlHandler({
       onPlay: () => {
         if (!this.controller.isLeader) {
@@ -384,9 +388,72 @@ export class AppSession {
     this.metronome.setBeatPointStates(this.controller.beatPointStates);
     this.metronome.setOffsetMs(this.controller.getOffsetMs());
     if (this.controller.rhythm === 3 && this.controller.drumProgram.length > 0) {
-      void this.metronome.configureProgram(this.controller.drumProgram);
+      void this.metronome.configureProgram(this.controller.drumProgram).catch((err: Error) => {
+        logUserFailure('drum-configuration', err);
+      });
     } else {
       this.metronome.configure(this.controller.rhythm, this.controller.soundId);
+    }
+  }
+
+  private async prepareCurrentAudioConfiguration(): Promise<boolean> {
+    if (this.shutdownOperation !== undefined || this.latencyCalibrationActive) {
+      return false;
+    }
+    this.preemptDrumPreview();
+    // The controller already owns the strict-start deadline for this path.
+    return await this.waitForAudioConfiguration(false);
+  }
+
+  /**
+   * Wait for this session's current local PCM without taking audio ownership or
+   * starting transport. False includes timeout, replacement and another owner;
+   * timeout leaves the engine's asynchronous preparation running. Ready does
+   * not mean a shared future transport deadline is audible yet.
+   */
+  async waitForCurrentAudioConfiguration(): Promise<boolean> {
+    return await this.waitForAudioConfiguration(true);
+  }
+
+  private async waitForAudioConfiguration(bounded: boolean): Promise<boolean> {
+    if (AppSession.instance !== this || this.shutdownOperation !== undefined ||
+      this.latencyCalibrationActive || this.drumPreviewActive) {
+      return false;
+    }
+    const rhythm = this.controller.rhythm;
+    const raw = this.controller.drumProgram;
+    const bpm = this.controller.bpm;
+    const beats = this.controller.beatsPerBar;
+    const unit = this.controller.beatUnit;
+    const sound = this.controller.soundId;
+    const points = this.controller.beatPointStates.join(',');
+    const previewOwner = this.drumPreviewToken;
+    const calibrationOwner = this.latencyRouteProbeToken;
+    const deadline = bounded ? MonotonicClock.nowMs() + TRANSPORT_START_PREPARE_TIMEOUT_MS : 0;
+    const stillCurrent = (): boolean => AppSession.instance === this && this.shutdownOperation === undefined &&
+      !this.latencyCalibrationActive && !this.drumPreviewActive &&
+      previewOwner === this.drumPreviewToken && calibrationOwner === this.latencyRouteProbeToken &&
+      rhythm === this.controller.rhythm && raw === this.controller.drumProgram &&
+      bpm === this.controller.bpm && beats === this.controller.beatsPerBar &&
+      unit === this.controller.beatUnit && sound === this.controller.soundId &&
+      points === this.controller.beatPointStates.join(',');
+    let timeoutId: number = -1;
+    try {
+      const timeout = bounded ? new Promise<boolean>((resolve: (ready: boolean) => void) => {
+        timeoutId = setTimeout(() => resolve(false), TRANSPORT_START_PREPARE_TIMEOUT_MS);
+      }) : undefined;
+      this.syncEngineFromSession();
+      const preparation: Promise<boolean> = rhythm === 3 ?
+        (raw.length > 0 ? this.metronome.configureProgram(raw) : Promise.resolve(false)) : Promise.resolve(true);
+      const ready = await (timeout === undefined ? preparation : Promise.race([preparation, timeout]));
+      // A blocked JS frame can settle the PCM promise before an overdue timer
+      // gets a turn. Check the monotonic deadline as well as racing the timer.
+      return ready && stillCurrent() && (!bounded || MonotonicClock.nowMs() < deadline);
+    } catch (err) {
+      logUserFailure('drum-configuration', err);
+      return false;
+    } finally {
+      if (timeoutId >= 0) { clearTimeout(timeoutId); }
     }
   }
 
@@ -807,6 +874,8 @@ export class AppSession {
   }
 
   async leaderBootstrap(displayName: string): Promise<string> {
+    const inviteRevision = ++this.leaderInviteRevision;
+    this.controller.bleInviteAvailable = false;
     this.controller.soloTeam = false;
     this.controller.displayName = displayName;
     const draft = createP2pRoomInvitation();
@@ -819,12 +888,21 @@ export class AppSession {
     );
     this.controller.configureP2pRoom(invitation);
     await this.controller.startLeader(group.goIpAddress);
-    try {
-      await this.bleDiscovery.startLeaderAdvertising(invitation);
-      this.controller.bleInviteAvailable = true;
-    } catch (err) {
-      this.controller.bleInviteAvailable = false;
-      console.warn(`BLE room advertising unavailable: ${(err as Error).message}`);
+    if (inviteRevision === this.leaderInviteRevision && AppSession.instance === this &&
+      this.shutdownOperation === undefined && this.controller.getP2pInvitation() === invitation) {
+      try {
+        await this.bleDiscovery.startLeaderAdvertising(invitation);
+        if (inviteRevision === this.leaderInviteRevision) {
+          this.controller.bleInviteAvailable = AppSession.instance === this &&
+            this.shutdownOperation === undefined && this.controller.getP2pInvitation() === invitation &&
+            this.bleDiscovery.isBluetoothEnabled();
+        }
+      } catch (err) {
+        if (inviteRevision === this.leaderInviteRevision) {
+          this.controller.bleInviteAvailable = false;
+        }
+        console.warn(`BLE room advertising unavailable: ${(err as Error).message}`);
+      }
     }
     this.syncEngineFromSession();
     await SessionBackgroundKeeper.start(true); // 队长：显示媒体卡片
@@ -835,14 +913,25 @@ export class AppSession {
 
   /** 从编辑页返回大厅或系统重建网络后，确认临时 P2P 组仍然可用。 */
   async refreshLeaderP2pGroup(): Promise<void> {
-    if (!this.controller.isLeader || this.controller.soloTeam) {
+    if (AppSession.instance !== this || this.shutdownOperation !== undefined ||
+      !this.controller.isLeader || this.controller.soloTeam) {
       return;
     }
     const invitation = this.controller.getP2pInvitation();
     if (invitation === undefined) {
+      // Early radio events have no invitation to refresh and must not retire
+      // the bootstrap that is still creating the room.
+      this.controller.bleInviteAvailable = false;
       return;
     }
-    if (!(await this.p2p.isLeaderGroupReady(invitation))) {
+    const inviteRevision = ++this.leaderInviteRevision;
+    this.controller.bleInviteAvailable = false;
+    const groupReady = await this.p2p.isLeaderGroupReady(invitation);
+    if (inviteRevision !== this.leaderInviteRevision || AppSession.instance !== this ||
+      this.shutdownOperation !== undefined || this.controller.getP2pInvitation() !== invitation) {
+      return;
+    }
+    if (!groupReady) {
       if (this.controller.hasConnectedFollowers()) {
         // System P2P queries can briefly report DISCONNECTED while an ability is
         // returning to foreground. Recreating the group here would evict every
@@ -850,15 +939,22 @@ export class AppSession {
         console.warn('Leader P2P readiness is transiently unavailable; preserving the active team');
       } else {
         const group = await this.p2p.createLeaderGroup(invitation);
+        if (inviteRevision !== this.leaderInviteRevision || AppSession.instance !== this ||
+          this.shutdownOperation !== undefined || this.controller.getP2pInvitation() !== invitation) {
+          return;
+        }
         this.controller.leaderHost = group.goIpAddress;
       }
     }
     if (this.bleDiscovery.isBluetoothEnabled()) {
       await this.bleDiscovery.startLeaderAdvertising(invitation);
-      this.controller.bleInviteAvailable = true;
+      if (inviteRevision === this.leaderInviteRevision) {
+        this.controller.bleInviteAvailable = AppSession.instance === this &&
+          this.shutdownOperation === undefined && this.controller.getP2pInvitation() === invitation &&
+          this.bleDiscovery.isBluetoothEnabled();
+      }
     } else {
       await this.bleDiscovery.stopLeaderAdvertising();
-      this.controller.bleInviteAvailable = false;
     }
     this.syncEngineFromSession();
   }

@@ -14,6 +14,7 @@ import { writeAtomic } from '../common/AtomicTextFile';
 import { showUserNotice } from '../common/UserFeedback';
 import { ensureMicrophonePermission, microphonePermissionDeniedHint } from '../network/join/TeamNetworkPermissions';
 import { PAPER, INK, LILAC, CORAL, WHITE, TEAL } from '../components/ComicKit';
+import { ActionButton } from '../components/ActionButton';
 
 const LAB_PAGE_INSET: number = 20;
 const LAB_CARD_GAP: number = 16;
@@ -382,9 +383,12 @@ struct MicCaptureExperimentPage {
       Row() {
         Text(title).fontSize(18).fontWeight(900).fontColor(INK)
         Blank()
-        Button(this.previewSource === result.source ? '停止试听' : '试听原音')
-          .fontSize(13).fontColor(INK).backgroundColor(LILAC).height(36)
-          .enabled(!this.busy).onClick((): void => { void this.preview(result); })
+        ActionButton({
+          label: this.previewSource === result.source ? '停止试听' : '试听原音', active: !this.busy,
+          controlWidth: 'auto', controlHeight: 36, labelSize: 13, labelColor: INK, fill: LILAC,
+          cornerRadius: 18, contentPadding: { left: 16, right: 16 },
+          action: (): void => { void this.preview(result); }
+        })
       }.width('100%')
       Text(this.resultDetails(result)).fontSize(12).lineHeight(21).fontColor(INK).width('100%')
     }.padding(LAB_CARD_INSET).width('100%').backgroundColor(WHITE)
@@ -428,10 +432,13 @@ struct MicCaptureExperimentPage {
               Button('停止本轮').height(LAB_BUTTON_HEIGHT).width('100%').fontColor(WHITE).backgroundColor(INK)
                 .onClick((): void => { this.cancelExperiment('已手动停止本轮实验'); })
             } else {
-              Button('开始 MIC / LIVE 对比 · 约 28 秒').height(LAB_BUTTON_HEIGHT).width('100%')
-                .fontColor(INK).backgroundColor(CORAL).fontSize(14).fontWeight(900)
-                .enabled(this.capability.liveAvailable)
-                .onClick((): void => { void this.startExperiment(true); })
+              ActionButton({
+                label: '开始 MIC / LIVE 对比 · 约 28 秒', active: this.capability.liveAvailable,
+                controlHeight: LAB_BUTTON_HEIGHT, labelColor: INK, fill: CORAL,
+                labelSize: 14, labelWeight: 900, cornerRadius: LAB_BUTTON_HEIGHT / 2,
+                contentPadding: { left: 16, right: 16 },
+                action: (): void => { void this.startExperiment(true); }
+              })
               Button('只采集普通 MIC · 约 14 秒').height(LAB_BUTTON_HEIGHT).width('100%')
                 .fontColor(INK).backgroundColor(PAPER).fontSize(14)
                 .onClick((): void => { void this.startExperiment(false); })
@@ -445,8 +452,11 @@ struct MicCaptureExperimentPage {
           if (this.liveResult !== undefined) { this.resultCard('02 / LIVE', this.liveResult); }
           Text('每段前 5 秒安静，后 5 秒说话或拍手。保持手机、耳机和系统音量一致。先用扬声器，再分别连接常用耳机复测。\n\n录音只留本机私有目录，重测会覆盖上一轮，不上传、不存图库。硬件时间戳稳定不等于声音已对齐；双机同步和耳机实际延迟仍需另测。')
             .fontSize(12).lineHeight(21).fontColor('#625C55').width('100%')
-          Button('清除本机实验文件').fontColor(INK).backgroundColor(Color.Transparent).enabled(!this.busy)
-            .onClick((): void => { void this.clearFiles(); })
+          ActionButton({
+            label: '清除本机实验文件', active: !this.busy, controlWidth: 'auto',
+            labelColor: INK, fill: Color.Transparent, cornerRadius: 20,
+            contentPadding: { left: 16, right: 16 }, action: (): void => { void this.clearFiles(); }
+          })
         }.width('100%').padding({ left: LAB_PAGE_INSET, right: LAB_PAGE_INSET,
           top: 8, bottom: this.bottomSafeInset + 24 })
       }.layoutWeight(1).width('100%')

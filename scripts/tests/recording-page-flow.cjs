@@ -3,9 +3,14 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const ts = require(process.argv[2] || '/Applications/DevEco-Studio.app/Contents/tools/hvigor/hvigor/node_modules/typescript/lib/typescript.js');
 const mainPageSource = fs.readFileSync('entry/src/main/ets/pages/MainPage.ets', 'utf8');
+const comicInkOffsets = Object.fromEntries([...fs.readFileSync('entry/src/main/ets/components/ComicInkSurface.ets', 'utf8')
+  .matchAll(/export const (COMIC_[A-Z_]+): number = ([\d.]+);/g)].map(match => [match[1], Number(match[2])]));
 assert.match(mainPageSource,
-  /private recordingSaveOverlay\(\)[\s\S]*Button\('继续行进'[\s\S]*Button\('退出去查看'/,
+  /private recordingSaveOverlay\(\)[\s\S]*Button\('继续行进'[\s\S]*ActionButton\(\{\s*label: '退出去查看', active: !this\.exiting[\s\S]*?inkShadow: CONTROL_SHADOW,[\s\S]*?action: \(\) => \{ void this\.exitAndViewSavedRecording\(\); \}/,
   'Recording success must offer continue and exit-to-view actions');
+assert.match(mainPageSource,
+  /ActionButton\(\{\s*label: '重试保存', active: !this\.retrySaveBusy[\s\S]*?action: \(\) => \{ void this\.retryRecordingSave\(\); \}/,
+  'The custom retry face must retain its busy gate and original save action');
 assert.match(mainPageSource,
   /private recordingErrorOverlay\(\)[\s\S]*Text\(this\.recordingErrorMessage\)[\s\S]*Button\('知道了，继续行进'/,
   'Recording failures must show their error detail in a dialog');
@@ -48,9 +53,10 @@ function harness(options = {}) {
   const storage = new Map();
   const context = {
     exports: {}, Map, Date,
+    ...comicInkOffsets,
     beijingDayKey: now => new Date(now + 8 * 3600000).toISOString().substring(0, 10), SHARE_CHECK_IN_DAY_MS: 86400000,
     getShareCheckInSummary: () => ({ todayCompleted }), MAX_MIC_SHIFT_US: 300000,
-    RecordingMixer: { mixVersion: clip => clip.micCaptureMode === 'system-aec' ? 7 : 6 },
+    RecordingMixer: { mixVersion: clip => clip.micCaptureMode === 'system-aec' ? 8 : 6 },
     RenderingContextSettings: class {},
     CanvasRenderingContext2D: class {
       clearRect() {} beginPath() {} moveTo() {} lineTo() {} stroke() {}
@@ -59,6 +65,12 @@ function harness(options = {}) {
       pause() { trace.push('pause-preview'); }
       start() { trace.push('start-preview'); }
       setCurrentTime(time, mode) { trace.push(`seek-preview:${time}:${mode}`); }
+    },
+    Scroller: class {
+      offset = { xOffset: 0, yOffset: 0 };
+      currentOffset() { return { ...this.offset }; }
+      scrollTo(options) { this.offset = { xOffset: options.xOffset, yOffset: options.yOffset };
+        trace.push(`scroll:${options.yOffset}:${options.animation}`); }
     },
     SeekMode: { Accurate: 'accurate' },
     SliderChangeMode: { Begin: 0, Moving: 1, End: 2, Click: 3 },
@@ -122,7 +134,12 @@ function harness(options = {}) {
         if (options.albumSaveFailure) throw new Error('simulated album write failure');
         return options.albumSaveResult ?? true;
       },
-      async remove(id) { trace.push(`remove:${id}`); storedClips = storedClips.filter(item => item.id !== id); }
+      async remove(id) {
+        trace.push(`remove:${id}`);
+        if (options.removeFailureIds?.includes(id)) throw new Error('simulated index failure');
+        storedClips = storedClips.filter(item => item.id !== id);
+        if (options.removeCleanupFailureIds?.includes(id)) throw new Error('simulated post-index cleanup failure');
+      }
     },
     RecordingShareService: {
       async markReturnedToApp() {},
@@ -139,7 +156,8 @@ function harness(options = {}) {
     setClips: value => { storedClips = value; }, setSnapshot: value => { snapshot = { ...snapshot, ...value }; } };
 }
 
-(async () => {
+module.exports = { loadPage, harness, clip, flush };
+if (require.main === module) (async () => {
   const consent = harness();
   const main = loadPage('MainPage', consent.context);
   consent.setSnapshot({ state: 'preparing' });
@@ -322,6 +340,7 @@ function harness(options = {}) {
   deletion.setPending([{ id: 'delete-todo', clipId: secondClip.id }]);
   const deleteLibrary = loadPage('RecordingLibraryPage', deletion.context);
   deleteLibrary.clips = [clip, secondClip]; deleteLibrary.selectedId = clip.id;
+  deleteLibrary.managing = true;
   deleteLibrary.requestDeleteClip(secondClip.id);
   assert.equal(deleteLibrary.selectedId, clip.id, 'A card close control cannot switch the selected preview');
   assert.equal(deletion.trace.some(item => item.startsWith('remove:')), false, 'The close control requires explicit deletion confirmation');

@@ -1,3 +1,4 @@
+import { COMIC_CARD_INK_OFFSET, COMIC_CONTROL_INK_OFFSET } from '../components/ComicInkSurface';
 import { common } from '@kit.AbilityKit';
 import { access } from '@kit.ConnectivityKit';
 import { router } from '@kit.ArkUI';
@@ -8,6 +9,8 @@ import { SessionMember } from '../protocol/messages';
 import { RandomCharacterFilm, RANDOM_FILM_HEIGHT } from '../components/RandomCharacterFilm';
 import { EditableBpm } from '../components/EditableBpm';
 import { EditableMeter, MeterEditorOverlay } from '../components/EditableMeter';
+import { DrumPaper } from '../components/DrumPaper';
+import { ActionButton, ACTION_DISABLED_OPACITY } from '../components/ActionButton';
 import { beatUnitLabel } from '../common/MeterModel';
 import {
   avatarDisplayName,
@@ -19,10 +22,7 @@ import {
   LILAC,
   TEAL,
   WHITE,
-  BLUE,
-  CARD_SHADOW,
-  CONTROL_SHADOW,
-  INK_SHADOW_RADIUS
+  BLUE
 } from '../components/ComicKit';
 import {
   CharacterPickState,
@@ -43,10 +43,12 @@ import {
   teamNetworkPermissionDeniedHint,
   verifyTeamNetworkAccess
 } from '../network/join/TeamNetworkPermissions';
-import { DrumProgram, parseDrumProgram, styleByKey } from '../audio/DrumMachineCatalog';
+import { DrumProgram, drumProgramStyleKeys, parseDrumProgram, styleByKey } from '../audio/DrumMachineCatalog';
+import { loadSavedDrumPrograms, resolveSavedDrumProgram } from '../audio/DrumProgramLibrary';
 import {
   isProDrumMachineAccessible,
   isSceneAccessible,
+  hasUsableEntitlementCache,
   limitedFreeCharacterKeys,
   resolveDrumAccess,
   formatTrialExpiry
@@ -62,12 +64,21 @@ interface LobbySceneOption {
   caption: string;
 }
 
+type LobbyInviteBluetoothState = 'off' | 'turningOn' | 'turningOff' | 'on' | 'unavailable';
+
 const LOBBY_SCENES: LobbySceneOption[] = [
   { key: 'sunset_coast', name: '夕阳海边', caption: '海浪、云层与土路' },
   { key: 'neon_street', name: '霓虹街口', caption: '雨夜街区与霓虹灯' }
 ];
 
 const PRO_DRUM_BUTTON_HEIGHT: number = 56;
+// Regional faces use DrumPaper sibling backings; their shadows must stay outside face clipping.
+const LOBBY_AREA_SHADOW_OFFSET: number = 4;
+const LOBBY_SCENE_CARD_WIDTH: number = 154;
+const LOBBY_SCENE_CARD_HEIGHT: number = 148;
+const LOBBY_SCENE_CORNER_RADIUS: number = 7;
+const LOBBY_SCENE_BORDER_WIDTH: number = 1;
+const LOBBY_SCENE_SELECTED_BORDER_WIDTH: number = 3;
 const PRO_DRUM_ENTRY_PADDING: number = 4;
 const PRO_CHAIN_SOURCE_WIDTH: number = 400;
 const PRO_CHAIN_SOURCE_HEIGHT: number = 600;
@@ -82,6 +93,13 @@ const PRO_CHAIN_HEIGHT: number = PRO_CHAIN_SOURCE_HEIGHT * PRO_CHAIN_SCALE;
 const PRO_CHAIN_TOP_OFFSET: number = PRO_DRUM_ENTRY_PADDING - PRO_CHAIN_BUTTON_TOP_PX * PRO_CHAIN_SCALE;
 const PRO_CHAIN_OFFSET_X: number = -20;
 const PRO_DRUM_TRIAL_LABEL_SIZE: number = 10;
+const DRUM_CARD_PADDING: number = 14;
+const DRUM_CARD_CONTENT_GAP: number = 12;
+const DRUM_CARD_RADIUS: number = 8;
+const DRUM_CONTROL_RADIUS: number = 6;
+const DRUM_ARRANGEMENT_ICON_SIZE: number = 68;
+const DRUM_STYLE_CHIP_GAP: number = 6;
+const DRUM_STYLE_CHIP_HEIGHT: number = 28;
 
 const CHARACTER_PICK_AVATAR_SIZE: number = 48;
 const CHARACTER_PICK_AVATAR_TOP: number = 6;
@@ -96,12 +114,29 @@ const CHARACTER_BADGE_ICON_PADDING: number = 3;
 const CHARACTER_FREE_BADGE_WIDTH: number = 28;
 const CHARACTER_FREE_BADGE_HEIGHT: number = 17;
 const ROSTER_AVATAR_SIZE: number = 43;
+const ROSTER_SLOT_NAME_GAP: number = 2;
+const ROSTER_SLOT_NAME_HEIGHT: number = 12;
+const ROSTER_SLOT_TOTAL_HEIGHT: number = ROSTER_AVATAR_SIZE + ROSTER_SLOT_NAME_GAP + ROSTER_SLOT_NAME_HEIGHT;
 const ROSTER_STATUS_RAIL_HEIGHT: number = 13;
 const ROSTER_STATUS_ICON_SIZE: number = 9;
 const ROSTER_STATUS_DOT_SIZE: number = 2;
 const ROSTER_STATUS_ANIMATION_INTERVAL_MS: number = 220;
 /** 头像顶部已无浮层，只留漫画阴影和选中描边需要的呼吸空间。 */
 const ROSTER_ROW_TOP_PADDING: number = 2;
+const ROSTER_SLOT_COLUMN_WIDTH: number = 58;
+const ROSTER_SLOT_ROW_GAP: number = 10;
+const ROSTER_SLOT_STEP: number = ROSTER_SLOT_COLUMN_WIDTH + ROSTER_SLOT_ROW_GAP;
+const ROSTER_DRAG_LONG_PRESS_MS: number = 450;
+const ROSTER_DRAG_CLICK_GUARD_MS: number = 150;
+const ROSTER_REORDER_SHIFT_MS: number = 160;
+const ROSTER_DRAG_HELD_SCALE: number = 1.29;
+const ROSTER_DRAG_HELD_OPACITY: number = 0.72;
+const ROSTER_SCROLL_BOTTOM_INSET: number = COMIC_CONTROL_INK_OFFSET + 2;
+/** 名单行固定高度：拖拽放大只改 transform，不撑开「人在队伍中」白卡片。 */
+const ROSTER_SCROLL_VIEWPORT_HEIGHT: number =
+  ROSTER_ROW_TOP_PADDING + ROSTER_SLOT_TOTAL_HEIGHT + ROSTER_SCROLL_BOTTOM_INSET;
+/** 拖拽时名单层叠在标题/邀请区之上，放大部分可画出固定视口外。 */
+const ROSTER_DRAG_OVERFLOW_Z_INDEX: number = 6;
 const CALIBRATION_DOT_INDICES: number[] = [0, 1, 2];
 const CALIBRATION_CARD_HEIGHT: number = 58;
 const CALIBRATION_CARD_ICON_SIZE: number = 36;
@@ -111,6 +146,14 @@ const SOLO_CALIBRATION_FONT_SIZE: number = 12;
 const SOLO_CALIBRATION_VERTICAL_PADDING: number = 6;
 const BLUETOOTH_ROUTE_CONFIRM_WIDTH: number = 318;
 const BLUETOOTH_ROUTE_PROBE_BUTTON_HEIGHT: number = 48;
+const INVITE_NOTICE_GAP: number = 8;
+const INVITE_NOTICE_HORIZONTAL_PADDING: number = 10;
+const INVITE_NOTICE_VERTICAL_PADDING: number = 8;
+const INVITE_NOTICE_ICON_SIZE: number = 16;
+const INVITE_NOTICE_ACTION_WIDTH: number = 76;
+const INVITE_NOTICE_ACTION_HEIGHT: number = 44;
+const INVITE_NOTICE_FILL: string = '#FFF1CC';
+const INVITE_NOTICE_INK: string = '#77602A';
 
 @Entry
 @Component
@@ -137,6 +180,12 @@ struct LeaderLobbyPage {
   @State failed: boolean = false;
   @State invite: boolean = false;
   @State qr: string = '';
+  @State inviteBluetoothState: LobbyInviteBluetoothState = 'unavailable';
+  @State inviteBluetoothSupported: boolean = false;
+  @State inviteCodeAvailable: boolean = false;
+  @State inviteJoinCode: string = '';
+  @State inviteActionBusy: boolean = false;
+  @State inviteActionError: string = '';
   @State localReady: boolean = false;
   @State leaderCanDepart: boolean = false;
   @State rhythmDropdownOpen: boolean = false;
@@ -165,10 +214,20 @@ struct LeaderLobbyPage {
   private rhythms: string[] = ['均匀节拍', '双分节拍', '仅小节重音'];
   private enteringStage: boolean = false;
   private refreshingConnectivity: boolean = false;
+  private connectivityRefreshQueued: boolean = false;
+  private connectivityRefreshOwner: number = 0;
+  private connectivityRefreshSession: AppSession | undefined = undefined;
+  private inviteActionOwner: number = 0;
+  private inviteFeedbackSession: AppSession | undefined = undefined;
   private readonly rosterScroller: Scroller = new Scroller();
   private randomSelectionToken: number = 0;
   private randomPreviewPreviousDrawId: number = 0;
   private rosterStatusAnimationTimer: number = -1;
+  @State rosterDragMemberId: string = '';
+  @State rosterDragOffsetX: number = 0;
+  private rosterDragFromIndex: number = -1;
+  private rosterDragSession: AppSession | undefined = undefined;
+  private rosterDragSuppressSelectUntil: number = 0;
   private drumAccessRefreshTimer: number = -1;
   private actionSequence: number = 0;
   // Late results from an earlier action or room cannot overwrite visible feedback.
@@ -177,8 +236,142 @@ struct LeaderLobbyPage {
   // Retain dismissal even if the authoritative result arrives after active changes.
   private readonly interruptedRandomPreviews: Map<string, number> = new Map();
   private readonly bluetoothStateListener = (_state: access.BluetoothState): void => {
+    // Hide stale digits before native P2P/BLE work can suspend this callback.
+    this.updateInviteBluetoothState();
     void this.refreshLeaderConnectivity();
   };
+
+  private clearInviteAction(): void {
+    this.inviteActionOwner = 0;
+    this.inviteActionBusy = false;
+    this.inviteActionError = '';
+  }
+
+  private updateInviteBluetoothState(): void {
+    const session = AppSession.get();
+    if (session !== this.inviteFeedbackSession) {
+      this.clearInviteAction();
+      this.inviteFeedbackSession = session;
+    }
+    const previousState = this.inviteBluetoothState;
+    this.inviteBluetoothSupported = false;
+    this.inviteBluetoothState = 'unavailable';
+    try {
+      this.inviteBluetoothSupported = canIUse('SystemCapability.Communication.Bluetooth.Core');
+      if (this.inviteBluetoothSupported) {
+        const state = access.getState();
+        if (state === access.BluetoothState.STATE_ON) {
+          this.inviteBluetoothState = 'on';
+        } else if (state === access.BluetoothState.STATE_OFF) {
+          this.inviteBluetoothState = 'off';
+        } else if (state === access.BluetoothState.STATE_TURNING_ON) {
+          this.inviteBluetoothState = 'turningOn';
+        } else if (state === access.BluetoothState.STATE_TURNING_OFF) {
+          this.inviteBluetoothState = 'turningOff';
+        }
+      }
+    } catch (_error) {
+      // Permission/capability failures are unknown availability, not proof that Bluetooth is off.
+    }
+    this.inviteJoinCode = session?.controller.joinCode ?? '';
+    this.inviteCodeAvailable = this.inviteBluetoothState === 'on' &&
+      session?.controller.bleInviteAvailable === true;
+    if (previousState !== this.inviteBluetoothState || this.canShowJoinCode()) {
+      this.inviteActionError = '';
+    }
+  }
+
+  private canShowJoinCode(): boolean {
+    // The radio being on is insufficient: nearby discovery must actually be advertising this invitation.
+    return this.inviteBluetoothState === 'on' && this.inviteCodeAvailable &&
+      /^\d{6}$/.test(this.inviteJoinCode);
+  }
+
+  private inviteUnavailableTitle(): string {
+    if (this.inviteBluetoothState === 'turningOn') {
+      return '正在启用加入码';
+    }
+    return this.inviteBluetoothState === 'off' || this.inviteBluetoothState === 'turningOff'
+      ? '加入码待启用' : '加入码暂不可用';
+  }
+
+  private inviteUnavailableDetail(): string {
+    if (this.inviteActionError.length > 0) {
+      return this.inviteActionError;
+    }
+    if (this.inviteBluetoothState === 'off') {
+      return '开启蓝牙后，可用 6 位码加入';
+    }
+    if (this.inviteBluetoothState === 'turningOn') {
+      return '蓝牙正在开启，队员仍可扫码加入';
+    }
+    if (this.inviteBluetoothState === 'turningOff') {
+      return '蓝牙正在关闭，队员仍可扫码加入';
+    }
+    return '附近发现暂不可用，队员可扫码加入';
+  }
+
+  private inviteActionLabel(): string {
+    if (this.inviteActionBusy) {
+      return '处理中…';
+    }
+    if (this.inviteBluetoothState === 'turningOn') {
+      return '开启中…';
+    }
+    return this.inviteBluetoothState === 'off' || this.inviteBluetoothState === 'turningOff'
+      ? '去开启 ›' : '重试 ›';
+  }
+
+  private inviteActionEnabled(): boolean {
+    return this.leader && !this.soloTeam && !this.loading && !this.failed && !this.leavingLobby &&
+      this.randomPreviewPageVisible && this.qr.length > 0 && this.inviteBluetoothSupported &&
+      !this.inviteActionBusy && this.inviteBluetoothState !== 'turningOn';
+  }
+
+  private async activateJoinCode(): Promise<void> {
+    this.updateInviteBluetoothState();
+    if (!this.inviteActionEnabled() || this.canShowJoinCode()) {
+      return;
+    }
+    const session = AppSession.get();
+    if (session === undefined || !session.controller.isLeader || session.controller.soloTeam) {
+      return;
+    }
+    const request = this.beginAction('lobby-invite');
+    this.inviteActionOwner = request;
+    this.inviteActionBusy = true;
+    this.inviteActionError = '';
+    try {
+      const ctx = getContext(this) as common.UIAbilityContext;
+      if (this.inviteBluetoothState === 'off' || this.inviteBluetoothState === 'turningOff') {
+        // Opening settings does not claim success. State events/page return own radio and advertisement revalidation.
+        await openWirelessSettings(ctx);
+        return;
+      }
+      const granted = await ensureBluetoothDiscoveryPermission(ctx);
+      if (!this.isCurrentAction('lobby-invite', request)) {
+        return;
+      }
+      if (!granted) {
+        this.inviteActionError = '未获得蓝牙权限，仍可扫码加入';
+        return;
+      }
+      await this.refreshLeaderConnectivity();
+      if (this.isCurrentAction('lobby-invite', request)) {
+        this.updateInviteBluetoothState();
+      }
+    } catch (error) {
+      logUserFailure('lobby-invite', error);
+      if (this.isCurrentAction('lobby-invite', request)) {
+        this.inviteActionError = '未能更新加入码，请从系统设置检查蓝牙';
+      }
+    } finally {
+      if (this.inviteActionOwner === request) {
+        this.inviteActionOwner = 0;
+        this.inviteActionBusy = false;
+      }
+    }
+  }
 
   private onBluetoothAudioRouteChanged(): void {
     if (!this.btAudioActive && this.bluetoothRouteConfirmVisible) {
@@ -317,48 +510,52 @@ struct LeaderLobbyPage {
 
   @Builder
   private latencyCalibrationEntry() {
-    Row({ space: 10 }) {
-      Stack({ alignContent: Alignment.Center }) {
-        Circle()
-          .width(CALIBRATION_CARD_ICON_SIZE).height(CALIBRATION_CARD_ICON_SIZE)
-          .fill(this.calibrationCardIconFill()).stroke(INK).strokeWidth(1.5)
-        if (!this.hasBluetoothCalibration()) {
-          Image($rawfile('calibration/lobby/bluetooth-calibration-default.png'))
-            .width(CALIBRATION_CARD_HEADPHONE_SIZE).height(CALIBRATION_CARD_HEADPHONE_SIZE)
-            .objectFit(ImageFit.Contain)
-        } else if (this.btCalibrationNeedsRemeasure) {
-          Image($rawfile('calibration/lobby/bluetooth-calibration-reconnected.png'))
-            .width(CALIBRATION_CARD_HEADPHONE_SIZE).height(CALIBRATION_CARD_HEADPHONE_SIZE)
-            .objectFit(ImageFit.Contain)
-        } else {
-          Image($rawfile('calibration/lobby/bluetooth-calibration-calibrated.png'))
-            .width(CALIBRATION_CARD_HEADPHONE_SIZE).height(CALIBRATION_CARD_HEADPHONE_SIZE)
-            .objectFit(ImageFit.Contain)
+    Column() {
+      DrumPaper({ fill: this.calibrationCardFill(), cornerRadius: 8, paperLineWidth: 0,
+        offsetX: LOBBY_AREA_SHADOW_OFFSET, offsetY: LOBBY_AREA_SHADOW_OFFSET }) {
+        Row({ space: 10 }) {
+          Stack({ alignContent: Alignment.Center }) {
+            Circle()
+              .width(CALIBRATION_CARD_ICON_SIZE).height(CALIBRATION_CARD_ICON_SIZE)
+              .fill(this.calibrationCardIconFill()).stroke(INK).strokeWidth(1.5)
+            if (!this.hasBluetoothCalibration()) {
+              Image($rawfile('calibration/lobby/bluetooth-calibration-default.png'))
+                .width(CALIBRATION_CARD_HEADPHONE_SIZE).height(CALIBRATION_CARD_HEADPHONE_SIZE)
+                .objectFit(ImageFit.Contain)
+            } else if (this.btCalibrationNeedsRemeasure) {
+              Image($rawfile('calibration/lobby/bluetooth-calibration-reconnected.png'))
+                .width(CALIBRATION_CARD_HEADPHONE_SIZE).height(CALIBRATION_CARD_HEADPHONE_SIZE)
+                .objectFit(ImageFit.Contain)
+            } else {
+              Image($rawfile('calibration/lobby/bluetooth-calibration-calibrated.png'))
+                .width(CALIBRATION_CARD_HEADPHONE_SIZE).height(CALIBRATION_CARD_HEADPHONE_SIZE)
+                .objectFit(ImageFit.Contain)
+            }
+          }.width(CALIBRATION_CARD_ICON_SIZE).height(CALIBRATION_CARD_ICON_SIZE)
+
+          Column({ space: 2 }) {
+            Text(this.calibrationCardTitle())
+              .fontSize(15).fontWeight(900).fontColor(INK).width('100%').maxLines(1)
+            Text(this.calibrationCardSubtitle())
+              .fontSize(10).fontWeight(700).fontColor('#625B53').width('100%').maxLines(1)
+          }
+          .layoutWeight(1)
+          .alignItems(HorizontalAlign.Start)
+
+          Text(this.calibrationCardActionLabel())
+            .fontSize(13).fontWeight(900).fontColor(CORAL)
         }
-      }.width(CALIBRATION_CARD_ICON_SIZE).height(CALIBRATION_CARD_ICON_SIZE)
-
-      Column({ space: 2 }) {
-        Text(this.calibrationCardTitle())
-          .fontSize(15).fontWeight(900).fontColor(INK).width('100%').maxLines(1)
-        Text(this.calibrationCardSubtitle())
-          .fontSize(10).fontWeight(700).fontColor('#625B53').width('100%').maxLines(1)
+        .width('100%')
+        .height(CALIBRATION_CARD_HEIGHT)
+        .padding({ left: 12, right: 12 })
+        .alignItems(VerticalAlign.Center)
+        .backgroundColor(this.calibrationCardFill())
+        .border({ width: 1.5, color: INK })
+        .borderRadius(8)
+        .onClick(() => this.requestBluetoothCalibration())
       }
-      .layoutWeight(1)
-      .alignItems(HorizontalAlign.Start)
-
-      Text(this.calibrationCardActionLabel())
-        .fontSize(13).fontWeight(900).fontColor(CORAL)
-    }
-    .width('100%')
-    .height(CALIBRATION_CARD_HEIGHT)
-    .padding({ left: 12, right: 12 })
-    .alignItems(VerticalAlign.Center)
-    .backgroundColor(this.calibrationCardFill())
-    .border({ width: 1.5, color: INK })
-    .borderRadius(8)
-    .shadow(CONTROL_SHADOW)
-    .margin({ top: CALIBRATION_ENTRY_VERTICAL_MARGIN, bottom: CALIBRATION_ENTRY_VERTICAL_MARGIN })
-    .onClick(() => this.requestBluetoothCalibration())
+    }.width('100%').clip(false)
+      .margin({ top: CALIBRATION_ENTRY_VERTICAL_MARGIN, bottom: CALIBRATION_ENTRY_VERTICAL_MARGIN })
   }
 
   @Builder
@@ -370,60 +567,71 @@ struct LeaderLobbyPage {
         .backgroundColor('#99171B1F')
         .onClick(() => this.dismissBluetoothRouteConfirmation())
 
-      Column({ space: 14 }) {
-        Row({ space: 11 }) {
-          Stack() {
-            Image($rawfile('calibration/lobby/bluetooth-calibration-default.png'))
-              .width(56).height(56).objectFit(ImageFit.Contain)
-          }.width(58).height(58)
-          Column({ space: 2 }) {
-            Text('确认蓝牙声音出口').fontSize(20).fontWeight(900).fontStyle(FontStyle.Italic).fontColor(INK)
-            Text('确认后再开始延迟测量').fontSize(10).fontWeight(800).fontColor('#625B53')
-          }.layoutWeight(1).alignItems(HorizontalAlign.Start)
-          Text('×').fontSize(26).fontWeight(900).fontColor(INK).width(28).textAlign(TextAlign.Center)
-            .onClick(() => this.dismissBluetoothRouteConfirmation())
-        }.width('100%').alignItems(VerticalAlign.Center)
+      Column() {
+        DrumPaper({ fill: PAPER, cornerRadius: 10, paperLineWidth: 0,
+          offsetX: LOBBY_AREA_SHADOW_OFFSET, offsetY: LOBBY_AREA_SHADOW_OFFSET }) {
+          Column({ space: 14 }) {
+            Row({ space: 11 }) {
+              Stack() {
+                Image($rawfile('calibration/lobby/bluetooth-calibration-default.png'))
+                  .width(56).height(56).objectFit(ImageFit.Contain)
+              }.width(58).height(58)
+              Column({ space: 2 }) {
+                Text('确认蓝牙声音出口').fontSize(20).fontWeight(900).fontStyle(FontStyle.Italic).fontColor(INK)
+                Text('确认后再开始延迟测量').fontSize(10).fontWeight(800).fontColor('#625B53')
+              }.layoutWeight(1).alignItems(HorizontalAlign.Start)
+              Text('×').fontSize(26).fontWeight(900).fontColor(INK).width(28).textAlign(TextAlign.Center)
+                .onClick(() => this.dismissBluetoothRouteConfirmation())
+            }.width('100%').alignItems(VerticalAlign.Center)
 
-        Text(this.bluetoothRouteStatus.length > 0 ? this.bluetoothRouteStatus :
-          '系统检测到了蓝牙音频。播放“嘀嗒”两声试音，确认声音确实从蓝牙耳机里传出。')
-          .width('100%').fontSize(13).lineHeight(20).fontWeight(700).fontColor('#4F4943')
+            Text(this.bluetoothRouteStatus.length > 0 ? this.bluetoothRouteStatus :
+              '系统检测到了蓝牙音频。播放“嘀嗒”两声试音，确认声音确实从蓝牙耳机里传出。')
+              .width('100%').fontSize(13).lineHeight(20).fontWeight(700).fontColor('#4F4943')
 
-        Button(this.bluetoothRouteProbePlaying ? '正在播放…' :
-          this.bluetoothRouteProbePlayed ? '再播放一次试音 ♪' : '播放试音 ♪', { type: ButtonType.Normal })
-          .width('100%').height(BLUETOOTH_ROUTE_PROBE_BUTTON_HEIGHT)
-          .fontSize(15).fontWeight(900).fontColor(INK)
-          .backgroundColor(this.bluetoothRouteProbePlaying ? '#D9D4CC' : LILAC)
-          .border({ width: 1.5, color: INK }).borderRadius(7).shadow(CONTROL_SHADOW)
-          .enabled(!this.bluetoothRouteProbePlaying)
-          .onClick(() => { void this.playBluetoothRouteProbe(); })
+            ActionButton({
+              label: this.bluetoothRouteProbePlaying ? '正在播放…' :
+                this.bluetoothRouteProbePlayed ? '再播放一次试音 ♪' : '播放试音 ♪',
+              active: !this.bluetoothRouteProbePlaying,
+              controlHeight: BLUETOOTH_ROUTE_PROBE_BUTTON_HEIGHT,
+              contentPadding: { left: 16, right: 16 },
+              labelSize: 15, labelWeight: 900, fill: LILAC, lineWidth: 1.5, cornerRadius: 7,
+              hardShadow: { offsetX: COMIC_CONTROL_INK_OFFSET, offsetY: COMIC_CONTROL_INK_OFFSET, color: INK },
+              action: () => { void this.playBluetoothRouteProbe(); }
+            })
 
-        if (this.bluetoothRouteProbePlayed) {
-          Row({ space: 6 }) {
-            Text('✓').fontSize(13).fontWeight(900).fontColor(TEAL)
-            Text('试音已播放，现在请选择实际听到的位置')
-              .fontSize(10).fontWeight(800).fontColor('#625B53')
-          }.width('100%')
+            if (this.bluetoothRouteProbePlayed) {
+              Row({ space: 6 }) {
+                Text('✓').fontSize(13).fontWeight(900).fontColor(TEAL)
+                Text('试音已播放，现在请选择实际听到的位置')
+                  .fontSize(10).fontWeight(800).fontColor('#625B53')
+              }.width('100%')
 
-          Button('声音在蓝牙耳机里', { type: ButtonType.Normal })
-            .width('100%').height(50).fontSize(16).fontWeight(900).fontColor(INK)
-            .backgroundColor(TEAL)
-            .border({ width: 1.5, color: INK }).borderRadius(7)
-            .shadow(CONTROL_SHADOW)
-            .enabled(this.btAudioActive && !this.bluetoothRouteProbePlaying)
-            .onClick(() => { void this.confirmBluetoothCalibration(); })
+              ActionButton({
+                label: '声音在蓝牙耳机里', active: this.btAudioActive && !this.bluetoothRouteProbePlaying,
+                controlHeight: 50, labelSize: 16, labelWeight: 900,
+                contentPadding: { left: 16, right: 16 },
+                fill: TEAL, lineWidth: 1.5, cornerRadius: 7,
+                hardShadow: { offsetX: COMIC_CONTROL_INK_OFFSET, offsetY: COMIC_CONTROL_INK_OFFSET, color: INK },
+                action: () => { void this.confirmBluetoothCalibration(); }
+              })
 
-          Button('声音在手机 / 其他设备', { type: ButtonType.Normal })
-            .width('100%').height(44).fontSize(13).fontWeight(900).fontColor(CORAL)
-            .backgroundColor(WHITE).border({ width: 1.5, color: INK }).borderRadius(7)
-            .onClick(() => this.rejectBluetoothRouteConfirmation())
+              DrumPaper({ fill: WHITE, paperWidth: '100%', cornerRadius: 7, paperLineWidth: 0,
+                offsetX: COMIC_CONTROL_INK_OFFSET, offsetY: COMIC_CONTROL_INK_OFFSET }) {
+                Button('声音在手机 / 其他设备', { type: ButtonType.Normal })
+                  .width('100%').height(44).fontSize(13).fontWeight(900).fontColor(CORAL)
+                  .backgroundColor(WHITE).border({ width: 1.5, color: INK }).borderRadius(7)
+                  .onClick(() => this.rejectBluetoothRouteConfirmation())
+              }
+            }
+          }
+          .width('100%')
+          .padding(18)
+          .backgroundColor(PAPER)
+          .border({ width: 2, color: INK })
+          .borderRadius(10)
+          .clip(false)
         }
-      }
-      .width(BLUETOOTH_ROUTE_CONFIRM_WIDTH)
-      .padding(18)
-      .backgroundColor(PAPER)
-      .border({ width: 2, color: INK })
-      .borderRadius(10)
-      .shadow({ radius: INK_SHADOW_RADIUS, offsetX: 5, offsetY: 6, color: INK })
+      }.width(BLUETOOTH_ROUTE_CONFIRM_WIDTH).clip(false)
     }
     .width('100%')
     .height('100%')
@@ -441,6 +649,9 @@ struct LeaderLobbyPage {
     void this.initialize();
   }
   aboutToDisappear(): void {
+    this.clearInviteAction();
+    this.connectivityRefreshQueued = false;
+    this.cancelRosterDrag();
     this.stopDrumAccessRefresh();
     this.pendingActions.clear();
     this.actionSessions.clear();
@@ -475,12 +686,14 @@ struct LeaderLobbyPage {
     this.startRosterStatusAnimation();
     this.startDrumAccessRefresh();
     this.enteringStage = false;
-    this.refreshingConnectivity = false;
     this.refresh();
     this.latencyCalibrationMs = getCalibrationMs();
     void this.refreshLeaderConnectivity();
   }
   onPageHide(): void {
+    this.clearInviteAction();
+    this.connectivityRefreshQueued = false;
+    this.cancelRosterDrag();
     this.stopDrumAccessRefresh();
     this.pendingActions.clear();
     this.actionSessions.clear();
@@ -535,34 +748,78 @@ struct LeaderLobbyPage {
   }
 
   private async refreshLeaderConnectivity(): Promise<void> {
-    if (this.refreshingConnectivity) {
+    this.updateInviteBluetoothState();
+    const session = AppSession.get();
+    if (!this.randomPreviewPageVisible || this.leavingLobby || session === undefined ||
+      !session.controller.isLeader || session.controller.soloTeam) {
+      return;
+    }
+    if (this.refreshingConnectivity && this.connectivityRefreshSession === session) {
+      // TURNING_ON and ON can arrive during one native refresh. Re-read the final state instead of dropping it.
+      this.connectivityRefreshQueued = true;
       return;
     }
     this.refreshingConnectivity = true;
     const request = this.beginAction('lobby-connectivity');
+    this.connectivityRefreshOwner = request;
+    this.connectivityRefreshSession = session;
     try {
-      await AppSession.get()?.refreshLeaderP2pGroup();
-      if (!this.isCurrentAction('lobby-connectivity', request)) {
-        return;
-      }
-      this.refresh();
-      this.updateRoomStatus();
-    } catch (err) {
-      logUserFailure('lobby-connectivity', err);
-      if (this.isCurrentAction('lobby-connectivity', request)) {
+      do {
+        this.connectivityRefreshQueued = false;
+        try {
+          const refreshing = session.refreshLeaderP2pGroup();
+          // The session invalidates advertisement readiness before its first await.
+          // Publish that invalidation now, rather than keeping old digits throughout native work.
+          this.updateInviteBluetoothState();
+          await refreshing;
+        } catch (err) {
+          logUserFailure('lobby-connectivity', err);
+          if (this.isCurrentAction('lobby-connectivity', request)) {
+            this.refresh();
+            this.status = userErrorMessage(err, '邀请信息更新失败，请稍后重试');
+          }
+          continue;
+        }
+        if (!this.isCurrentAction('lobby-connectivity', request)) {
+          return;
+        }
         this.refresh();
-        this.status = userErrorMessage(err, '邀请信息更新失败，请稍后重试');
-      }
+        this.updateRoomStatus();
+      } while (this.connectivityRefreshQueued && this.isCurrentAction('lobby-connectivity', request));
     } finally {
-      if (this.isCurrentAction('lobby-connectivity', request)) {
+      if (this.connectivityRefreshOwner === request) {
+        const retry = this.connectivityRefreshQueued && this.randomPreviewPageVisible &&
+          !this.leavingLobby && session === AppSession.get();
         this.refreshingConnectivity = false;
+        this.connectivityRefreshQueued = false;
+        this.connectivityRefreshOwner = 0;
+        this.connectivityRefreshSession = undefined;
+        if (retry) {
+          void this.refreshLeaderConnectivity();
+        }
       }
     }
   }
 
   private onStoreEntitlementsChanged(): void {
     this.refreshDrumAccess();
+    const session = AppSession.get();
+    if (session !== undefined) {
+      void this.reconcileLobbySceneAccess(session).catch((error: Error) => {
+        logUserFailure('lobby-scene-access', error);
+      });
+    }
     this.refresh();
+  }
+
+  private async reconcileLobbySceneAccess(session: AppSession): Promise<void> {
+    if (session !== AppSession.get() || !this.randomPreviewPageVisible || this.leavingLobby ||
+      !session.controller.isLeader || isSceneAccessible(session.controller.sceneKey)) {
+      return;
+    }
+    // The room owns the scene. Updating only cached UI storage would be undone
+    // by its next snapshot; only the visible leader lobby reconciles revocation.
+    await session.controller.updateSceneKey('sunset_coast');
   }
 
   private refreshDrumAccess(): void {
@@ -600,11 +857,12 @@ struct LeaderLobbyPage {
     const request = this.beginAction('lobby-initialize', false);
     this.loading = true;
     this.failed = false;
+    // Cached entitlements already back the controls. Refresh them independently:
+    // store/network latency must not hold an unrelated local roster off screen.
+    const entitlements = refreshStoreEntitlementsNow().catch((error: Error) => {
+      logUserFailure('lobby-store-refresh', error);
+    });
     try {
-      await refreshStoreEntitlementsNow();
-      if (!this.isCurrentAction('lobby-initialize', request)) {
-        return;
-      }
       const params = router.getParams() as Record<string, string>;
       if (params?.['reuse'] !== '1') {
         await AppSession.reset();
@@ -613,9 +871,15 @@ struct LeaderLobbyPage {
         }
         const name = params?.['displayName'] || 'Player';
         const session = AppSession.createLeader(name);
+        this.actionSessions.set('lobby-initialize', session);
         if (params?.['solo'] === '1') {
-          await session.leaderBootstrapSolo(name);
+          const preparing = session.leaderBootstrapSolo(name);
+          this.refresh();
+          await preparing;
         } else {
+          // The leader exists before Wi-Fi/BLE/background setup. Show that real
+          // roster now, while loading still prevents an unprepared departure.
+          this.refresh();
           const ctx = getContext(this) as common.UIAbilityContext;
           const granted = await ensureTeamNetworkPermissions(ctx);
           if (!this.isCurrentAction('lobby-initialize', request)) {
@@ -637,9 +901,30 @@ struct LeaderLobbyPage {
           }
           await session.leaderBootstrap(name);
         }
+      } else {
+        const session = AppSession.get();
+        if (session !== undefined) {
+          this.actionSessions.set('lobby-initialize', session);
+        }
+        this.refresh();
       }
       if (!this.isCurrentAction('lobby-initialize', request)) {
         return;
+      }
+      // A valid local snapshot can make the lobby usable while revalidating.
+      // Missing/expired snapshots retain the first-run entitlement readiness gate.
+      if (!hasUsableEntitlementCache()) {
+        await entitlements;
+      }
+      if (!this.isCurrentAction('lobby-initialize', request)) {
+        return;
+      }
+      const session = AppSession.get();
+      if (session !== undefined) {
+        await this.reconcileLobbySceneAccess(session);
+        if (!this.isCurrentAction('lobby-initialize', request)) {
+          return;
+        }
       }
       this.refresh();
       this.soloTeam = AppSession.get()?.controller.soloTeam ?? false;
@@ -696,6 +981,7 @@ struct LeaderLobbyPage {
   }
 
   refresh(): void {
+    this.updateInviteBluetoothState();
     const c = AppSession.get()?.controller;
     if (c === undefined) { return; }
     this.members = c.getMembers(); this.leader = c.isLeader;
@@ -706,6 +992,12 @@ struct LeaderLobbyPage {
     }
     this.selectedSceneKey = c.sceneKey;
     this.soloTeam = c.soloTeam;
+    if (this.rosterDragMemberId.length > 0 &&
+      (this.rosterDragSession !== AppSession.get() || !this.soloRosterReorderEnabled() ||
+      this.members.findIndex((member: SessionMember) => member.id === this.rosterDragMemberId) !==
+        this.rosterDragFromIndex)) {
+      this.cancelRosterDrag();
+    }
     this.qr = c.buildJoinQrPayload();
     this.localReady = c.isLocalLobbyReady();
     this.leaderCanDepart = c.canLeaderStartWalk();
@@ -909,16 +1201,6 @@ struct LeaderLobbyPage {
       ? CHARACTER_FREE_BADGE_HEIGHT : CHARACTER_BADGE_ICON_SIZE;
   }
 
-  private pickOpacity(state: CharacterPickState): number {
-    if (state === 'selectable') {
-      return 1;
-    }
-    if (state === 'taken' || state === 'lockedByReady') {
-      return 0.42;
-    }
-    return 0.28;
-  }
-
   private async pickCharacter(key: string): Promise<void> {
     if (this.pickStateForKey(key) !== 'selectable') {
       return;
@@ -1079,16 +1361,17 @@ struct LeaderLobbyPage {
     return parseDrumProgram(this.drumProgram);
   }
 
-  private activeDrumStyleName(): string {
-    return styleByKey(this.activeDrumProgram().styleKey).name;
+  private activeDrumProgramName(): string {
+    return resolveSavedDrumProgram(this.drumProgram, AppSession.get()?.controller.drumProgramLibraryId,
+      loadSavedDrumPrograms())?.name ?? '未命名编排';
   }
 
-  private activeDrumStyleCaption(): string {
-    return styleByKey(this.activeDrumProgram().styleKey).caption;
+  private activeDrumStyleKeys(): string[] {
+    return drumProgramStyleKeys(this.activeDrumProgram());
   }
 
-  private activeDrumStyleColor(): string {
-    return styleByKey(this.activeDrumProgram().styleKey).color;
+  private activeDrumVisibleStyleKeys(): string[] {
+    return this.activeDrumStyleKeys().slice(0, 2);
   }
 
   private activeDrumSectionCount(): number {
@@ -1197,6 +1480,124 @@ struct LeaderLobbyPage {
       (AppSession.get()?.controller.canAddSoloBot() ?? false);
   }
 
+  private soloRosterReorderEnabled(): boolean {
+    return this.soloTeam && this.leader && !this.loading && this.randomPreviewPageVisible &&
+      !this.leavingLobby && !this.enteringStage;
+  }
+
+  private rosterDragOverflowPaint(): boolean {
+    return this.rosterDragMemberId.length > 0;
+  }
+
+  private beginRosterDrag(memberId: string): void {
+    if (!this.soloRosterReorderEnabled()) {
+      return;
+    }
+    const fromIndex = this.members.findIndex((member: SessionMember) => member.id === memberId);
+    if (fromIndex < 0) {
+      return;
+    }
+    const session = AppSession.get();
+    if (session === undefined) {
+      return;
+    }
+    this.rosterDragMemberId = memberId;
+    this.rosterDragFromIndex = fromIndex;
+    this.rosterDragSession = session;
+    this.rosterDragOffsetX = 0;
+    this.rosterDragSuppressSelectUntil = 0;
+  }
+
+  private updateRosterDrag(offsetX: number): void {
+    if (this.rosterDragMemberId.length === 0) {
+      return;
+    }
+    if (this.rosterDragSession !== AppSession.get() || !this.soloRosterReorderEnabled()) {
+      this.cancelRosterDrag();
+      return;
+    }
+    this.rosterDragOffsetX = offsetX;
+  }
+
+  private rosterDragTargetIndex(): number {
+    if (this.rosterDragMemberId.length === 0 || this.rosterDragFromIndex < 0 ||
+      this.rosterDragFromIndex >= this.members.length ||
+      this.members[this.rosterDragFromIndex].id !== this.rosterDragMemberId) {
+      return -1;
+    }
+    return Math.max(0, Math.min(this.members.length - 1,
+      this.rosterDragFromIndex + Math.round(this.rosterDragOffsetX / ROSTER_SLOT_STEP)));
+  }
+
+  private rosterMemberDragOffsetX(memberId: string): number {
+    const targetIndex = this.rosterDragTargetIndex();
+    if (targetIndex < 0) {
+      return 0;
+    }
+    if (memberId === this.rosterDragMemberId) {
+      return this.rosterDragOffsetX;
+    }
+    const index = this.members.findIndex((member: SessionMember) => member.id === memberId);
+    // Preview an insertion gap without changing the authoritative roster or
+    // rebuilding its gesture owner. Only the drop commits the new walk order.
+    if (index > this.rosterDragFromIndex && index <= targetIndex) {
+      return -ROSTER_SLOT_STEP;
+    }
+    if (index >= targetIndex && index < this.rosterDragFromIndex) {
+      return ROSTER_SLOT_STEP;
+    }
+    return 0;
+  }
+
+  private cancelRosterDrag(): void {
+    // A long-press can end before Pan recognizes. Guard its trailing click, but
+    // expire by time so cancellation cannot permanently disable avatar selection.
+    if (this.rosterDragMemberId.length > 0) {
+      this.rosterDragSuppressSelectUntil = Date.now() + ROSTER_DRAG_CLICK_GUARD_MS;
+    }
+    this.rosterDragMemberId = '';
+    this.rosterDragFromIndex = -1;
+    this.rosterDragSession = undefined;
+    this.rosterDragOffsetX = 0;
+  }
+
+  private async finishRosterDrag(): Promise<void> {
+    if (this.rosterDragMemberId.length === 0 || this.rosterDragFromIndex < 0) {
+      this.cancelRosterDrag();
+      return;
+    }
+    const session = this.rosterDragSession;
+    const fromIndex = this.members.findIndex((member: SessionMember) => member.id === this.rosterDragMemberId);
+    // A delayed gesture from an earlier room or a changed roster must never
+    // reorder a different member that now happens to occupy the old index.
+    if (session === undefined || session !== AppSession.get() || !this.soloRosterReorderEnabled() ||
+      fromIndex !== this.rosterDragFromIndex) {
+      this.cancelRosterDrag();
+      return;
+    }
+    const toIndex = this.rosterDragTargetIndex();
+    this.cancelRosterDrag();
+    if (fromIndex === toIndex) {
+      return;
+    }
+    const request = this.beginAction('lobby-reorder-roster');
+    try {
+      await session.controller.reorderSoloMembers(fromIndex, toIndex);
+      if (this.isCurrentAction('lobby-reorder-roster', request)) {
+        this.refresh();
+      }
+    } catch (error) {
+      this.reportActionFailure('lobby-reorder-roster', request, error, '调整顺序失败，请重试');
+    }
+  }
+
+  private selectRosterMember(memberId: string): void {
+    if (this.rosterDragMemberId.length > 0 || Date.now() < this.rosterDragSuppressSelectUntil) {
+      return;
+    }
+    this.selectEditingMember(memberId);
+  }
+
   private keepRosterAddSlotVisible(): void {
     if (!this.soloTeam || !this.leader) {
       return;
@@ -1221,6 +1622,7 @@ struct LeaderLobbyPage {
       if (newBotId !== undefined && newBotId.length > 0) {
         this.selectEditingMember(newBotId);
       }
+      this.keepRosterAddSlotVisible();
     } catch (error) {
       this.reportActionFailure('lobby-add-bot', request, error, '添加人机失败，请重试');
     }
@@ -1301,23 +1703,41 @@ struct LeaderLobbyPage {
     .hitTestBehavior(HitTestMode.None)
   }
 
+  private characterPickSelected(key: string): boolean {
+    return (this.showingRandomMystery() ? 'random' : this.editingAvatarKey()) === key;
+  }
+
   @Builder
-  private rosterMemberSlot(member: SessionMember) {
-    Column({ space: 2 }) {
-      Stack({ alignContent: Alignment.TopEnd }) {
+  private rosterMemberPortrait(member: SessionMember) {
+    ActionButton({
+      active: this.canEditMember(member.id),
+      controlWidth: ROSTER_AVATAR_SIZE, controlHeight: ROSTER_AVATAR_SIZE,
+      fill: PAPER, cornerRadius: 4,
+      hardShadow: this.editingMemberId === member.id ?
+        { offsetX: COMIC_CONTROL_INK_OFFSET, offsetY: COMIC_CONTROL_INK_OFFSET, color: INK } : undefined,
+      accessibilityLabel: `${member.displayName}，选择队员`,
+      action: () => { this.selectRosterMember(member.id); }
+    }) {
+      Stack() {
         ComicCharacter({
           avatar: member.avatarKey,
           portrait: true,
+          allowNativeDrag: false,
           mysteryAvatar: this.revealedMemberMysteryAvatar(member)
         }).width(ROSTER_AVATAR_SIZE).height(ROSTER_AVATAR_SIZE)
-          .border({
-            width: this.editingMemberId === member.id ? 2 : 0,
-            color: INK
-          })
-          .borderRadius(4)
-          .clip(true)
-          .opacity(this.canEditMember(member.id) ? 1 : 0.88)
-          .onClick(() => { this.selectEditingMember(member.id); })
+      }
+      .width(ROSTER_AVATAR_SIZE).height(ROSTER_AVATAR_SIZE)
+      .backgroundColor(PAPER)
+      .border({ width: this.editingMemberId === member.id ? 2 : 0, color: INK })
+      .borderRadius(4).clip(true)
+    }
+  }
+
+  @Builder
+  private rosterMemberSlotBody(member: SessionMember) {
+    Column({ space: ROSTER_SLOT_NAME_GAP }) {
+      Stack({ alignContent: Alignment.TopEnd }) {
+        this.rosterMemberPortrait(member)
         if (member.lobbyReady === true || member.bluetoothCalibrating === true) {
           this.rosterStatusRail(member)
         }
@@ -1338,29 +1758,69 @@ struct LeaderLobbyPage {
       .width(ROSTER_AVATAR_SIZE)
       .height(ROSTER_AVATAR_SIZE)
       .clip(false)
-      Text(member.displayName).fontSize(10).maxLines(1).width(58).textAlign(TextAlign.Center)
+      Text(member.displayName).fontSize(10).maxLines(1).width(ROSTER_SLOT_COLUMN_WIDTH)
+        .height(ROSTER_SLOT_NAME_HEIGHT).textAlign(TextAlign.Center)
     }
-    .width(58)
+    .width(ROSTER_SLOT_COLUMN_WIDTH)
     .alignItems(HorizontalAlign.Center)
     .clip(false)
   }
 
   @Builder
+  private rosterMemberSlot(member: SessionMember) {
+    // Keep the same avatar subtree when initialization finishes. Gesture actions
+    // still check readiness, so loading no longer forces a second image mount.
+    if (this.soloTeam && this.leader) {
+      Column() {
+        this.rosterMemberSlotBody(member)
+      }
+      .width(ROSTER_SLOT_COLUMN_WIDTH)
+      .translate({ x: this.rosterMemberDragOffsetX(member.id) })
+      // The held avatar tracks the finger immediately; only its neighbours ease
+      // into the gap. Disable the preview animation when layout commits on drop.
+      .animation({
+        duration: this.rosterDragMemberId.length > 0 && this.rosterDragMemberId !== member.id
+          ? ROSTER_REORDER_SHIFT_MS : 0,
+        curve: Curve.EaseOut
+      })
+      .zIndex(this.rosterDragMemberId === member.id ? 10 : 0)
+      .opacity(this.rosterDragMemberId === member.id ? ROSTER_DRAG_HELD_OPACITY : 1)
+      .scale({
+        x: this.rosterDragMemberId === member.id ? ROSTER_DRAG_HELD_SCALE : 1,
+        y: this.rosterDragMemberId === member.id ? ROSTER_DRAG_HELD_SCALE : 1,
+        centerX: ROSTER_SLOT_COLUMN_WIDTH / 2,
+        centerY: ROSTER_SLOT_TOTAL_HEIGHT / 2
+      })
+      .priorityGesture(GestureGroup(GestureMode.Sequence,
+        LongPressGesture({ repeat: false, duration: ROSTER_DRAG_LONG_PRESS_MS })
+          .onAction(() => { this.beginRosterDrag(member.id); }),
+        PanGesture({ fingers: 1, direction: PanDirection.Horizontal, distance: 1 })
+          .onActionStart((event: GestureEvent) => { this.updateRosterDrag(event.offsetX); })
+          .onActionUpdate((event: GestureEvent) => { this.updateRosterDrag(event.offsetX); })
+          .onActionEnd((event: GestureEvent) => {
+            this.updateRosterDrag(event.offsetX);
+            void this.finishRosterDrag();
+          })
+          .onActionCancel(() => { this.cancelRosterDrag(); })
+      ).onCancel(() => { this.cancelRosterDrag(); }))
+    } else {
+      this.rosterMemberSlotBody(member)
+    }
+  }
+
+  @Builder
   private rosterAddSlot() {
     Column({ space: 2 }) {
-      Stack() {
-        Text('+').fontSize(24).fontWeight(FontWeight.Bold).fontColor(this.canAddSoloBotSlot() ? INK : '#9A948C')
-      }
-      .width(43)
-      .height(43)
-      .border({ width: 1.5, color: INK })
-      .borderRadius(4)
-      .backgroundColor(PAPER)
-      .shadow(CONTROL_SHADOW)
-      .opacity(this.canAddSoloBotSlot() ? 1 : 0.42)
-      .enabled(this.canAddSoloBotSlot())
-      .hitTestBehavior(this.canAddSoloBotSlot() ? HitTestMode.Default : HitTestMode.None)
-      .onClick(() => { void this.addSoloBotSlot(); })
+      Column() {
+        ActionButton({
+          label: '+', active: this.canAddSoloBotSlot(),
+          controlWidth: 43, controlHeight: 43, labelSize: 24, labelWeight: FontWeight.Bold,
+          fill: PAPER, lineWidth: 1.5, cornerRadius: 4,
+          hardShadow: { offsetX: COMIC_CONTROL_INK_OFFSET, offsetY: COMIC_CONTROL_INK_OFFSET, color: INK },
+          accessibilityLabel: '添加队员',
+          action: () => { void this.addSoloBotSlot(); }
+        })
+      }.width(43).clip(false)
       Text(' ').fontSize(10).opacity(0)
     }.width(58)
   }
@@ -1446,30 +1906,33 @@ struct LeaderLobbyPage {
   @Builder
   private characterPickCell(key: string) {
     Stack({ alignContent: Alignment.TopStart }) {
-      // An opaque offset layer gives the frame a hard ink shadow even when the
-      // portrait is transparent or dimmed. Only the artwork follows pick opacity.
-      Row().width(CHARACTER_PICK_AVATAR_SIZE).height(CHARACTER_PICK_AVATAR_SIZE)
-        .backgroundColor(INK).borderRadius(CHARACTER_PICK_CORNER_RADIUS)
-        .position({ x: CHARACTER_PICK_SHADOW_OFFSET, y: CHARACTER_PICK_AVATAR_TOP + CHARACTER_PICK_SHADOW_OFFSET })
       Stack() {
-        ComicCharacter({ avatar: key, portrait: true })
-          .width('100%').height('100%')
-          .opacity(this.pickOpacity(this.pickStateForKey(key)))
+      ActionButton({
+        active: this.pickStateForKey(key) === 'selectable',
+        controlWidth: CHARACTER_PICK_AVATAR_SIZE, controlHeight: CHARACTER_PICK_AVATAR_SIZE,
+        hitRegion: { x: 0, y: -CHARACTER_PICK_AVATAR_TOP, width: 59, height: 54 },
+        fill: this.characterPickSelected(key) ? LILAC : PAPER,
+        cornerRadius: CHARACTER_PICK_CORNER_RADIUS,
+        hardShadow: { offsetX: CHARACTER_PICK_SHADOW_OFFSET, offsetY: CHARACTER_PICK_SHADOW_OFFSET, color: INK },
+        accessibilityLabel: `${avatarDisplayName(key)}，选择角色`,
+        action: () => { void this.pickCharacter(key); }
+      }) {
+        Stack() {
+          ComicCharacter({ avatar: key, portrait: true })
+            .width('100%').height('100%')
+        }
+          .width(CHARACTER_PICK_AVATAR_SIZE).height(CHARACTER_PICK_AVATAR_SIZE)
+          .backgroundColor(this.characterPickSelected(key) ? LILAC : PAPER)
+          .border({ width: 1.5, color: INK })
+          .borderRadius(CHARACTER_PICK_CORNER_RADIUS).clip(true)
       }
-        .width(CHARACTER_PICK_AVATAR_SIZE)
-        .height(CHARACTER_PICK_AVATAR_SIZE)
-        .backgroundColor((this.showingRandomMystery() ? 'random' : this.editingAvatarKey()) === key ? LILAC : PAPER)
-        .border({ width: 1.5, color: INK })
-        // Clip the portrait itself to the frame corners; badges and the ink
-        // shadow remain sibling layers so their overhang is never cropped.
-        .borderRadius(CHARACTER_PICK_CORNER_RADIUS).clip(true)
+      }.width(CHARACTER_PICK_AVATAR_SIZE).height(CHARACTER_PICK_AVATAR_SIZE)
         .position({ x: 0, y: CHARACTER_PICK_AVATAR_TOP })
       this.characterBadges(key)
     }
     .width(59)
     .height(54)
     .clip(false)
-    .onClick(() => { void this.pickCharacter(key); })
   }
 
   @Builder
@@ -1486,10 +1949,16 @@ struct LeaderLobbyPage {
   @Builder
   private proDrumMachineEntryWithChain(asset: string, locked: boolean) {
     Stack({ alignContent: Alignment.TopEnd }) {
-      Row()
-        .width('100%').height(PRO_DRUM_BUTTON_HEIGHT).backgroundColor(LILAC)
-        .border({ width: 1.5, color: INK }).borderRadius(7)
-        .shadow(CARD_SHADOW).opacity(locked ? 0.68 : 1)
+      Column() {
+        DrumPaper({ fill: LILAC, cornerRadius: 7, paperLineWidth: 0,
+          offsetX: LOBBY_AREA_SHADOW_OFFSET, offsetY: LOBBY_AREA_SHADOW_OFFSET }) {
+          Row()
+            .width('100%').height(PRO_DRUM_BUTTON_HEIGHT).backgroundColor(LILAC)
+            .border({ width: 1.5, color: INK }).borderRadius(7)
+            .hitTestBehavior(HitTestMode.None)
+        }
+      }.width('100%').height(PRO_DRUM_BUTTON_HEIGHT).clip(false)
+        .opacity(locked ? 0.68 : 1)
         .align(Alignment.Top).translate({ y: PRO_DRUM_ENTRY_PADDING })
         .hitTestBehavior(HitTestMode.None)
       this.proChain(asset)
@@ -1556,55 +2025,85 @@ struct LeaderLobbyPage {
 
   @Builder
   private sceneCard(item: LobbySceneOption) {
-    Stack({ alignContent: Alignment.TopStart }) {
-      Column({ space: 0 }) {
-        this.scenePreview(item.key)
-        Column({ space: 2 }) {
-          Text(item.name).fontSize(15).fontWeight(900).width('100%')
-          Text(item.caption).fontSize(10).fontColor('#66615A').width('100%').maxLines(1)
-        }.width('100%').padding({ left: 8, right: 8, top: 6, bottom: 7 })
-      }.width('100%')
-      if (this.selectedSceneKey === item.key) {
-        Row() {
-          Blank()
-          Text('✓ 已选择').fontSize(10).fontWeight(900).fontColor(PAPER)
-            .backgroundColor(CORAL).padding({ left: 7, right: 7, top: 4, bottom: 4 }).borderRadius(4).shadow(CONTROL_SHADOW)
-        }.width('100%').padding({ top: 6, right: 6 }).hitTestBehavior(HitTestMode.None)
+    Column() {
+      DrumPaper({ fill: '#FFFDF7', cornerRadius: LOBBY_SCENE_CORNER_RADIUS, paperLineWidth: 0,
+        clipContent: true,
+        offsetX: LOBBY_AREA_SHADOW_OFFSET, offsetY: LOBBY_AREA_SHADOW_OFFSET }) {
+        Stack({ alignContent: Alignment.TopStart }) {
+          Column({ space: 0 }) {
+            this.scenePreview(item.key)
+            Column({ space: 2 }) {
+              Text(item.name).fontSize(15).fontWeight(900).width('100%')
+              Text(item.caption).fontSize(10).fontColor('#66615A').width('100%').maxLines(1)
+            }.width('100%').padding({ left: 8, right: 8, top: 6, bottom: 7 })
+          }.width('100%')
+          if (this.selectedSceneKey === item.key) {
+            Row() {
+              Blank()
+              DrumPaper({ fill: CORAL, paperWidth: 'auto', cornerRadius: 4, paperLineWidth: 0,
+                offsetX: COMIC_CONTROL_INK_OFFSET, offsetY: COMIC_CONTROL_INK_OFFSET }) {
+                Text('✓ 已选择').fontSize(10).fontWeight(900).fontColor(PAPER)
+                  .backgroundColor(CORAL).padding({ left: 7, right: 7, top: 4, bottom: 4 }).borderRadius(4)
+              }
+            }.width('100%').padding({ top: 6, right: 6 }).hitTestBehavior(HitTestMode.None)
+            // Add the remaining ink inside the fixed border, without changing
+            // the content inset when selection moves between cards.
+            Row().width('100%').height('100%')
+              .border({ width: LOBBY_SCENE_SELECTED_BORDER_WIDTH - LOBBY_SCENE_BORDER_WIDTH, color: INK })
+              .borderRadius(LOBBY_SCENE_CORNER_RADIUS - LOBBY_SCENE_BORDER_WIDTH)
+              .hitTestBehavior(HitTestMode.None).accessibilityLevel('no')
+          }
+        }
+        .width('100%').height(LOBBY_SCENE_CARD_HEIGHT)
+        .backgroundColor('#FFFDF7')
+        .border({ width: LOBBY_SCENE_BORDER_WIDTH, color: INK })
+        .borderRadius(LOBBY_SCENE_CORNER_RADIUS)
+        .onClick(() => { void this.chooseScene(item.key); })
       }
-    }
-    .width(154).height(148)
-    .backgroundColor('#FFFDF7')
-    .border({ width: this.selectedSceneKey === item.key ? 3 : 1, color: INK })
-    .borderRadius(7).shadow(CARD_SHADOW)
-    .opacity(this.leader && isSceneAccessible(item.key) ? 1 : 0.55)
-    .onClick(() => { void this.chooseScene(item.key); })
+    // Fade the opaque face and ink together. The cache needs the full shadow
+    // extent; negative margins preserve card spacing and the Scroll's bounds.
+    }.width(LOBBY_SCENE_CARD_WIDTH + LOBBY_AREA_SHADOW_OFFSET)
+      .height(LOBBY_SCENE_CARD_HEIGHT + LOBBY_AREA_SHADOW_OFFSET)
+      .padding({ right: LOBBY_AREA_SHADOW_OFFSET, bottom: LOBBY_AREA_SHADOW_OFFSET })
+      .margin({ right: -LOBBY_AREA_SHADOW_OFFSET, bottom: -LOBBY_AREA_SHADOW_OFFSET })
+      .clip(false)
+      .renderGroup(!this.leader || !isSceneAccessible(item.key))
+      .opacity(this.leader && isSceneAccessible(item.key) ? 1 : ACTION_DISABLED_OPACITY)
   }
 
   @Builder
   private rhythmDropdownPanel() {
-    Column({ space: 3 }) {
-      ForEach(this.rhythms, (name: string, index: number) => {
-        Button({ type: ButtonType.Normal }) {
-          Row() {
-            Text(name).fontSize(13).fontWeight(FontWeight.Bold)
-            Blank()
-            if (this.rhythm === index) {
-              Text('✓').fontSize(13).fontWeight(900)
+    Column() {
+      DrumPaper({ fill: PAPER, cornerRadius: 6, paperLineWidth: 0,
+        offsetX: LOBBY_AREA_SHADOW_OFFSET, offsetY: LOBBY_AREA_SHADOW_OFFSET }) {
+        Column({ space: 3 }) {
+          ForEach(this.rhythms, (name: string, index: number) => {
+            DrumPaper({ fill: this.rhythm === index ? CORAL : PAPER, paperWidth: '100%', cornerRadius: 4, paperLineWidth: 0,
+              offsetX: COMIC_CONTROL_INK_OFFSET, offsetY: COMIC_CONTROL_INK_OFFSET }) {
+              Button({ type: ButtonType.Normal }) {
+                Row() {
+                  Text(name).fontSize(13).fontWeight(FontWeight.Bold)
+                  Blank()
+                  if (this.rhythm === index) {
+                    Text('✓').fontSize(13).fontWeight(900)
+                  }
+                }.width('100%')
+              }
+              .width('100%').height(32).padding({ left: 10, right: 8 }).fontColor(INK)
+              .backgroundColor(this.rhythm === index ? CORAL : PAPER)
+              .border({ width: 1, color: INK }).borderRadius(4)
+              .onClick(() => { void this.chooseBasicRhythm(index); })
             }
-          }.width('100%')
+          })
         }
-        .width('100%').height(32).padding({ left: 10, right: 8 }).fontColor(INK)
-        .backgroundColor(this.rhythm === index ? CORAL : PAPER)
-        .border({ width: 1, color: INK }).borderRadius(4).shadow(CONTROL_SHADOW)
-        .onClick(() => { void this.chooseBasicRhythm(index); })
-      })
-    }
-    .width(this.rhythmDropdownWidth)
-    .padding({ left: 4, right: 4, top: 5, bottom: 5 })
-    .backgroundColor(PAPER)
-    .border({ width: 1.5, color: INK })
-    .borderRadius(6)
-    .shadow(CARD_SHADOW)
+        .width('100%')
+        .padding({ left: 4, right: 4, top: 5, bottom: 5 })
+        .backgroundColor(PAPER)
+        .border({ width: 1.5, color: INK })
+        .borderRadius(6)
+        .clip(false)
+      }
+    }.width(this.rhythmDropdownWidth).clip(false)
   }
 
   @Builder
@@ -1625,6 +2124,38 @@ struct LeaderLobbyPage {
     .zIndex(85)
   }
 
+  @Builder
+  private inviteUnavailableCard() {
+    Row({ space: INVITE_NOTICE_GAP }) {
+      Image($rawfile(this.inviteBluetoothState === 'off' || this.inviteBluetoothState === 'turningOff'
+        ? 'comic/icons/bluetooth-off.svg' : 'comic/icons/bluetooth.svg'))
+        .width(INVITE_NOTICE_ICON_SIZE).height(INVITE_NOTICE_ICON_SIZE)
+        .objectFit(ImageFit.Contain).accessibilityLevel('no')
+      Column({ space: 3 }) {
+        Text(this.inviteUnavailableTitle()).fontSize(13).fontWeight(FontWeight.Bold)
+          .fontColor(INVITE_NOTICE_INK).width('100%')
+        Text(this.inviteUnavailableDetail()).fontSize(11).fontColor(INVITE_NOTICE_INK).width('100%')
+      }.layoutWeight(1).alignItems(HorizontalAlign.Start)
+        .accessibilityGroup(true)
+      if (this.inviteBluetoothSupported) {
+        ActionButton({
+          label: this.inviteActionLabel(), active: this.inviteActionEnabled(),
+          controlWidth: INVITE_NOTICE_ACTION_WIDTH, controlHeight: INVITE_NOTICE_ACTION_HEIGHT,
+          fill: INVITE_NOTICE_FILL, labelColor: INVITE_NOTICE_INK, labelSize: 12,
+          labelWeight: FontWeight.Bold, lineWidth: 0, cornerRadius: 4,
+          buttonId: 'lobby-enable-join-code',
+          accessibilityLabel: this.inviteBluetoothState === 'off' || this.inviteBluetoothState === 'turningOff'
+            ? '前往系统设置开启蓝牙，扫码仍可使用' : '重新启用加入码，扫码仍可使用',
+          action: () => { void this.activateJoinCode(); }
+        })
+      }
+    }.width('100%')
+      .padding({ left: INVITE_NOTICE_HORIZONTAL_PADDING, right: INVITE_NOTICE_HORIZONTAL_PADDING,
+        top: INVITE_NOTICE_VERTICAL_PADDING, bottom: INVITE_NOTICE_VERTICAL_PADDING })
+      .backgroundColor(INVITE_NOTICE_FILL).borderRadius(5)
+      .id('lobby-join-code-notice')
+  }
+
   build() {
     Stack() {
       Scroll() {
@@ -1633,77 +2164,101 @@ struct LeaderLobbyPage {
           Text('‹').fontSize(32).width(32).onClick(() => { void this.leaveLobby(); })
           Text('队伍大厅').fontSize(32).fontWeight(900).fontStyle(FontStyle.Italic)
           Blank()
-          Text(this.leader ? '队长' : '队员').fontSize(12).backgroundColor(LILAC).padding(7).borderRadius(4).shadow(CONTROL_SHADOW)
+          DrumPaper({ fill: LILAC, paperWidth: 'auto', cornerRadius: 4, paperLineWidth: 0,
+            offsetX: COMIC_CONTROL_INK_OFFSET, offsetY: COMIC_CONTROL_INK_OFFSET }) {
+            Text(this.leader ? '队长' : '队员').fontSize(12).backgroundColor(LILAC).padding(7).borderRadius(4)
+          }
         }.width('100%')
-        Column({ space: 9 }) {
-          Row() {
-            Text(`${this.members.length} 人在队伍中`).fontWeight(FontWeight.Bold)
-            Blank()
-            if (this.qr.length > 0 && !this.invite) {
-              Text('展开邀请信息 ›')
-                .fontSize(12)
-                .fontWeight(FontWeight.Bold)
-                .onClick(() => { this.invite = true; })
-            } else if (this.qr.length === 0) {
-              Text('本机练习').fontSize(12).fontColor('#66615A')
-            }
-          }.width('100%')
-          Scroll(this.rosterScroller) {
-            Row({ space: 10 }) {
-              ForEach(this.members, (m: SessionMember) => {
-                this.rosterMemberSlot(m)
-              }, (m: SessionMember) => `${m.id}-${m.avatarKey}-${m.randomDrawId ?? 0}-` +
-                `${this.revealedMemberMysteryAvatar(m)}-${m.lobbyReady === true ? 1 : 0}-` +
-                `${m.bluetoothCalibrating === true ? 1 : 0}`)
-              if (this.soloTeam && this.leader) {
-                this.rosterAddSlot()
-              }
-            }
-            .padding({ top: ROSTER_ROW_TOP_PADDING, bottom: 2 })
-            .onAreaChange(() => { this.keepRosterAddSlotVisible(); })
-          }
-          .scrollable(ScrollDirection.Horizontal)
-          .width('100%')
-          .clip(false)
-          .onAreaChange(() => { this.keepRosterAddSlotVisible(); })
-          if (this.invite && this.qr.length > 0) {
-            QRCode(this.qr).width(150).height(150).backgroundColor(Color.White)
-            Text(`加入码  ${AppSession.get()?.controller.joinCode ?? '------'}`)
-              .fontSize(28)
-              .fontWeight(900)
-              .fontStyle(FontStyle.Italic)
-              .letterSpacing(4)
-            Text(AppSession.get()?.controller.bleInviteAvailable === true
-              ? '扫码或输入 6 位加入码'
-              : '加入码暂不可用，可扫码加入')
-              .fontSize(12)
-              .fontColor('#66615A')
+        DrumPaper({ fill: WHITE, cornerRadius: 7, paperLineWidth: 0,
+          offsetX: LOBBY_AREA_SHADOW_OFFSET, offsetY: LOBBY_AREA_SHADOW_OFFSET }) {
+          Column({ space: 9 }) {
             Row() {
+              Text(`${this.members.length} 人在队伍中`).fontWeight(FontWeight.Bold)
               Blank()
-              Text('收起邀请信息 ›')
-                .fontSize(12)
-                .fontWeight(FontWeight.Bold)
-                .onClick(() => { this.invite = false; })
+              if (this.qr.length > 0 && !this.invite) {
+                Text('展开邀请信息 ›')
+                  .fontSize(12)
+                  .fontWeight(FontWeight.Bold)
+                  .onClick(() => { this.invite = true; })
+              } else if (this.qr.length === 0) {
+                Text('本机练习').fontSize(12).fontColor('#66615A')
+              }
             }.width('100%')
-          }
-        }.padding(12).width('100%').backgroundColor(WHITE)
-          .border({ width: 1, color: INK }).borderRadius(7).shadow(CARD_SHADOW).clip(false)
+            Column() {
+              Scroll(this.rosterScroller) {
+                Row({ space: ROSTER_SLOT_ROW_GAP }) {
+                  ForEach(this.members, (m: SessionMember) => {
+                    this.rosterMemberSlot(m)
+                  }, (m: SessionMember) => `${m.id}-${m.avatarKey}-${m.randomDrawId ?? 0}-` +
+                    `${this.revealedMemberMysteryAvatar(m)}-${m.lobbyReady === true ? 1 : 0}-` +
+                    `${m.bluetoothCalibrating === true ? 1 : 0}`)
+                  if (this.soloTeam && this.leader) {
+                    this.rosterAddSlot()
+                  }
+                }
+                .padding({
+                  left: 2,
+                  right: COMIC_CONTROL_INK_OFFSET + 2,
+                  top: ROSTER_ROW_TOP_PADDING,
+                  bottom: ROSTER_SCROLL_BOTTOM_INSET
+                })
+              }
+              .scrollable(ScrollDirection.Horizontal)
+              .enableScrollInteraction(this.rosterDragMemberId.length === 0)
+              .scrollBar(BarState.Off)
+              .width('100%')
+              .height(ROSTER_SCROLL_VIEWPORT_HEIGHT)
+              .clip(!this.rosterDragOverflowPaint())
+            }
+            .width('100%')
+            .height(ROSTER_SCROLL_VIEWPORT_HEIGHT)
+            .clip(!this.rosterDragOverflowPaint())
+            .zIndex(this.rosterDragOverflowPaint() ? ROSTER_DRAG_OVERFLOW_Z_INDEX : 0)
+            if (this.invite && this.qr.length > 0) {
+              QRCode(this.qr).width(150).height(150).backgroundColor(Color.White)
+              if (this.leader && !this.canShowJoinCode()) {
+                Text('队员可直接扫码').fontSize(12).fontColor('#66615A')
+                this.inviteUnavailableCard()
+              } else {
+                Text(`加入码  ${this.inviteJoinCode}`)
+                  .fontSize(28)
+                  .fontWeight(900)
+                  .fontStyle(FontStyle.Italic)
+                  .letterSpacing(4)
+                  .id('lobby-join-code')
+                Text('扫码或输入 6 位加入码').fontSize(12).fontColor('#66615A')
+              }
+              Row() {
+                Blank()
+                Text('收起邀请信息 ›')
+                  .fontSize(12)
+                  .fontWeight(FontWeight.Bold)
+                  .onClick(() => { this.invite = false; })
+              }.width('100%')
+            }
+          }.padding(12).width('100%').backgroundColor(WHITE)
+            .border({ width: 1, color: INK }).borderRadius(7)
+            .clip(!this.rosterDragOverflowPaint())
+        }
         Text('角色选择').width('100%').fontWeight(FontWeight.Bold).fontSize(17)
-        Text(this.soloTeam && this.leader ? '点队伍槽位切换编辑对象' : '仅可更换自己的角色')
+        Text(this.soloTeam && this.leader ? '点槽位切换编辑 · 长按拖动调整顺序' : '仅可更换自己的角色')
           .fontSize(11).fontColor('#66615A').width('100%')
         if (this.showingRandomMystery()) {
-          RandomCharacterFilm({
-            request: this.randomPreviewRequest,
-            cancelRequest: this.randomPreviewCancelRequest,
-            memberId: this.editingMemberId,
-            resolvedAvatarKey: this.editingResolvedAvatarKey(),
-            drawId: this.editingRandomDrawId(),
-            skipPlayback: this.shouldSkipEditingRandomPlayback(),
-            revealReady: AppSession.get()?.controller.isMemberRandomAvatarRevealed(this.editingMemberId) === true,
-            onSettled: (memberId: string, drawId: number) => { void this.onRandomFilmSettled(memberId, drawId); },
-            selectionPending: this.randomPreviewPendingMemberId === this.editingMemberId,
-            ready: this.randomPreviewReady()
-          }).width('100%').height(RANDOM_FILM_HEIGHT)
+          DrumPaper({ fill: PAPER, cornerRadius: 6, paperLineWidth: 0,
+            offsetX: LOBBY_AREA_SHADOW_OFFSET, offsetY: LOBBY_AREA_SHADOW_OFFSET }) {
+            RandomCharacterFilm({
+              request: this.randomPreviewRequest,
+              cancelRequest: this.randomPreviewCancelRequest,
+              memberId: this.editingMemberId,
+              resolvedAvatarKey: this.editingResolvedAvatarKey(),
+              drawId: this.editingRandomDrawId(),
+              skipPlayback: this.shouldSkipEditingRandomPlayback(),
+              revealReady: AppSession.get()?.controller.isMemberRandomAvatarRevealed(this.editingMemberId) === true,
+              onSettled: (memberId: string, drawId: number) => { void this.onRandomFilmSettled(memberId, drawId); },
+              selectionPending: this.randomPreviewPendingMemberId === this.editingMemberId,
+              ready: this.randomPreviewReady()
+            }).width('100%').height(RANDOM_FILM_HEIGHT)
+          }
         } else {
           Stack() {
             Image($rawfile('comic/decor/character_panel.png')).width('100%').height('100%').objectFit(ImageFit.Fill)
@@ -1719,169 +2274,261 @@ struct LeaderLobbyPage {
             Text('已准备 · 不可换角').fontSize(11).fontColor('#66615A')
           }
         }.width('100%')
-        Scroll() {
-          Row({ space: 10 }) {
-            ForEach(sortRosterKeysForPicker(rosterKeysForLobby(this.soloTeam)), (key: string) => {
-              this.characterPickCell(key)
-            }, (key: string) => `${key}@${this.storeEntitlementEpoch}`)
+        Column() {
+          Scroll() {
+            Row({ space: 10 }) {
+              ForEach(sortRosterKeysForPicker(rosterKeysForLobby(this.soloTeam)), (key: string) => {
+                this.characterPickCell(key)
+              }, (key: string) => `${key}@${this.storeEntitlementEpoch}`)
+            }
+            .padding({ left: 2, right: 2, top: 2, bottom: 2 })
           }
-          .padding({ left: 2, right: 2, top: 2, bottom: 2 })
-        }
-        .scrollable(ScrollDirection.Horizontal)
-        .scrollBar(BarState.Off)
-        .width('100%')
-        .clip(false)
+          .scrollable(ScrollDirection.Horizontal)
+          .scrollBar(BarState.Off)
+          .width('100%')
+          .clip(true)
+        }.width('100%').clip(true)
         if (this.leader) {
-          Column({ space: 9 }) {
-            Row() {
-              Text('行进场景').fontSize(18).fontWeight(900)
-              Blank()
-              Text('点击选择 · 可左右滑动')
-                .fontSize(10).fontWeight(FontWeight.Bold).fontColor('#66615A')
-            }.width('100%')
-            Scroll() {
-              Row({ space: 10 }) {
-                ForEach(LOBBY_SCENES, (item: LobbySceneOption) => {
-                  this.sceneCard(item)
-                }, (item: LobbySceneOption) => item.key)
-              }.padding({ bottom: 2 })
-            }.scrollable(ScrollDirection.Horizontal).scrollBar(BarState.Off).width('100%').height(151)
-          }.width('100%').padding(12).backgroundColor(WHITE)
-            .border({ width: 1, color: INK }).borderRadius(7).shadow(CARD_SHADOW)
+          DrumPaper({ fill: WHITE, cornerRadius: 7, paperLineWidth: 0, clipContent: true,
+            offsetX: LOBBY_AREA_SHADOW_OFFSET, offsetY: LOBBY_AREA_SHADOW_OFFSET }) {
+            Column({ space: 9 }) {
+              Row() {
+                Text('行进场景').fontSize(18).fontWeight(900)
+                Blank()
+                Text('点击选择 · 可左右滑动')
+                  .fontSize(10).fontWeight(FontWeight.Bold).fontColor('#66615A')
+              }.width('100%')
+              // Keep card backings inside the viewport while clipping horizontal overflow.
+              Scroll() {
+                Row({ space: 10 }) {
+                  ForEach(LOBBY_SCENES, (item: LobbySceneOption) => {
+                    this.sceneCard(item)
+                  }, (item: LobbySceneOption) => item.key)
+                }.padding({ right: LOBBY_AREA_SHADOW_OFFSET, bottom: LOBBY_AREA_SHADOW_OFFSET })
+              }.scrollable(ScrollDirection.Horizontal).scrollBar(BarState.Off).width('100%')
+                .height(LOBBY_SCENE_CARD_HEIGHT + LOBBY_AREA_SHADOW_OFFSET).clip(true)
+            }.width('100%').padding(12).backgroundColor(WHITE)
+              .border({ width: 1, color: INK }).borderRadius(7)
+              .clip(false)
+          }
         }
         if (this.leader && this.rhythm !== 3) {
-          Column({ space: 13 }) {
-            Text('队长设置').fontSize(18).fontWeight(900).width('100%')
-            Row() {
-              Text('节奏型').fontSize(14).width(68)
-              Button({ type: ButtonType.Normal }) {
-                Row() {
-                  Text(this.rhythms[this.rhythm]).fontSize(13).fontWeight(FontWeight.Bold)
-                  Blank()
-                  Text(this.rhythmDropdownOpen ? '⌃' : '⌄').fontSize(15)
-                }.width('100%')
-              }
-              .id('lobby-rhythm-select')
-              .layoutWeight(1)
-              .height(34)
-              .padding({ left: 8, right: 7 })
-              .fontColor(INK)
-              .backgroundColor(PAPER)
-              .border({ width: 1, color: INK })
-              .borderRadius(5).shadow(CONTROL_SHADOW)
-              .enabled(this.leader && !this.loading)
-              .onClick(() => this.openRhythmDropdown())
-            }.width('100%')
-            Row({ space: 8 }) {
-              Text('拍号').fontSize(14).width(60)
-              EditableMeter({
-                beats: this.beats,
-                unit: this.unit,
-                editable: this.leader && !this.loading,
-                controlWidth: '100%',
-                controlHeight: 38,
-                valueFontSize: 20,
-                onEdit: (): void => { this.meterEditorVisible = true; }
-              })
-              .layoutWeight(1)
-            }.width('100%')
-            Row({ space: 12 }) {
-              Text('BPM').width(56).fontWeight(FontWeight.Bold)
-              Button('−').backgroundColor(PAPER).fontColor(INK).border({ width: 1, color: INK }).borderRadius(4).shadow(CONTROL_SHADOW)
-                .enabled(this.leader && this.bpm > 40).onClick(() => { void AppSession.get()?.controller.updateBpm(this.bpm - 1); })
-              EditableBpm({
-                value: this.bpm,
-                editable: this.leader && !this.loading,
-                inputId: 'lobby-bpm-input',
-                controlWidth: '100%',
-                controlHeight: 48,
-                valueFontSize: 40,
-                onCommit: (value: number): void => {
-                  void AppSession.get()?.controller.updateBpm(value);
-                }
-              }).layoutWeight(1)
-              Button('+').backgroundColor(PAPER).fontColor(INK).border({ width: 1, color: INK }).borderRadius(4).shadow(CONTROL_SHADOW)
-                .enabled(this.leader && this.bpm < 240).onClick(() => { void AppSession.get()?.controller.updateBpm(this.bpm + 1); })
-            }.width('100%')
-            Text(`每分钟 ${this.bpm} 个${beatUnitLabel(this.unit)}音符拍点`).fontSize(11).fontColor('#66615A').width('100%')
-          }.width('100%').padding(12).backgroundColor(WHITE)
-            .border({ width: 1, color: INK }).borderRadius(7).shadow(CARD_SHADOW)
+          DrumPaper({ fill: WHITE, cornerRadius: 7, paperLineWidth: 0,
+            offsetX: LOBBY_AREA_SHADOW_OFFSET, offsetY: LOBBY_AREA_SHADOW_OFFSET }) {
+            Column({ space: 13 }) {
+              Text('队长设置').fontSize(18).fontWeight(900).width('100%')
+              Row() {
+                Text('节奏型').fontSize(14).width(68)
+                Column() {
+                  ActionButton({
+                    active: this.leader && !this.loading,
+                    controlHeight: 34, contentPadding: { left: 8, right: 7 },
+                    fill: PAPER, lineWidth: 1, cornerRadius: 5,
+                    hardShadow: { offsetX: COMIC_CONTROL_INK_OFFSET, offsetY: COMIC_CONTROL_INK_OFFSET, color: INK },
+                    buttonId: 'lobby-rhythm-select', accessibilityLabel: this.rhythms[this.rhythm],
+                    action: () => this.openRhythmDropdown()
+                  }) {
+                    Row() {
+                      Text(this.rhythms[this.rhythm]).fontSize(13).fontWeight(FontWeight.Bold).fontColor(INK)
+                      Blank()
+                      Text(this.rhythmDropdownOpen ? '⌃' : '⌄').fontSize(15).fontColor(INK)
+                    }.width('100%')
+                  }
+                }.layoutWeight(1).clip(false)
+              }.width('100%')
+              Row({ space: 8 }) {
+                Text('拍号').fontSize(14).width(60)
+                EditableMeter({
+                  solidInk: true,
+                  beats: this.beats,
+                  unit: this.unit,
+                  editable: this.leader && !this.loading,
+                  controlWidth: '100%',
+                  controlHeight: 38,
+                  valueFontSize: 20,
+                  onEdit: (): void => { this.meterEditorVisible = true; }
+                })
+                .layoutWeight(1)
+              }.width('100%')
+              Row({ space: 12 }) {
+                Text('BPM').width(56).fontWeight(FontWeight.Bold)
+                ActionButton({
+                  label: '−', active: this.leader && this.bpm > 40,
+                  controlWidth: 'auto', controlHeight: 40, contentPadding: { left: 16, right: 16 },
+                  labelSize: 16, labelWeight: FontWeight.Medium, fill: PAPER, lineWidth: 1, cornerRadius: 4,
+                  hardShadow: { offsetX: COMIC_CONTROL_INK_OFFSET, offsetY: COMIC_CONTROL_INK_OFFSET, color: INK },
+                  accessibilityLabel: '降低 BPM',
+                  action: () => { void AppSession.get()?.controller.updateBpm(this.bpm - 1); }
+                })
+                EditableBpm({
+                  solidInk: true,
+                  value: this.bpm,
+                  editable: this.leader && !this.loading,
+                  inputId: 'lobby-bpm-input',
+                  controlWidth: '100%',
+                  controlHeight: 48,
+                  valueFontSize: 40,
+                  onCommit: (value: number): void => {
+                    void AppSession.get()?.controller.updateBpm(value);
+                  }
+                }).layoutWeight(1)
+                ActionButton({
+                  label: '+', active: this.leader && this.bpm < 240,
+                  controlWidth: 'auto', controlHeight: 40, contentPadding: { left: 16, right: 16 },
+                  labelSize: 16, labelWeight: FontWeight.Medium, fill: PAPER, lineWidth: 1, cornerRadius: 4,
+                  hardShadow: { offsetX: COMIC_CONTROL_INK_OFFSET, offsetY: COMIC_CONTROL_INK_OFFSET, color: INK },
+                  accessibilityLabel: '提高 BPM',
+                  action: () => { void AppSession.get()?.controller.updateBpm(this.bpm + 1); }
+                })
+              }.width('100%')
+              Text(`每分钟 ${this.bpm} 个${beatUnitLabel(this.unit)}音符拍点`).fontSize(11).fontColor('#66615A').width('100%')
+            }.width('100%').padding(12).backgroundColor(WHITE)
+              .border({ width: 1, color: INK }).borderRadius(7)
+              .clip(false)
+          }
         }
         if (this.rhythm === 3 && this.drumProgram.length > 0) {
-          Column({ space: 12 }) {
-            Row() {
-              Text('PRO 定制鼓机').fontSize(20).fontWeight(900).fontStyle(FontStyle.Italic)
-              Blank()
-              Text('已应用')
-                .fontSize(10).fontWeight(900).fontColor(INK).backgroundColor(BLUE)
-                .shadow(CONTROL_SHADOW)
-                .padding({ left: 8, right: 8, top: 4, bottom: 4 })
-                .border({ width: 1, color: INK }).borderRadius(3).rotate({ angle: 2 })
-            }.width('100%')
-            if (this.leader) {
-              Text(this.drumAccessLabel()).fontSize(11).fontWeight(FontWeight.Bold)
-                .fontColor('#61566F').width('100%')
-                .onClick(() => this.showProDrumAccessToast())
-            }
-            Row({ space: 12 }) {
-              Stack() {
-                Circle().width(68).height(68).fill(this.activeDrumStyleColor()).stroke(INK).strokeWidth(2)
-                Text('♪').fontSize(34).fontWeight(900).fontColor(INK)
-              }.width(72).height(72)
-              Column({ space: 3 }) {
-                Text(this.activeDrumStyleName()).fontSize(25).fontWeight(900).fontStyle(FontStyle.Italic).width('100%')
-                Text(this.activeDrumStyleCaption()).fontSize(12).fontWeight(FontWeight.Bold).fontColor('#5D574F').width('100%')
-                Row({ space: 4 }) {
-                  EditableMeter({
-                    beats: this.beats,
-                    unit: this.unit,
-                    editable: this.leader && !this.loading,
-                    controlWidth: 66,
-                    controlHeight: 28,
-                    valueFontSize: 14,
-                    onEdit: (): void => { this.meterEditorVisible = true; }
-                  })
-                  EditableBpm({
-                    value: this.bpm,
-                    editable: this.leader && !this.loading,
-                    inputId: 'lobby-drum-bpm-input',
-                    controlWidth: 55,
-                    controlHeight: 26,
-                    valueFontSize: 18,
-                    onCommit: (value: number): void => {
-                      void AppSession.get()?.controller.updateBpm(value);
-                    }
-                  })
-                  Text('BPM').fontSize(13).fontWeight(900)
-                }.width('100%').alignItems(VerticalAlign.Center)
-              }.layoutWeight(1)
-            }.width('100%')
-            Row({ space: 8 }) {
-              Text(`${this.activeDrumSectionCount()} 个段落`)
-                .fontSize(12).fontWeight(900).backgroundColor(PAPER)
-                .padding({ left: 9, right: 9, top: 5, bottom: 5 }).border({ width: 1, color: INK }).borderRadius(4).shadow(CONTROL_SHADOW)
-              Text(`${this.activeDrumBarCount()} 小节循环`)
-                .fontSize(12).fontWeight(900).backgroundColor(PAPER)
-                .padding({ left: 9, right: 9, top: 5, bottom: 5 }).border({ width: 1, color: INK }).borderRadius(4).shadow(CONTROL_SHADOW)
-            }.width('100%')
-            if (this.leader) {
-              Row({ space: 9 }) {
-                Button('编辑鼓机', { type: ButtonType.Normal })
-                  .layoutWeight(1).height(46).fontSize(15).fontWeight(900).fontColor(INK)
-                  .backgroundColor(LILAC).border({ width: 1.5, color: INK }).borderRadius(6).shadow(CONTROL_SHADOW)
-                  .onClick(() => this.editDrumMachine())
-                Button('切回节拍打点', { type: ButtonType.Normal })
-                  .layoutWeight(1.35).height(46).fontSize(15).fontWeight(900).fontColor(INK)
-                  .backgroundColor(PAPER).border({ width: 1.5, color: INK }).borderRadius(6).shadow(CONTROL_SHADOW)
-                  .onClick(() => { void this.switchToBasicBeat(); })
+          DrumPaper({ fill: '#EDE6FF', cornerRadius: DRUM_CARD_RADIUS, paperLineWidth: 0,
+            offsetX: LOBBY_AREA_SHADOW_OFFSET, offsetY: LOBBY_AREA_SHADOW_OFFSET }) {
+            Column({ space: DRUM_CARD_CONTENT_GAP }) {
+              Row() {
+                Text('PRO 定制鼓机').fontSize(20).fontWeight(900).fontStyle(FontStyle.Italic)
+                Blank()
+                Column() {
+                  DrumPaper({ fill: BLUE, paperWidth: 'auto', cornerRadius: DRUM_CONTROL_RADIUS, paperLineWidth: 0,
+                    offsetX: COMIC_CONTROL_INK_OFFSET, offsetY: COMIC_CONTROL_INK_OFFSET }) {
+                    Text('已应用')
+                      .fontSize(10).fontWeight(900).fontColor(INK).backgroundColor(BLUE)
+                      .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+                      .border({ width: 1, color: INK }).borderRadius(DRUM_CONTROL_RADIUS)
+                  }
+                }.rotate({ angle: 2 }).clip(false)
               }.width('100%')
-            } else {
-              Text('队长已启用定制鼓机，出发时会自动同步。').fontSize(11).fontColor('#5D574F').width('100%')
+              if (this.leader) {
+                Text(this.drumAccessLabel()).fontSize(11).fontWeight(FontWeight.Bold)
+                  .fontColor('#61566F').width('100%')
+                  .onClick(() => this.showProDrumAccessToast())
+              }
+              Row({ space: DRUM_CARD_CONTENT_GAP }) {
+                DrumPaper({ fill: WHITE, paperWidth: DRUM_ARRANGEMENT_ICON_SIZE, cornerRadius: DRUM_CONTROL_RADIUS, paperLineWidth: 0,
+                  offsetX: COMIC_CONTROL_INK_OFFSET, offsetY: COMIC_CONTROL_INK_OFFSET }) {
+                  Stack() {
+                    Column({ space: 5 }) {
+                      Rect().width(29).height(5).radius(2.5).fill(INK)
+                      Rect().width(21).height(5).radius(2.5).fill(INK)
+                      Rect().width(29).height(5).radius(2.5).fill(INK)
+                    }
+                  }
+                  .width(DRUM_ARRANGEMENT_ICON_SIZE).height(DRUM_ARRANGEMENT_ICON_SIZE)
+                  .backgroundColor(WHITE).border({ width: 1.5, color: INK })
+                  .borderRadius(DRUM_CONTROL_RADIUS)
+                  .id('lobby-drum-arrangement-icon')
+                  .accessibilityText('本编排')
+                }
+                Column({ space: 6 }) {
+                  Text(this.activeDrumProgramName()).fontSize(12).fontWeight(900).fontColor('#61566F').width('100%')
+                    .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+                  Row({ space: DRUM_STYLE_CHIP_GAP }) {
+                    ForEach(this.activeDrumVisibleStyleKeys(), (key: string) => {
+                      DrumPaper({ fill: styleByKey(key).color, paperWidth: 'auto', cornerRadius: DRUM_CONTROL_RADIUS, paperLineWidth: 0,
+                        offsetX: COMIC_CONTROL_INK_OFFSET, offsetY: COMIC_CONTROL_INK_OFFSET }) {
+                        Text(styleByKey(key).name)
+                          .fontSize(14).fontWeight(900).fontColor(INK)
+                          .height(DRUM_STYLE_CHIP_HEIGHT)
+                          .padding({ left: 8, right: 8 })
+                          .backgroundColor(styleByKey(key).color)
+                          .border({ width: 1, color: INK }).borderRadius(DRUM_CONTROL_RADIUS)
+                          .maxLines(1)
+                      }
+                    }, (key: string) => key)
+                    if (this.activeDrumStyleKeys().length > 2) {
+                      Text('…').fontSize(20).fontWeight(900).fontColor(INK)
+                        .accessibilityText('更多风格')
+                    }
+                  }.width('100%').alignItems(VerticalAlign.Center).id('lobby-drum-style-summary')
+                  Row({ space: 6 }) {
+                    EditableMeter({
+                      solidInk: true,
+                      beats: this.beats,
+                      unit: this.unit,
+                      editable: this.leader && !this.loading,
+                      controlWidth: 66,
+                      controlHeight: 28,
+                      valueFontSize: 14,
+                      controlCornerRadius: DRUM_CONTROL_RADIUS,
+                      onEdit: (): void => { this.meterEditorVisible = true; }
+                    })
+                    DrumPaper({ fill: WHITE, paperWidth: 'auto', cornerRadius: DRUM_CONTROL_RADIUS, paperLineWidth: 0,
+                      offsetX: COMIC_CONTROL_INK_OFFSET, offsetY: COMIC_CONTROL_INK_OFFSET }) {
+                      Row({ space: 4 }) {
+                        Text('BPM').fontSize(11).fontWeight(900).fontColor('#61566F')
+                        EditableBpm({
+                          solidInk: true,
+                          value: this.bpm,
+                          editable: this.leader && !this.loading,
+                          inputId: 'lobby-drum-bpm-input',
+                          controlWidth: 42,
+                          controlHeight: 26,
+                          valueFontSize: 18,
+                          controlCornerRadius: DRUM_CONTROL_RADIUS,
+                          onCommit: (value: number): void => {
+                            void AppSession.get()?.controller.updateBpm(value);
+                          }
+                        })
+                      }.height(28).padding({ left: 7, right: 5 }).backgroundColor(WHITE)
+                        .border({ width: 1, color: INK }).borderRadius(DRUM_CONTROL_RADIUS)
+                    }
+                  }.width('100%').alignItems(VerticalAlign.Center)
+                }.layoutWeight(1)
+              }.width('100%')
+              Row({ space: 8 }) {
+                DrumPaper({ fill: PAPER, paperWidth: 'auto', cornerRadius: DRUM_CONTROL_RADIUS, paperLineWidth: 0,
+                  offsetX: COMIC_CONTROL_INK_OFFSET, offsetY: COMIC_CONTROL_INK_OFFSET }) {
+                  Text(`${this.activeDrumSectionCount()} 个段落`)
+                    .fontSize(12).fontWeight(900).backgroundColor(PAPER)
+                    .padding({ left: 9, right: 9, top: 5, bottom: 5 }).border({ width: 1, color: INK })
+                    .borderRadius(DRUM_CONTROL_RADIUS)
+                }
+                DrumPaper({ fill: PAPER, paperWidth: 'auto', cornerRadius: DRUM_CONTROL_RADIUS, paperLineWidth: 0,
+                  offsetX: COMIC_CONTROL_INK_OFFSET, offsetY: COMIC_CONTROL_INK_OFFSET }) {
+                  Text(`${this.activeDrumBarCount()} 小节循环`)
+                    .fontSize(12).fontWeight(900).backgroundColor(PAPER)
+                    .padding({ left: 9, right: 9, top: 5, bottom: 5 }).border({ width: 1, color: INK })
+                    .borderRadius(DRUM_CONTROL_RADIUS)
+                }
+              }.width('100%')
+              if (this.leader) {
+                Row({ space: 9 }) {
+                  Column() {
+                    DrumPaper({ fill: LILAC, cornerRadius: DRUM_CONTROL_RADIUS, paperLineWidth: 0,
+                      offsetX: COMIC_CONTROL_INK_OFFSET, offsetY: COMIC_CONTROL_INK_OFFSET }) {
+                      Button('编辑鼓机', { type: ButtonType.Normal })
+                        .width('100%').height(46).fontSize(15).fontWeight(900).fontColor(INK)
+                        .backgroundColor(LILAC).border({ width: 1.5, color: INK })
+                        .borderRadius(DRUM_CONTROL_RADIUS)
+                        .onClick(() => this.editDrumMachine())
+                    }
+                  }.layoutWeight(1).clip(false)
+                  Column() {
+                    DrumPaper({ fill: PAPER, cornerRadius: DRUM_CONTROL_RADIUS, paperLineWidth: 0,
+                      offsetX: COMIC_CONTROL_INK_OFFSET, offsetY: COMIC_CONTROL_INK_OFFSET }) {
+                      Button('切回节拍打点', { type: ButtonType.Normal })
+                        .width('100%').height(46).fontSize(15).fontWeight(900).fontColor(INK)
+                        .backgroundColor(PAPER).border({ width: 1.5, color: INK })
+                        .borderRadius(DRUM_CONTROL_RADIUS)
+                        .onClick(() => { void this.switchToBasicBeat(); })
+                    }
+                  }.layoutWeight(1.35).clip(false)
+                }.width('100%')
+              } else {
+                Text('队长已启用定制鼓机，出发时会自动同步。').fontSize(11).fontColor('#5D574F').width('100%')
+              }
             }
+            .width('100%').padding(DRUM_CARD_PADDING).backgroundColor('#EDE6FF')
+            .border({ width: 2, color: INK }).borderRadius(DRUM_CARD_RADIUS)
+            .clip(false)
+            .id('lobby-applied-drum-card')
           }
-          .width('100%').padding(14).backgroundColor('#EDE6FF')
-          .border({ width: 2, color: INK }).borderRadius(8)
-          .shadow({ radius: INK_SHADOW_RADIUS, offsetX: 3, offsetY: 4, color: INK })
         } else if (this.leader) {
           this.proDrumMachineEntry()
         }
@@ -1908,6 +2555,7 @@ struct LeaderLobbyPage {
           label: this.primaryLobbyLabel(),
           fill: this.primaryLobbyFill(),
           active: this.primaryLobbyActive(),
+          hardShadow: { offsetX: COMIC_CARD_INK_OFFSET, offsetY: COMIC_CARD_INK_OFFSET, color: INK },
           action: () => { void this.handlePrimaryLobbyAction(); }
         })
         }.padding({
@@ -1917,11 +2565,15 @@ struct LeaderLobbyPage {
           bottom: 28 + this.bottomSafeInset
         }).width('100%')
       }.height('100%').width('100%').backgroundColor(PAPER)
+        // Before long-press, swipes still scroll normally. Once sorting owns
+        // the touch, neither Scroll may compete with the avatar's Pan gesture.
+        .enableScrollInteraction(this.rosterDragMemberId.length === 0)
       if (this.rhythmDropdownOpen) {
         this.rhythmDropdownOverlay()
       }
       if (this.meterEditorVisible) {
         MeterEditorOverlay({
+          solidInk: true,
           initialBeats: this.beats,
           initialUnit: this.unit,
           onChange: (beats: number, unit: number): void => { void this.applyMeter(beats, unit); },

@@ -190,7 +190,7 @@ inline int16_t MixSample(int16_t app, int16_t microphone, double microphoneGain)
     return static_cast<int16_t>(std::clamp(mixed, -32768, 32767));
 }
 
-/** A cached echo-cleaned MIC stays floating point so only the final mix is limited. */
+/** Floating-point MIC caches preserve later gain edits; the final sum is clamped to S16. */
 inline int16_t MixProcessedMicSample(int16_t app, float microphone, double microphoneGain)
 {
     if (microphoneGain == 0) return app;

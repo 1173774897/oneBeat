@@ -130,7 +130,7 @@
       "file": "entry/src/main/ets/pages/DrumMachinePage.ets",
       "line": 256,
       "registered_page": true,
-      "call": "promptAction.showToast({ message: replaced ? '已更新我的节奏' : '已保存到我的节奏' })",
+      "call": "promptAction.showToast({ message: replaced ? '已更新我的编排' : '已保存到我的编排' })",
       "audit_id": "T013",
       "recommendation": "保存结果择一轻反馈，避免列表与Toast叠加"
     },

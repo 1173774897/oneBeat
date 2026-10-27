@@ -1,3 +1,6 @@
+import { comicInkSurface, COMIC_CARD_INK_OFFSET, COMIC_CONTROL_INK_OFFSET } from '../components/ComicInkSurface';
+import { DrumPaper } from '../components/DrumPaper';
+import { ActionButton } from '../components/ActionButton';
 import { common } from '@kit.AbilityKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { util } from '@kit.ArkTS';
@@ -9,9 +12,6 @@ import {
   INK,
   LILAC,
   PAPER,
-  CARD_SHADOW,
-  CONTROL_SHADOW,
-  INK_SHADOW_RADIUS
 } from '../components/ComicKit';
 import { fetchStoreBootstrap, redeemStoreCode, restoreStorePurchases, verifyStorePurchase } from '../store/StoreApi';
 import { isStoreApiConfigured } from '../store/StoreApiConfig';
@@ -103,8 +103,8 @@ const STORE_SCENES: StoreScene[] = [
 const PASS_PRODUCT_ID: string = 'onebeat.pass.monthly';
 const IAP_ERROR_ALREADY_OWNED: number = 1001860051;
 
-const PASS_BANNER_MAX_WIDTH: number = 460;
-const PASS_BANNER_DEFAULT_WIDTH: number = 360;
+const PASS_BANNER_MAX_WIDTH: number = 472;
+const PASS_BANNER_DEFAULT_WIDTH: number = 372;
 // The PNG canvas keeps transparent room around a 2.52:1 ticket. Cover-cropping
 // it into this ratio preserves the complete ink edge while removing that room.
 const PASS_BANNER_DISPLAY_RATIO: number = 2.42;
@@ -370,6 +370,21 @@ struct StorePage {
     return count;
   }
 
+  /** “我的” tab lists owned exclusive characters only, not random-pool members. */
+  private ownedExclusiveCharacterCount(): number {
+    return this.visibleCharacterCountInList(STORE_EXCLUSIVE_CHARACTERS, true);
+  }
+
+  private ownedSceneCount(): number {
+    let count = 0;
+    for (let i = 0; i < STORE_SCENES.length; i++) {
+      if (this.hasScene(STORE_SCENES[i].key)) {
+        count++;
+      }
+    }
+    return count;
+  }
+
   private visibleCharacterCountInList(items: StoreCharacter[], onlyAccessible: boolean): number {
     if (!onlyAccessible) {
       return items.length;
@@ -387,7 +402,7 @@ struct StorePage {
     if (itemCount <= 0) {
       return 0;
     }
-    return Math.ceil(itemCount / 2) * 244;
+    return Math.ceil(itemCount / 2) * (234 + 10 + COMIC_CARD_INK_OFFSET);
   }
 
   private openCharacterPurchase(item: StoreCharacter): void {
@@ -944,14 +959,15 @@ struct StorePage {
         Text(this.redemptionAvailable ? 'OPEN' : 'CLOSED').fontSize(9).fontWeight(900).fontColor(PAPER)
           .padding({ left: 8, right: 8, top: 4, bottom: 4 })
           .backgroundColor(this.redemptionAvailable ? CORAL : INK).rotate({ angle: 3 })
-          .shadow(CONTROL_SHADOW)
+          .background(comicInkSurface(this.redemptionAvailable ? CORAL : INK, 0, COMIC_CONTROL_INK_OFFSET)).clip(false)
       }.width('100%')
       if (this.redemptionAvailable) {
         Column({ space: 9 }) {
           TextInput({ placeholder: '输入活动口令', text: this.redemptionCode })
             .width('100%').height(46).fontSize(15).fontColor(INK)
             .placeholderColor('#8D857A').backgroundColor(PAPER)
-            .border({ width: 1.5, color: INK }).borderRadius(5).shadow(CONTROL_SHADOW)
+            .border({ width: 1.5, color: INK }).borderRadius(5)
+            .background(comicInkSurface(PAPER, 5, COMIC_CONTROL_INK_OFFSET)).clip(false)
             .padding({ left: 12, right: 12 }).maxLength(64)
             .enabled(!this.redemptionBusy)
             .onChange((value: string) => this.updateRedemptionCode(value))
@@ -959,26 +975,42 @@ struct StorePage {
             Text(this.redemptionStatus).fontSize(11).fontWeight(FontWeight.Bold)
               .fontColor('#645E55').lineHeight(17).width('100%')
           }
-          Button(this.redemptionBusy ? '兑换中…' : '立即兑换', { type: ButtonType.Normal })
-            .width('100%').height(46).padding(0).fontSize(15).fontWeight(900).fontColor(INK)
-            .backgroundColor(CORAL).border({ width: 1.5, color: INK }).borderRadius(5)
-            .shadow({ radius: INK_SHADOW_RADIUS, offsetX: 3, offsetY: 4, color: INK })
-            .enabled(!this.redemptionBusy && this.redemptionCode.trim().length > 0)
-            .onClick(() => void this.submitRedemption())
+          ActionButton({
+            label: this.redemptionBusy ? '兑换中…' : '立即兑换',
+            active: !this.redemptionBusy && this.redemptionCode.trim().length > 0,
+            controlHeight: 46, labelSize: 15, labelWeight: 900, fill: CORAL,
+            lineWidth: 1.5, cornerRadius: 5,
+            hardShadow: { offsetX: COMIC_CONTROL_INK_OFFSET, offsetY: COMIC_CONTROL_INK_OFFSET, color: INK },
+            action: () => { void this.submitRedemption(); }
+          })
         }.width('100%')
       } else {
         Text('当前没有开放中的口令活动')
           .width('100%').fontSize(14).fontWeight(900).textAlign(TextAlign.Center)
           .padding({ top: 20, bottom: 20 }).backgroundColor(PAPER)
-          .border({ width: 1.2, color: INK }).borderRadius(5).shadow(CONTROL_SHADOW)
+          .border({ width: 1.2, color: INK }).borderRadius(5)
+          .background(comicInkSurface(PAPER, 5, COMIC_CONTROL_INK_OFFSET)).clip(false)
       }
       if (!this.redemptionAvailable && this.redemptionStatus.length > 0) {
         Text(this.redemptionStatus).fontSize(11).fontWeight(FontWeight.Bold)
           .fontColor('#645E55').lineHeight(17).width('100%')
       }
     }.width('100%').padding({ left: 16, right: 16, top: 16, bottom: 18 })
-    .backgroundColor(LILAC).border({ width: 2, color: INK }).borderRadius(8)
-    .shadow({ radius: INK_SHADOW_RADIUS, offsetX: 5, offsetY: 6, color: INK })
+  }
+
+  @Builder
+  private redemptionCardFrame() {
+    DrumPaper({
+      fill: LILAC,
+      paperWidth: '100%',
+      cornerRadius: 8,
+      paperLineWidth: 2,
+      clipContent: true,
+      offsetX: COMIC_CARD_INK_OFFSET,
+      offsetY: COMIC_CARD_INK_OFFSET
+    }) {
+      this.redemptionCard()
+    }
   }
 
   @Builder
@@ -995,23 +1027,45 @@ struct StorePage {
       } else if (this.redemptionSyncFailed) {
         Text('月卡已领取，权益列表暂未更新，可重试更新。').fontSize(12).lineHeight(19)
           .fontColor('#645E55').textAlign(TextAlign.Center).width('100%')
-        Button('重试更新权益', { type: ButtonType.Normal }).width('100%').height(42)
-          .fontSize(14).fontWeight(900).fontColor(INK).backgroundColor(LILAC)
-          .border({ width: 1.5, color: INK }).borderRadius(6)
-          .enabled(!this.purchaseBusy).onClick(() => void this.retryRedemptionEntitlements())
+        ActionButton({
+          label: '重试更新权益', active: !this.purchaseBusy,
+          controlHeight: 42, labelSize: 14, labelWeight: 900, fill: LILAC,
+          contentPadding: { left: 16, right: 16 },
+          lineWidth: 1.5, cornerRadius: 6,
+          hardShadow: { offsetX: COMIC_CONTROL_INK_OFFSET, offsetY: COMIC_CONTROL_INK_OFFSET, color: INK },
+          action: () => { void this.retryRedemptionEntitlements(); }
+        })
       }
       Button('返回小铺', { type: ButtonType.Normal }).width('100%').height(46)
         .fontSize(16).fontWeight(900).fontColor(INK).backgroundColor(CORAL)
-        .border({ width: 1.5, color: INK }).borderRadius(6).shadow(CONTROL_SHADOW)
+        .border({ width: 1.5, color: INK }).borderRadius(6)
+        .background(comicInkSurface(CORAL, 6, COMIC_CONTROL_INK_OFFSET)).clip(false)
         .onClick(() => { this.redemptionVisible = false; })
       if (this.redemptionAvailable) {
-        Button('兑换其他口令', { type: ButtonType.Normal }).width('100%').height(36)
-          .fontSize(13).fontWeight(800).fontColor(INK).backgroundColor('#00000000')
-          .enabled(!this.redemptionBusy && !this.purchaseBusy).onClick(() => this.startAnotherRedemption())
+        ActionButton({
+          label: '兑换其他口令', active: !this.redemptionBusy && !this.purchaseBusy,
+          controlHeight: 36, labelSize: 13, labelWeight: 800, fill: '#00000000',
+          contentPadding: { left: 16, right: 16 },
+          cornerRadius: 18,
+          action: () => this.startAnotherRedemption()
+        })
       }
-    }.width('100%').padding(20).backgroundColor('#FFF9EE')
-      .border({ width: 2, color: INK }).borderRadius(8)
-      .shadow({ radius: INK_SHADOW_RADIUS, offsetX: 5, offsetY: 6, color: INK })
+    }.width('100%').padding(20)
+  }
+
+  @Builder
+  private redemptionResultCardFrame() {
+    DrumPaper({
+      fill: '#FFF9EE',
+      paperWidth: '100%',
+      cornerRadius: 8,
+      paperLineWidth: 2,
+      clipContent: true,
+      offsetX: COMIC_CARD_INK_OFFSET,
+      offsetY: COMIC_CARD_INK_OFFSET
+    }) {
+      this.redemptionResultCard()
+    }
   }
 
   @Builder
@@ -1021,7 +1075,7 @@ struct StorePage {
         .width(33).height(24).backgroundColor(LILAC)
         .border({ width: 2, color: INK }).borderRadius(4)
         .rotate({ angle: -7 })
-        .shadow({ radius: INK_SHADOW_RADIUS, offsetX: 2, offsetY: 2, color: INK })
+        .background(comicInkSurface(LILAC, 4, COMIC_CONTROL_INK_OFFSET)).clip(false)
       Text('兑').fontSize(14).fontWeight(900).fontStyle(FontStyle.Italic).rotate({ angle: -7 })
       if (this.redemptionAvailable) {
         Circle().width(9).height(9).fill(CORAL).stroke(PAPER).strokeWidth(1.5)
@@ -1103,15 +1157,16 @@ struct StorePage {
           Blank()
           Stack({ alignContent: Alignment.Center }) {
             Row().width(42).height(29).backgroundColor(CORAL)
-              .border({ width: 2, color: INK }).borderRadius(5).shadow(CONTROL_SHADOW).rotate({ angle: 7 })
+              .border({ width: 2, color: INK }).borderRadius(5)
+              .background(comicInkSurface(CORAL, 5, COMIC_CONTROL_INK_OFFSET)).clip(false).rotate({ angle: 7 })
             Text('兑').fontSize(17).fontWeight(900).rotate({ angle: 7 })
           }.width(52).height(44)
         }.width('100%')
         if (this.redemptionSucceeded) {
-          this.redemptionResultCard()
+          this.redemptionResultCardFrame()
         } else {
           this.redemptionHero()
-          this.redemptionCard()
+          this.redemptionCardFrame()
           Text('口令区分具体字符，请按活动公布的原文输入。')
             .width('100%').fontSize(10).fontColor('#6B655D').textAlign(TextAlign.Center)
         }
@@ -1119,9 +1174,9 @@ struct StorePage {
       .width('100%')
       .padding({
         left: 18,
-        right: 18,
+        right: 18 + COMIC_CARD_INK_OFFSET,
         top: 10 + this.topSafeInset,
-        bottom: 28 + this.bottomSafeInset
+        bottom: 28 + this.bottomSafeInset + COMIC_CARD_INK_OFFSET
       })
     }
     .width('100%').height('100%').backgroundColor(PAPER).zIndex(90)
@@ -1161,6 +1216,7 @@ struct StorePage {
       Button(this.productPrice(item.productId), { type: ButtonType.Normal })
         .width('88%').height(32).padding(0).fontSize(12).fontWeight(900).fontColor(INK)
         .backgroundColor(CORAL).border({ width: 1, color: INK }).borderRadius(16)
+        .background(comicInkSurface(CORAL, 16, COMIC_CONTROL_INK_OFFSET)).clip(false)
         .onClick(() => this.openCharacterPurchase(item))
     }
   }
@@ -1219,7 +1275,7 @@ struct StorePage {
         .position({ x: PASS_BANNER_ACTION_X, y: PASS_BANNER_ACTION_Y })
         .onClick(() => this.openPassPurchase())
     }
-    .width('100%')
+    .width('102%')
     .constraintSize({ maxWidth: PASS_BANNER_MAX_WIDTH })
     .height(this.passBannerWidth / PASS_BANNER_DISPLAY_RATIO)
     .clip(true)
@@ -1234,40 +1290,70 @@ struct StorePage {
   }
 
   @Builder
+  private restorePurchasesAction() {
+    ActionButton({
+      label: '恢复购买', active: !this.purchaseBusy && !this.redemptionBusy,
+      controlHeight: 48, labelSize: 15, labelWeight: 900, fill: PAPER,
+      lineWidth: 1.5, cornerRadius: 7,
+      hardShadow: { offsetX: COMIC_CARD_INK_OFFSET, offsetY: COMIC_CARD_INK_OFFSET, color: INK },
+      action: () => { void this.restorePurchases(); }
+    })
+  }
+
+  @Builder
   private tabBar() {
-    Row() {
-      ForEach(['角色', '场景', '我的'], (label: string, index: number) => {
-        Button(label, { type: ButtonType.Normal }).layoutWeight(1).height(42).padding(0)
-          .fontSize(15).fontWeight(900).fontColor(INK)
-          .backgroundColor(this.selectedTab === index ? CORAL : PAPER)
-          .border({ width: { right: index < 2 ? 1 : 0 }, color: '#C9C0B4' })
-          .onClick(() => this.selectedTab = index)
-      })
-    }.width('100%').border({ width: 1.5, color: INK }).borderRadius(7).clip(true)
+    DrumPaper({
+      fill: PAPER,
+      paperWidth: '100%',
+      cornerRadius: 7,
+      paperLineWidth: 1.5,
+      clipContent: true,
+      offsetX: COMIC_CARD_INK_OFFSET,
+      offsetY: COMIC_CARD_INK_OFFSET
+    }) {
+      Row() {
+        ForEach(['角色', '场景', '我的'], (label: string, index: number) => {
+          Button(label, { type: ButtonType.Normal }).layoutWeight(1).height(42).padding(0)
+            .fontSize(15).fontWeight(900).fontColor(INK)
+            .backgroundColor(this.selectedTab === index ? CORAL : PAPER)
+            .border({ width: { right: index < 2 ? 1 : 0 }, color: '#C9C0B4' })
+            .onClick(() => this.selectedTab = index)
+        })
+      }.width('100%').clip(true)
+    }
   }
 
   @Builder
   private characterCard(item: StoreCharacter) {
-    Column({ space: 0 }) {
-      Stack({ alignContent: Alignment.Bottom }) {
-        Column().width('100%').height('100%').backgroundColor(item.color)
-        Text('.....').fontSize(20).letterSpacing(5).fontColor('#332D2960')
-          .position({ x: 10, y: 7 }).rotate({ angle: -8 })
-        if (item.mystery === true) {
-          this.mysteryCharacterArt(item)
-        } else if (item.photoAsset !== undefined) {
-          Image($rawfile(item.photoAsset)).width('96%').height('96%').objectFit(ImageFit.Contain)
-        } else {
-          ComicCharacter({ avatar: item.asset, pose: item.asset }).width('96%').height('96%')
-        }
-      }.width('100%').height(150).clip(true)
-      Column({ space: 4 }) {
-        Text(item.name).fontSize(15).fontWeight(900).maxLines(1)
-        Text(item.caption).fontSize(9).fontColor('#645E55').maxLines(1)
-        this.characterAction(item)
-      }.width('100%').height(84).padding({ top: 5, bottom: 6 })
-    }.width('100%').height(234).backgroundColor('#FFFDF7')
-    .border({ width: 1.3, color: INK }).borderRadius(7).clip(true)
+    DrumPaper({
+      fill: '#FFFDF7',
+      paperWidth: '100%',
+      cornerRadius: 7,
+      paperLineWidth: 1.3,
+      clipContent: true,
+      offsetX: COMIC_CARD_INK_OFFSET,
+      offsetY: COMIC_CARD_INK_OFFSET
+    }) {
+      Column({ space: 0 }) {
+        Stack({ alignContent: Alignment.Bottom }) {
+          Column().width('100%').height('100%').backgroundColor(item.color)
+          Text('.....').fontSize(20).letterSpacing(5).fontColor('#332D2960')
+            .position({ x: 10, y: 7 }).rotate({ angle: -8 })
+          if (item.mystery === true) {
+            this.mysteryCharacterArt(item)
+          } else if (item.photoAsset !== undefined) {
+            Image($rawfile(item.photoAsset)).width('96%').height('96%').objectFit(ImageFit.Contain)
+          } else {
+            ComicCharacter({ avatar: item.asset, pose: item.asset }).width('96%').height('96%')
+          }
+        }.width('100%').height(150).clip(true)
+        Column({ space: 4 }) {
+          Text(item.name).fontSize(15).fontWeight(900).maxLines(1)
+          Text(item.caption).fontSize(9).fontColor('#645E55').maxLines(1)
+          this.characterAction(item)
+        }.width('100%').height(84).padding({ top: 5, bottom: 6 })
+      }.width('100%').height(234)
+    }
   }
 
   @Builder
@@ -1290,11 +1376,12 @@ struct StorePage {
         if (!onlyAccessible || this.hasCharacter(item.key)) {
           GridItem() {
             this.characterCard(item)
-          }
+          }.clip(false)
         }
       }, (item: StoreCharacter) => this.storeOfferRenderKey('character', item.key, item.productId))
-    }.columnsTemplate('1fr 1fr').columnsGap(10).rowsGap(10).width('100%')
+    }.columnsTemplate('1fr 1fr').columnsGap(10 + COMIC_CARD_INK_OFFSET).rowsGap(10 + COMIC_CARD_INK_OFFSET).width('100%')
     .height(this.characterGridHeight(this.visibleCharacterCountInList(items, onlyAccessible)))
+    .clip(false)
   }
 
   @Builder
@@ -1366,47 +1453,64 @@ struct StorePage {
   @Builder
   private sceneAction(item: StoreScene) {
     if (this.selectedSceneKey === item.key) {
-      Button('使用中', { type: ButtonType.Normal }).height(34).padding({ left: 13, right: 13 })
-        .fontSize(12).fontWeight(900).fontColor(INK).backgroundColor(PAPER)
-        .border({ width: 1, color: INK }).borderRadius(17).enabled(false)
+      ActionButton({
+        label: '使用中', active: false, controlWidth: 'auto', controlHeight: 34,
+        contentPadding: { left: 13, right: 13 }, labelSize: 12, labelWeight: 900,
+        fill: PAPER, lineWidth: 1, cornerRadius: 17,
+        hardShadow: { offsetX: COMIC_CONTROL_INK_OFFSET, offsetY: COMIC_CONTROL_INK_OFFSET, color: INK },
+        action: () => {}
+      })
     } else if (this.sceneAccessState(item) === 'limited') {
       Button({ type: ButtonType.Normal }) {
         this.limitedPrice(this.productPrice(item.productId))
       }
       .height(36).padding({ left: 9, right: 9 }).backgroundColor('#FFF1D7')
       .border({ width: 1, color: INK }).borderRadius(18)
+      .background(comicInkSurface('#FFF1D7', 18, COMIC_CONTROL_INK_OFFSET)).clip(false)
       .onClick(() => this.selectScene(item))
     } else if (this.sceneAccessState(item) === 'pass') {
       Button('可使用', { type: ButtonType.Normal }).height(34).padding({ left: 13, right: 13 })
         .fontSize(12).fontWeight(900).fontColor(INK).backgroundColor(LILAC)
         .border({ width: 1, color: INK }).borderRadius(17)
+        .background(comicInkSurface(LILAC, 17, COMIC_CONTROL_INK_OFFSET)).clip(false)
         .onClick(() => this.selectScene(item))
     } else if (this.sceneAccessState(item) === 'owned') {
       Button('已拥有', { type: ButtonType.Normal }).height(34).padding({ left: 13, right: 13 })
         .fontSize(12).fontWeight(900).fontColor(INK).backgroundColor(PAPER)
         .border({ width: 1, color: INK }).borderRadius(17)
+        .background(comicInkSurface(PAPER, 17, COMIC_CONTROL_INK_OFFSET)).clip(false)
         .onClick(() => this.selectScene(item))
     } else {
       Button(this.productPrice(item.productId), { type: ButtonType.Normal })
         .height(34).padding({ left: 13, right: 13 }).fontSize(12).fontWeight(900).fontColor(INK)
         .backgroundColor(CORAL).border({ width: 1, color: INK }).borderRadius(17)
+        .background(comicInkSurface(CORAL, 17, COMIC_CONTROL_INK_OFFSET)).clip(false)
         .onClick(() => this.openScenePurchase(item))
     }
   }
 
   @Builder
   private sceneCard(item: StoreScene) {
-    Column({ space: 0 }) {
-      this.scenePreview(item)
-      Row() {
-        Column({ space: 2 }) {
-          Text(item.name).fontSize(16).fontWeight(900)
-          Text(item.caption).fontSize(9).fontColor('#645E55').maxLines(2)
-        }.alignItems(HorizontalAlign.Start).layoutWeight(1)
-        this.sceneAction(item)
-      }.width('100%').height(62).padding({ left: 12, right: 10 })
-    }.width('100%').height(240).backgroundColor('#FFFDF7')
-    .border({ width: 1.3, color: INK }).borderRadius(7).clip(true)
+    DrumPaper({
+      fill: '#FFFDF7',
+      paperWidth: '100%',
+      cornerRadius: 7,
+      paperLineWidth: 1.3,
+      clipContent: true,
+      offsetX: COMIC_CARD_INK_OFFSET,
+      offsetY: COMIC_CARD_INK_OFFSET
+    }) {
+      Column({ space: 0 }) {
+        this.scenePreview(item)
+        Row() {
+          Column({ space: 2 }) {
+            Text(item.name).fontSize(16).fontWeight(900)
+            Text(item.caption).fontSize(9).fontColor('#645E55').maxLines(2)
+          }.alignItems(HorizontalAlign.Start).layoutWeight(1)
+          this.sceneAction(item)
+        }.width('100%').height(62).padding({ left: 12, right: 10 })
+      }.width('100%').height(240)
+    }
   }
 
   @Builder
@@ -1416,7 +1520,7 @@ struct StorePage {
       Scroll() {
         Image($rawfile(DRUM_INTRO_ASSET)).width('100%').aspectRatio(DRUM_INTRO_IMAGE_RATIO)
           .objectFit(ImageFit.Contain).draggable(false)
-          .accessibilityText('PRO 定制鼓机介绍：12 种风格、10 种鼓声，选择节奏型与加花、点格子编写鼓点，试听并应用到队伍')
+          .accessibilityText('PRO 定制鼓机介绍：12 种风格、最多 8 个段落独立选风格、10 种鼓声，选择节奏型与加花、点格子编写鼓点，保存到我的编排、试听并应用到队伍，行进时可切换编排')
       }.width('100%').height('100%').align(Alignment.TopStart)
         .scrollable(ScrollDirection.Vertical).scrollBar(BarState.Off)
         .padding({ left: DRUM_INTRO_SIDE_INSET, right: DRUM_INTRO_SIDE_INSET,
@@ -1426,7 +1530,8 @@ struct StorePage {
         Blank()
         Button('×', { type: ButtonType.Normal }).width(DRUM_INTRO_CLOSE_SIZE).height(DRUM_INTRO_CLOSE_SIZE)
           .padding(0).fontSize(29).fontWeight(FontWeight.Bold).fontColor(INK).backgroundColor(PAPER)
-          .border({ width: 1.5, color: INK }).borderRadius(DRUM_INTRO_CLOSE_SIZE / 2).shadow(CONTROL_SHADOW)
+          .border({ width: 1.5, color: INK }).borderRadius(DRUM_INTRO_CLOSE_SIZE / 2)
+          .background(comicInkSurface(PAPER, DRUM_INTRO_CLOSE_SIZE / 2, COMIC_CONTROL_INK_OFFSET)).clip(false)
           .id('drum-intro-close').accessibilityText('关闭鼓机介绍')
           .onClick(() => this.closeDrumIntro())
       }.width('100%').height(DRUM_INTRO_CLOSE_SIZE)
@@ -1439,84 +1544,108 @@ struct StorePage {
   @Builder
   private purchaseDialog() {
     Stack({ alignContent: Alignment.Center }) {
-      Column({ space: 12 }) {
-        Text(this.pendingType === 'pass' ? 'MORE BEATS!' : 'NEW FRIEND!')
-          .fontSize(11).fontWeight(900).fontColor(PAPER).backgroundColor(INK)
-          .padding({ left: 9, right: 9, top: 4, bottom: 4 }).rotate({ angle: -3 })
-          .shadow(CONTROL_SHADOW)
-        Text(this.storeActionType === 'restore' ? '恢复购买' : this.pendingName)
-          .fontSize(27).fontWeight(900).fontStyle(FontStyle.Italic)
-        if (this.storeActionType !== 'restore') {
-          if (this.pendingType === 'pass') {
-            Text() {
-              Span('开通后可使用当前及后续上架的所有角色、场景和 ')
-              Span('PRO 定制鼓机').fontColor('#B63926')
-                .decoration({ type: TextDecorationType.Underline })
-                .onClick(() => this.openDrumIntro())
-              Span('。')
-            }.fontSize(13).fontWeight(FontWeight.Bold).lineHeight(20).width('100%')
-              .id('pass-benefits-description')
-          } else {
-            Text('购买后会加入“我的”，可在小铺和队伍中使用。')
-              .fontSize(13).fontWeight(FontWeight.Bold).lineHeight(20).width('100%')
-          }
-          Text(this.pendingPrice).fontSize(22).fontWeight(900).fontColor(CORAL)
-        }
-        if (this.pendingType === 'pass' && this.storeActionType !== 'restore') {
-          Text() {
-            if (this.passDescription().includes('PRO 定制鼓机')) {
-              Span(this.passDescription().split('PRO 定制鼓机')[0])
-              Span('PRO 定制鼓机').fontColor('#B63926')
-                .decoration({ type: TextDecorationType.Underline })
-                .onClick(() => this.openDrumIntro())
-              Span(this.passDescription().split('PRO 定制鼓机')[1])
+      DrumPaper({
+        fill: '#FFF1D7',
+        paperWidth: '88%',
+        cornerRadius: 8,
+        paperLineWidth: 2.5,
+        clipContent: true,
+        offsetX: COMIC_CARD_INK_OFFSET,
+        offsetY: COMIC_CARD_INK_OFFSET
+      }) {
+        Column({ space: 12 }) {
+          Text(this.pendingType === 'pass' ? 'MORE BEATS!' : 'NEW FRIEND!')
+            .fontSize(11).fontWeight(900).fontColor(PAPER).backgroundColor(INK)
+            .padding({ left: 9, right: 9, top: 4, bottom: 4 }).rotate({ angle: -3 })
+            .background(comicInkSurface(INK, 0, COMIC_CONTROL_INK_OFFSET)).clip(false)
+          Text(this.storeActionType === 'restore' ? '恢复购买' : this.pendingName)
+            .fontSize(27).fontWeight(900).fontStyle(FontStyle.Italic)
+          if (this.storeActionType !== 'restore') {
+            if (this.pendingType === 'pass') {
+              Text() {
+                Span('开通后可使用当前及后续上架的所有角色、场景和 ')
+                Span('PRO 定制鼓机').fontColor('#B63926')
+                  .decoration({ type: TextDecorationType.Underline })
+                  .onClick(() => this.openDrumIntro())
+                Span('。')
+              }.fontSize(13).fontWeight(FontWeight.Bold).lineHeight(20).width('100%')
+                .id('pass-benefits-description')
             } else {
-              Span(this.passDescription())
+              Text('购买后会加入“我的”，可在小铺和队伍中使用。')
+                .fontSize(13).fontWeight(FontWeight.Bold).lineHeight(20).width('100%')
             }
-          }.fontSize(12).fontWeight(FontWeight.Bold).width('100%').id('pass-rights-description')
-          Text(this.passActive && this.passSource === 'PASS_REDEMPTION' ? '赠送月卡到期后结束，不自动续费。' :
-            '本方案按月自动续费，可在华为账号的订阅管理中取消；取消后本期仍可使用。')
-            .fontSize(11).fontColor('#6B655D').lineHeight(17).width('100%')
-          if (this.passPurchaseRestriction().length > 0) {
-            Text(this.passPurchaseRestriction()).fontSize(12).fontWeight(FontWeight.Bold).width('100%')
+            Text(this.pendingPrice).fontSize(22).fontWeight(900).fontColor(CORAL)
           }
-        }
-        if (this.storeActionStatus.length > 0) {
-          Text(this.storeActionStatus).fontSize(12).fontWeight(FontWeight.Bold).width('100%')
-        }
-        Row({ space: 9 }) {
-          Button(this.storeActionType === 'restore' ? '关闭' : '再想想', { type: ButtonType.Normal })
-            .layoutWeight(1).height(42).fontSize(13).fontWeight(900)
-            .fontColor(INK).backgroundColor(PAPER).border({ width: 1.5, color: INK }).borderRadius(5).shadow(CONTROL_SHADOW)
-            .enabled(!this.purchaseBusy)
-            .onClick(() => this.purchaseVisible = false)
-          if (this.storeActionType === 'restore') {
-            if (this.storeActionRecovery === 'restore') {
-              Button('重试恢复', { type: ButtonType.Normal }).layoutWeight(1.3).height(42).fontSize(13).fontWeight(900)
-                .fontColor(INK).backgroundColor(CORAL).border({ width: 1.5, color: INK }).borderRadius(5)
-                .shadow(CONTROL_SHADOW).enabled(!this.purchaseBusy)
-                .onClick(() => void this.restorePurchases())
+          if (this.pendingType === 'pass' && this.storeActionType !== 'restore') {
+            Text() {
+              if (this.passDescription().includes('PRO 定制鼓机')) {
+                Span(this.passDescription().split('PRO 定制鼓机')[0])
+                Span('PRO 定制鼓机').fontColor('#B63926')
+                  .decoration({ type: TextDecorationType.Underline })
+                  .onClick(() => this.openDrumIntro())
+                Span(this.passDescription().split('PRO 定制鼓机')[1])
+              } else {
+                Span(this.passDescription())
+              }
+            }.fontSize(12).fontWeight(FontWeight.Bold).width('100%').id('pass-rights-description')
+            Text(this.passActive && this.passSource === 'PASS_REDEMPTION' ? '赠送月卡到期后结束，不自动续费。' :
+              '本方案按月自动续费，可在华为账号的订阅管理中取消；取消后本期仍可使用。')
+              .fontSize(11).fontColor('#6B655D').lineHeight(17).width('100%')
+            if (this.passPurchaseRestriction().length > 0) {
+              Text(this.passPurchaseRestriction()).fontSize(12).fontWeight(FontWeight.Bold).width('100%')
             }
-          } else {
-            Button(this.pendingType === 'pass' && this.passPurchaseRestriction().length > 0 ? '暂不可购买' :
-              (this.storeActionRecovery === 'purchase' ? '重新购买' : '确认购买'),
-              { type: ButtonType.Normal }).layoutWeight(1.3).height(42).fontSize(13).fontWeight(900)
-              .fontColor(INK).backgroundColor(CORAL).border({ width: 1.5, color: INK }).borderRadius(5).shadow(CONTROL_SHADOW)
-              .enabled(!this.purchaseBusy &&
-                (this.pendingType !== 'pass' || this.passPurchaseRestriction().length === 0))
-              .onClick(() => void this.confirmPurchase())
           }
-        }.width('100%')
-        if (this.storeActionRecovery === 'purchase') {
-          Button('恢复购买', { type: ButtonType.Normal }).width('100%').height(34).fontSize(12).fontWeight(900)
-            .fontColor(INK).backgroundColor(PAPER).border({ width: 1, color: INK }).borderRadius(5)
-            .enabled(!this.purchaseBusy).onClick(() => void this.restorePurchases())
-        }
-        Text('支付后权益未到账，可在“我的”中点击“恢复购买”。')
-          .fontSize(9).fontColor('#6B655D').width('100%')
-      }.width('88%').padding(17).backgroundColor('#FFF1D7')
-      .border({ width: 2.5, color: INK }).borderRadius(8)
-      .shadow({ radius: INK_SHADOW_RADIUS, offsetX: 7, offsetY: 8, color: INK })
+          if (this.storeActionStatus.length > 0) {
+            Text(this.storeActionStatus).fontSize(12).fontWeight(FontWeight.Bold).width('100%')
+          }
+          Row({ space: 9 }) {
+            ActionButton({
+              label: this.storeActionType === 'restore' ? '关闭' : '再想想', active: !this.purchaseBusy,
+              controlHeight: 42, labelSize: 13, labelWeight: 900, fill: PAPER,
+              contentPadding: { left: 16, right: 16 },
+              lineWidth: 1.5, cornerRadius: 5,
+              hardShadow: { offsetX: COMIC_CONTROL_INK_OFFSET, offsetY: COMIC_CONTROL_INK_OFFSET, color: INK },
+              action: () => { this.purchaseVisible = false; }
+            }).layoutWeight(1)
+            if (this.storeActionType === 'restore') {
+              if (this.storeActionRecovery === 'restore') {
+                ActionButton({
+                  label: '重试恢复', active: !this.purchaseBusy,
+                  controlHeight: 42, labelSize: 13, labelWeight: 900, fill: CORAL,
+                  contentPadding: { left: 16, right: 16 },
+                  lineWidth: 1.5, cornerRadius: 5,
+                  hardShadow: { offsetX: COMIC_CONTROL_INK_OFFSET, offsetY: COMIC_CONTROL_INK_OFFSET, color: INK },
+                  action: () => { void this.restorePurchases(); }
+                }).layoutWeight(1.3)
+              }
+            } else {
+              ActionButton({
+                label: this.pendingType === 'pass' && this.passPurchaseRestriction().length > 0 ? '暂不可购买' :
+                  (this.storeActionRecovery === 'purchase' ? '重新购买' : '确认购买'),
+                active: !this.purchaseBusy &&
+                  (this.pendingType !== 'pass' || this.passPurchaseRestriction().length === 0),
+                controlHeight: 42, labelSize: 13, labelWeight: 900, fill: CORAL,
+                contentPadding: { left: 16, right: 16 },
+                lineWidth: 1.5, cornerRadius: 5,
+                hardShadow: { offsetX: COMIC_CONTROL_INK_OFFSET, offsetY: COMIC_CONTROL_INK_OFFSET, color: INK },
+                action: () => { void this.confirmPurchase(); }
+              }).layoutWeight(1.3)
+            }
+          }.width('100%')
+          if (this.storeActionRecovery === 'purchase') {
+            ActionButton({
+              label: '恢复购买', active: !this.purchaseBusy,
+              controlHeight: 34, labelSize: 12, labelWeight: 900, fill: PAPER,
+              contentPadding: { left: 16, right: 16 },
+              lineWidth: 1, cornerRadius: 5,
+              hardShadow: { offsetX: COMIC_CONTROL_INK_OFFSET, offsetY: COMIC_CONTROL_INK_OFFSET, color: INK },
+              action: () => { void this.restorePurchases(); }
+            })
+          }
+          Text('支付后权益未到账，可在“我的”中点击“恢复购买”。')
+            .fontSize(9).fontColor('#6B655D').width('100%')
+        }.width('100%').padding(17)
+      }
     }.width('100%').height('100%').backgroundColor('#77000000').zIndex(100)
   }
 
@@ -1543,28 +1672,38 @@ struct StorePage {
             ForEach(STORE_SCENES, (item: StoreScene) => {
               this.sceneCard(item)
             }, (item: StoreScene) => this.storeOfferRenderKey('scene', item.key, item.productId))
-            Column({ space: 4 }) {
-              Text('MORE WORLDS INCOMING').fontSize(11).fontWeight(900).letterSpacing(1)
-              Text('新场景将会在这里持续上架').fontSize(12).fontColor('#655F57')
-            }.width('100%').padding(16).backgroundColor(LILAC)
-            .border({ width: 1.2, color: INK }).borderRadius(7)
+            DrumPaper({
+              fill: LILAC,
+              paperWidth: '100%',
+              cornerRadius: 7,
+              paperLineWidth: 1.2,
+              clipContent: true,
+              offsetX: COMIC_CARD_INK_OFFSET,
+              offsetY: COMIC_CARD_INK_OFFSET
+            }) {
+              Column({ space: 4 }) {
+                Text('MORE WORLDS INCOMING').fontSize(11).fontWeight(900).letterSpacing(1)
+                Text('新场景将会在这里持续上架').fontSize(12).fontColor('#655F57')
+              }.width('100%').padding(16)
+            }
           } else {
-            Row() {
-              Text('我的角色').fontSize(17).fontWeight(900)
-              Blank()
-              Text(`${this.ownedCharacterCount()} 个`).fontSize(11).fontColor('#655F57')
-            }.width('100%')
-            this.characterCatalog(true)
-            Text('我的场景').fontSize(17).fontWeight(900).width('100%')
-            ForEach(STORE_SCENES, (item: StoreScene) => {
-              if (this.hasScene(item.key)) {
-                this.sceneCard(item)
-              }
-            }, (item: StoreScene) => this.storeOfferRenderKey('owned-scene', item.key, item.productId))
-            Button('恢复购买', { type: ButtonType.Normal }).width('100%').height(48)
-              .fontSize(15).fontWeight(900).fontColor(INK).backgroundColor(PAPER)
-              .border({ width: 1.5, color: INK }).borderRadius(7).enabled(!this.purchaseBusy)
-              .onClick(() => void this.restorePurchases())
+            if (this.ownedExclusiveCharacterCount() > 0) {
+              Row() {
+                Text('我的角色').fontSize(17).fontWeight(900)
+                Blank()
+                Text(`${this.ownedExclusiveCharacterCount()} 个`).fontSize(11).fontColor('#655F57')
+              }.width('100%')
+              this.characterCatalog(true)
+            }
+            if (this.ownedSceneCount() > 0) {
+              Text('我的场景').fontSize(17).fontWeight(900).width('100%')
+              ForEach(STORE_SCENES, (item: StoreScene) => {
+                if (this.hasScene(item.key)) {
+                  this.sceneCard(item)
+                }
+              }, (item: StoreScene) => this.storeOfferRenderKey('owned-scene', item.key, item.productId))
+            }
+            this.restorePurchasesAction()
             if (this.storeActionType === 'restore' && !this.purchaseVisible && this.storeActionStatus.length > 0) {
               Text(this.storeActionStatus).fontSize(12).fontWeight(FontWeight.Bold).width('100%')
             }
@@ -1586,9 +1725,9 @@ struct StorePage {
             })
         }.width('100%').padding({
           left: 16,
-          right: 16,
+          right: 16 + COMIC_CARD_INK_OFFSET,
           top: 10 + this.topSafeInset,
-          bottom: 24 + this.bottomSafeInset
+          bottom: 24 + this.bottomSafeInset + COMIC_CARD_INK_OFFSET
         })
       }.width('100%').height('100%').backgroundColor(PAPER)
       if (this.redemptionVisible) {

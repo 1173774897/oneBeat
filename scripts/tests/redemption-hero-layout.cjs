@@ -58,8 +58,13 @@ for (const viewport of [320, 360, 390, 430]) {
   assert.ok(bubbleWidth + 8 < contentWidth, viewport + ': keep the speech bubble inside the page');
 }
 assert.match(page, /this\.redemptionHero\(\)/);
-assert.match(page, /this\.redemptionCard\(\)/);
-assert.match(source, /\.enabled\(!this\.redemptionBusy && this\.redemptionCode\.trim\(\)\.length > 0\)/);
-assert.match(source, /\.onClick\(\(\) => void this\.submitRedemption\(\)\)/);
+assert.match(page, /this\.redemptionCardFrame\(\)/);
+const frame = source.slice(source.indexOf('private redemptionCardFrame()'), source.indexOf('private redemptionResultCard()'));
+assert.match(frame, /DrumPaper\(\{[\s\S]*?this\.redemptionCard\(\)/,
+  'The form keeps its solid outer paper backing');
+const form = source.slice(source.indexOf('private redemptionCard()'), source.indexOf('private redemptionCardFrame()'));
+assert.match(form, /ActionButton\(\{\s*label: this\.redemptionBusy \? '兑换中…' : '立即兑换',\s*active: !this\.redemptionBusy && this\.redemptionCode\.trim\(\)\.length > 0/);
+assert.match(form, /hardShadow: \{ offsetX: COMIC_CONTROL_INK_OFFSET, offsetY: COMIC_CONTROL_INK_OFFSET, color: INK \}/);
+assert.match(form, /action: \(\) => \{ void this\.submitRedemption\(\); \}/);
 assert.ok(fs.existsSync(path.join(root, 'entry/src/main/resources/rawfile/comic/poses/mismatch-ticket.png')));
 console.log('PASS: compact live speech, unified arrow hard shadow, original-size mirrored pose centered after text at 320–430vp and existing redemption flow retained');

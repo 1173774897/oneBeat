@@ -24,6 +24,21 @@ function harness() {
   page.recordingState = 'recording';
   return { page, update(values) { snapshot = { ...snapshot, ...values }; page.refreshRecordingState(); } };
 }
+const overlay = source.slice(source.indexOf('  private recordingSaveOverlay() {'), source.indexOf('  private recordingErrorOverlay() {'));
+assert.match(overlay, /height\(RECORD_SAVE_DIALOG_HEIGHT\)/);
+assert.match(overlay, /constraintSize\(\{ maxHeight: RECORD_SAVE_DIALOG_MAX_HEIGHT \}\)/);
+assert.match(overlay, /Scroll\(\)[\s\S]*layoutWeight\(1\)/);
+assert.match(overlay, /height\(RECORD_SAVE_ACTION_HEIGHT\)/);
+assert.match(overlay, /Progress\(\{ value: this\.recordingSaveStageNumber\(\) - 1, total: 3/);
+assert.match(overlay, /ActionButton\(\{\s*label: '正在保存…', active: false,[\s\S]*?action: \(\) => \{\}/,
+  'The saving face remains a native disabled action with no operation');
+assert.match(overlay, /ActionButton\(\{\s*label: '退出去查看', active: !this\.exiting,[\s\S]*?inkShadow: CONTROL_SHADOW,[\s\S]*?action: \(\) => \{ void this\.exitAndViewSavedRecording\(\); \}/,
+  'The saved action keeps its native busy gate, ink shadow and explicit exit handler');
+assert.match(overlay, /ActionButton\(\{\s*label: '放弃这段', active: !this\.retrySaveBusy,[\s\S]*?action: \(\) => this\.requestDiscardPendingRecording\(\)/,
+  'Discard must retain the retry guard and confirmation request');
+assert.doesNotMatch(source, /private (?:recordingSavedOverlay|saveRecoveryOverlay)\(\)/,
+  'Saving, success and retry share one frame rather than independently sized overlays');
+
 const active = harness();
 active.update({ state: 'stopping', savePhase: 'finishing', error: '系统已结束录制，练习仍可继续' });
 assert.equal(active.page.showRecordingSaving, true);
@@ -68,13 +83,4 @@ discard.page.showDiscardRecordingConfirm = true;
 discard.update({ state: 'stopping', pendingClip: clip });
 assert.equal(discard.page.showRecordingSaving, false, 'Explicit discard cleanup must not display a misleading saving state');
 
-const overlay = source.slice(source.indexOf('  private recordingSaveOverlay() {'), source.indexOf('  private recordingErrorOverlay() {'));
-assert.match(overlay, /height\(RECORD_SAVE_DIALOG_HEIGHT\)/);
-assert.match(overlay, /constraintSize\(\{ maxHeight: RECORD_SAVE_DIALOG_MAX_HEIGHT \}\)/);
-assert.match(overlay, /Scroll\(\)[\s\S]*layoutWeight\(1\)/);
-assert.match(overlay, /height\(RECORD_SAVE_ACTION_HEIGHT\)/);
-assert.match(overlay, /Progress\(\{ value: this\.recordingSaveStageNumber\(\) - 1, total: 3/);
-assert.match(overlay, /Button\('正在保存…'[\s\S]*?\.enabled\(false\)/);
-assert.doesNotMatch(source, /private (?:recordingSavedOverlay|saveRecoveryOverlay)\(\)/,
-  'Saving, success and retry share one frame rather than independently sized overlays');
 console.log('PASS Recording save dialog: real stages, one frame, success/failure transitions and nonblocking dismissal');

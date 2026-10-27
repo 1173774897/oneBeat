@@ -16,7 +16,7 @@
 | T010 | [AudioCalibrationPage.ets:414](/Users/lizhe/work/oneBeat/entry/src/main/ets/pages/AudioCalibrationPage.ets:414) | \`试听启动失败：${(err as Error).message}\` | 非主流程：旧／未注册校准页。保留必要故障语义，优先不在本轮产品流程中复制；21处不计日常打扰 |
 | T011 | [DrumMachinePage.ets:144](/Users/lizhe/work/oneBeat/entry/src/main/ets/pages/DrumMachinePage.ets:144) | 'PRO 定制鼓机包含在畅游月卡中' | 保留权益守卫兜底，入口先体现锁定状态 |
 | T012 | [DrumMachinePage.ets:221](/Users/lizhe/work/oneBeat/entry/src/main/ets/pages/DrumMachinePage.ets:221) | '请填写节奏名称' | 改为名称字段错误 |
-| T013 | [DrumMachinePage.ets:256](/Users/lizhe/work/oneBeat/entry/src/main/ets/pages/DrumMachinePage.ets:256) | replaced ? '已更新我的节奏' : '已保存到我的节奏' | 保存结果择一轻反馈，避免列表与Toast叠加 |
+| T013 | [DrumMachinePage.ets:256](/Users/lizhe/work/oneBeat/entry/src/main/ets/pages/DrumMachinePage.ets:256) | replaced ? '已更新我的编排' : '已保存到我的编排' | 保存结果择一轻反馈，避免列表与Toast叠加 |
 | T014 | [DrumMachinePage.ets:273](/Users/lizhe/work/oneBeat/entry/src/main/ets/pages/DrumMachinePage.ets:273) | '已删除这个节奏' | 删除重复成功Toast，列表变化已可见 |
 | T015 | [DrumMachinePage.ets:290](/Users/lizhe/work/oneBeat/entry/src/main/ets/pages/DrumMachinePage.ets:290) | \`已载入 ${saved.name}\` | 删除重复成功Toast，编排已直接切换 |
 | T016 | [DrumMachinePage.ets:624](/Users/lizhe/work/oneBeat/entry/src/main/ets/pages/DrumMachinePage.ets:624) | '最多编排 8 个段落' | 用新增按钮禁用与局部上限状态表达 |

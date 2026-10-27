@@ -199,6 +199,7 @@ async function testGrowingLedgerAndMigration() {
 
 function monthlyCacheHarness(durable = new Map()) {
   const app = new Map([['storeEntitlementCacheSchema', 5]]);
+  const ClockDate = class extends Date { static now() { return noon; } };
   let fail = false;
   let readGate;
   let writeGate;
@@ -220,12 +221,18 @@ function monthlyCacheHarness(durable = new Map()) {
         }
       };
     } } },
+    './EntitlementSnapshotCache': load('store/EntitlementSnapshotCache.ets', {}, { Date: ClockDate }),
+    '../common/AtomicTextFile': {
+      readOptionalSync: file => durable.get(file) ?? '',
+      writeAtomicSync: (file, value) => durable.set(file, value)
+    },
     '../common/MonotonicClock': { MonotonicClock: { nowMs: () => 0 } }
   };
   const entitlement = load('store/EntitlementStore.ets', mocks, {
     AppStorage: { get: key => app.get(key), setOrCreate: (key, value) => app.set(key, value) },
-    console: { warn() {} }
+    console: { warn() {} }, Date: ClockDate
   });
+  entitlement.initializeStoredEntitlementCache({ filesDir: '/app/files' });
   return { entitlement, durable, app, fail(value) { fail = value; },
     readGate(value) { readGate = value; }, writeGate(value) { writeGate = value; } };
 }
@@ -297,36 +304,38 @@ async function testMonthlyCache() {
 }
 
 function testResolver() {
-  const app = new Map([
-    ['storeEntitlementCacheSchema', 5], ['storePassActive', true],
-    ['storePassExpiresAt', new Date(noon + day).toISOString()], ['storeProDrumMachine', true]
-  ]);
+  let now = noon;
+  const app = new Map();
+  const ClockDate = class extends Date { static now() { return now; } };
   const entitlement = load('store/EntitlementStore.ets', {
     '@kit.ArkData': { preferences: {} },
+    './EntitlementSnapshotCache': load('store/EntitlementSnapshotCache.ets', {}, { Date: ClockDate }),
+    '../common/AtomicTextFile': { readOptionalSync: () => '', writeAtomicSync() {} },
     '../common/MonotonicClock': { MonotonicClock: { nowMs: () => 0 } }
-  }, { AppStorage: { get: key => app.get(key), setOrCreate: (key, value) => app.set(key, value) } });
+  }, { AppStorage: { get: key => app.get(key), setOrCreate: (key, value) => app.set(key, value) }, Date: ClockDate });
+  function apply(active, reason = 'PASS', cutoff = noon + day) {
+    entitlement.applyStoreBootstrap(monthlyBootstrap(active, now, { pass: { active,
+      expiresAt: active ? new Date(cutoff).toISOString() : '', autoRenewing: false, iapPurchaseAllowed: true },
+      items: [{ itemKey: 'feature.pro_drum_machine', access: { allowed: true, reason } }] }));
+  }
+  apply(true);
   assert.equal(entitlement.resolveDrumAccess(noon).source, 'monthly');
-  assert.equal(entitlement.resolveDrumAccess(noon + day).allowed, false, 'Cached pass boolean must not outlive its cutoff');
+  assert.equal(entitlement.resolveDrumAccess(noon + day).allowed, false, 'Cached pass cannot outlive its cutoff');
   app.set('shareTrialExpiresAt', noon + 2 * day);
   assert.equal(entitlement.resolveDrumAccess(noon + day).source, 'trial');
   assert.equal(entitlement.resolveDrumAccess(noon + 2 * day).allowed, false);
-  app.set('storePassActive', false);
+  apply(false, 'OWNED');
   assert.equal(entitlement.resolveDrumAccess(noon).source, 'owned');
-  app.set('storeBootstrapCache', JSON.stringify({ pass: { active: true }, items: [{
-    itemKey: 'feature.pro_drum_machine', access: { allowed: true, reason: 'PASS', validUntil: new Date(noon + day).toISOString() }
-  }] }));
+  apply(true);
   assert.equal(entitlement.resolveDrumAccess(noon + 2 * day).allowed, false);
   assert.equal(entitlement.formatTrialExpiry(Date.parse('2026-10-18T23:59:00+08:00')), '10/18 23:59');
-  const wallNow = Date.now();
-  app.set('storePassActive', true);
-  app.set('storePassExpiresAt', new Date(wallNow + day).toISOString());
-  app.set('shareTrialClockWallAnchor', wallNow + 40 * day);
+  now = Date.now();
+  apply(true, 'PASS', now + day);
+  app.set('shareTrialClockWallAnchor', now + 40 * day);
   assert.equal(entitlement.resolveDrumAccess().source, 'monthly',
     'The campaign rollback floor must not revoke a still-valid paid membership');
-  app.set('storePassActive', false);
-  app.set('storeProDrumMachine', false);
-  app.set('storeBootstrapCache', '');
-  app.set('shareTrialExpiresAt', wallNow + day);
+  entitlement.applyStoreBootstrap(monthlyBootstrap(false, now));
+  app.set('shareTrialExpiresAt', now + day);
   assert.equal(entitlement.resolveDrumAccess().allowed, false, 'The same future floor still restricts campaign trials');
 }
 

@@ -16,3 +16,18 @@
 - Document public APIs and shared models when their contract or lifecycle is not self-evident.
 - Keep comments next to the code they constrain, and update or remove them whenever behavior changes. A stale comment is a defect.
 - Never place secrets, redemption plaintext, personal data, purchase payloads, or tokens in comments.
+
+
+
+
+## First Principles
+
+- Start from the user's actual goal and observable success criteria, not from an assumed implementation.
+- Identify the core facts, constraints, data shapes, invariants, and ownership boundaries before choosing a solution.
+- Fix root causes, not symptoms. If only a symptom can be changed, say so.
+- Prefer the smallest change that directly satisfies the underlying requirement.
+- Do not copy an existing pattern blindly when the pattern does not fit the problem's facts.
+- Separate facts from assumptions. Treat uncertain assumptions as risks, not as conclusions.
+- When tradeoffs exist, reason from constraints: correctness, user impact, maintainability, performance, security, and reversibility.
+- Verify behavior at the boundary the user cares about, not just by inspecting code.
+
