@@ -413,10 +413,11 @@ async function testAudiblePresentationClock() {
   }
 }
 
-async function testActualInsertedDroppedFrames() {
+async function testSharedCorrectionCannotChangePreview() {
   for (const correction of [-4410, 2205]) {
     const h = harness({ engineOptions: { queueMs: 120, compensationMs: 180, physicalLatencyMs: 180 } });
     h.session.keepRendererAliveForSession = true;
+    assert.equal(h.engine.setPhaseCorrectionEnabled(true), true);
     const plan = request(initial().map(section => ({ ...section, repeats: 1 })));
     const start = h.session.previewDrumProgram(plan.raw, true, 120, 4, 0, plan.keys);
     h.loads[0].resolve(bank(20000));
@@ -431,27 +432,28 @@ async function testActualInsertedDroppedFrames() {
     const pcm = write(h, BAR + Math.abs(correction) + 64, false);
     h.inWrite = undefined;
     const boundaryOffset = pcm.findIndex(value => value === 8000);
-    assert.ok(boundaryOffset >= 0, 'Locate the real B downbeat after native callback frame insertion/deletion');
-    assert.equal(boundaryOffset, BAR - 1 + correction,
-      'The controlled correction must actually shift the submitted B PCM boundary');
+    assert.ok(boundaryOffset >= 0, 'Locate the real B downbeat with a stale shared-clock correction present');
+    assert.equal(boundaryOffset, BAR - 1,
+      'Shared-clock corrections cannot insert or drop local preview PCM');
+    assert.equal(h.engine.phaseCorrectionSubmittedFrames, 0);
     // A compensated audible boundary occurs after the renderer consumed its
     // hardware frame. Keep data submitted beyond that time so the production
     // played<=submitted clamp does not turn this into an artificial underflow.
     write(h, Math.ceil(0.30 * RATE), false);
     h.inWrite = undefined;
     const audibleAt = h.audibleAtFrame(bufferStart + boundaryOffset);
-    assert.ok(Math.abs(audibleAt - (origin + 2000)) > 40);
+    assert.equal(bufferStart + boundaryOffset, transition.targetFrame + BAR);
     h.advanceClock(audibleAt - h.now - 1000 / RATE);
     position(h, 'key-a', 0);
     const deadline = h.engine.getDrumPreviewPosition().nextBoundaryDelayMs;
     assert.ok(deadline > 0 && deadline <= 2.01 * 1000 / RATE,
-      'Inserted/dropped frames must also move the reported next PCM boundary deadline');
+      'Preview deadlines must follow the unchanged actual PCM boundary');
     h.advanceClock(2 * 1000 / RATE);
     assert.equal(h.engine.getDrumPreviewPosition()?.sectionKey, 'key-b',
-      `The highlight must cross B's actual presentation boundary after a ${correction}-frame correction`);
+      `A stale ${correction}-frame shared correction cannot move the preview highlight`);
     position(h, 'key-b', 0);
     assert.equal(h.engine.transportStartLocalMs, origin,
-      'Following inserted/deleted local PCM cannot shift the shared transport clock');
+      'Local preview ownership cannot shift the shared transport clock');
   }
 }
 
@@ -719,7 +721,7 @@ async function testQueuedFillMetadataAndFallback() {
   }
 }
 
-async function testFillFrameCorrections() {
+async function testSharedCorrectionCannotChangePreviewFill() {
   for (const correction of [-4410, 2205]) {
     const h = await start([{ key: 'key-a', repeats: 2, velocity: 0.2, fillEvery: 1, fillIndex: 0 }],
       { bank: phraseBank() });
@@ -730,13 +732,13 @@ async function testFillFrameCorrections() {
     const pcm = write(h, BAR + Math.abs(correction) + 64, false);
     h.inWrite = undefined;
     const fillOffset = pcm.findIndex(value => value === 7600);
-    assert.equal(fillOffset, 3 * RATE / 2 - 1 + correction,
-      'The fixture must locate the real first fill onset after inserted/dropped source frames');
+    assert.equal(fillOffset, 3 * RATE / 2 - 1,
+      'A stale shared correction must leave the preview fill PCM onset unchanged');
     presentFrame(h, submitted + fillOffset - 1);
     position(h, 'key-a', 0, false);
     const deadline = h.engine.getDrumPreviewPosition().nextBoundaryDelayMs;
     assert.ok(deadline > 0 && deadline <= 2.01 * 1000 / RATE,
-      'Phase corrections must move the phrase deadline with the emitted PCM');
+      'The phrase deadline must retain the unchanged preview PCM boundary');
     presentFrame(h, submitted + fillOffset + 1);
     position(h, 'key-a', 0, true);
     assert.equal(h.engine.transportStartLocalMs, origin);
@@ -786,16 +788,16 @@ async function main() {
   await testAudiblePlanLagsSubmittedPcm();
   await testOrdinaryRecoveryPosition();
   await testAudiblePresentationClock();
-  await testActualInsertedDroppedFrames();
+  await testSharedCorrectionCannotChangePreview();
   await testPersistentAgedNativeClockAfterEdits();
   await testPersistentNativeOriginRegressions();
   await testPersistentNativeOriginRegressions(882);
   await testTransientNativeCounterRegression();
   await testAudibleFillWindows();
   await testQueuedFillMetadataAndFallback();
-  await testFillFrameCorrections();
+  await testSharedCorrectionCannotChangePreviewFill();
   await testRecoveredFillPhase();
-  console.log('PASS whole-song live drum update: actual next-boundary PCM, audible preset/custom fill windows, frequency/loop, queued fill edits and fallback, corrected-frame phrase deadlines, stable section/repeat mapping, structural edits, latest async/staged plan, cached sounds, failure continuity, owner cancellation, callback-safe rendering, shared defer, route and ordinary recovery position');
+  console.log('PASS whole-song live drum update: actual next-boundary PCM, audible preset/custom fill windows, frequency/loop, queued fill edits and fallback, shared-correction isolation and actual phrase deadlines, stable section/repeat mapping, structural edits, latest async/staged plan, cached sounds, failure continuity, owner cancellation, callback-safe rendering, shared defer, route and ordinary recovery position');
 }
 
 main().catch(error => { console.error(error); process.exitCode = 1; });

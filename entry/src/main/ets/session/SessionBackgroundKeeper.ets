@@ -20,14 +20,43 @@ export class SessionBackgroundKeeper {
   private static active: boolean = false;
   private static recordingActive: boolean = false;
   private static backgroundTaskStarted: boolean = false;
+  private static backgroundTaskId: number = -1;
   private static operation: Promise<void> = Promise.resolve();
   private static session: avSession.AVSession | undefined = undefined;
   private static controlHandler: TransportControlHandler | undefined = undefined;
   private static sessionRunningLock: runningLock.RunningLock | undefined = undefined;
   private static runningLockRenewTimer: number = -1;
+  private static showMediaCard: boolean = false;
+  private static playing: boolean = false;
+  private static audioActive: boolean = false;
+  private static cancellationObserved: boolean = false;
+  // Set when the native task vanished while audio mode was owned. The system
+  // mutes such a stream shortly afterwards while PCM callbacks and hardware
+  // timestamps keep advancing, so phase feedback cannot detect the loss.
+  private static playbackContinuityLost: boolean = false;
 
   static initialize(context: Context): void {
     SessionBackgroundKeeper.context = context;
+    if (!SessionBackgroundKeeper.cancellationObserved) {
+      try {
+        backgroundTaskManager.on('continuousTaskCancel', (info: backgroundTaskManager.ContinuousTaskCancelInfo) => {
+          if (SessionBackgroundKeeper.backgroundTaskId >= 0 && info.id !== SessionBackgroundKeeper.backgroundTaskId) {
+            return;
+          }
+          // System cancellation invalidates our local cache even while the team
+          // connection remains alive. Only a later playback/lifecycle request retries.
+          SessionBackgroundKeeper.backgroundTaskStarted = false;
+          SessionBackgroundKeeper.backgroundTaskId = -1;
+          if (SessionBackgroundKeeper.audioActive) {
+            SessionBackgroundKeeper.playbackContinuityLost = true;
+          }
+          console.warn(`[BackgroundPlaybackDiag] stage=cancelled reason=${info.reason}`);
+        });
+        SessionBackgroundKeeper.cancellationObserved = true;
+      } catch (error) {
+        console.warn(`SessionBackgroundKeeper cancellation observer: ${(error as Error).message}`);
+      }
+    }
   }
 
   static setControlHandler(handler: TransportControlHandler): void {
@@ -42,27 +71,85 @@ export class SessionBackgroundKeeper {
    */
   static start(showMediaCard: boolean): Promise<void> {
     SessionBackgroundKeeper.operation = SessionBackgroundKeeper.operation.then(async () => {
+      SessionBackgroundKeeper.showMediaCard = showMediaCard;
       if (SessionBackgroundKeeper.context === undefined) {
         return;
       }
       if (SessionBackgroundKeeper.active) {
-        if (SessionBackgroundKeeper.session === undefined) {
-          try { await SessionBackgroundKeeper.ensureAvSession(showMediaCard); }
-          catch (err) { console.warn(`SessionBackgroundKeeper media card: ${(err as Error).message}`); }
-        }
+        try { await SessionBackgroundKeeper.ensureAvSession(showMediaCard); }
+        catch (err) { console.warn(`SessionBackgroundKeeper media session: ${(err as Error).message}`); }
+        await SessionBackgroundKeeper.ensureRunningLock();
         return;
       }
       try {
         await SessionBackgroundKeeper.applyBackgroundModes(true, SessionBackgroundKeeper.recordingActive);
-        // The background owner exists even if its optional media card fails.
+        // Keep connection ownership if media setup fails. Playback admission
+        // separately requires both AVSession and a live native background task.
         SessionBackgroundKeeper.active = true;
         await SessionBackgroundKeeper.ensureAvSession(showMediaCard);
-        await SessionBackgroundKeeper.ensureRunningLock();
       } catch (err) {
         console.warn(`SessionBackgroundKeeper start: ${(err as Error).message}`);
+      } finally {
+        if (SessionBackgroundKeeper.active) {
+          await SessionBackgroundKeeper.ensureRunningLock();
+        }
       }
     });
     return SessionBackgroundKeeper.operation;
+  }
+
+  /** Revalidate native ownership before shared playback and across ability transitions. */
+  static ensurePlaybackReady(): Promise<void> {
+    const task = SessionBackgroundKeeper.operation.then(async () => {
+      if (!SessionBackgroundKeeper.active || SessionBackgroundKeeper.context === undefined) {
+        throw new Error('后台播放任务尚未准备好');
+      }
+      try {
+        await SessionBackgroundKeeper.ensureAvSession(SessionBackgroundKeeper.showMediaCard);
+      } catch (_error) {
+        // A cached proxy can outlive the native session. Rebuild it once before
+        // declaring playback unavailable; retaining the object alone is no proof.
+        await SessionBackgroundKeeper.destroyAvSession();
+        await SessionBackgroundKeeper.ensureAvSession(SessionBackgroundKeeper.showMediaCard);
+      }
+      let canVerifyTask = false;
+      try {
+        const tasks = await backgroundTaskManager.getAllContinuousTasks(SessionBackgroundKeeper.context, true);
+        canVerifyTask = true;
+        const current = tasks.find((item: backgroundTaskManager.ContinuousTaskInfo) => item.abilityName === ABILITY_NAME);
+        if (SessionBackgroundKeeper.audioActive && (current === undefined || current.suspendState)) {
+          // Cancellation can be missed while JS is frozen; enumeration is the backstop.
+          SessionBackgroundKeeper.playbackContinuityLost = true;
+        }
+        SessionBackgroundKeeper.backgroundTaskStarted = current !== undefined;
+        SessionBackgroundKeeper.backgroundTaskId = current?.continuousTaskId ?? -1;
+        console.info(`[BackgroundPlaybackDiag] stage=verify taskPresent=${current !== undefined} ` +
+          `suspended=${current?.suspendState ?? false} modes=${current?.backgroundModes.join(',') ?? 'none'}`);
+      } catch (error) {
+        // Older runtimes may not expose enumeration. Updating the task below
+        // still checks the native service, rather than trusting active alone.
+        console.warn(`SessionBackgroundKeeper task query: ${(error as Error).message}`);
+      }
+      const wasAudioActive = SessionBackgroundKeeper.audioActive;
+      SessionBackgroundKeeper.audioActive = true;
+      try {
+        await SessionBackgroundKeeper.applyBackgroundModes(true, SessionBackgroundKeeper.recordingActive);
+      } catch (error) {
+        SessionBackgroundKeeper.audioActive = wasAudioActive;
+        throw error as Error;
+      }
+      if (canVerifyTask) {
+        const tasks = await backgroundTaskManager.getAllContinuousTasks(SessionBackgroundKeeper.context, true);
+        const current = tasks.find((item: backgroundTaskManager.ContinuousTaskInfo) => item.abilityName === ABILITY_NAME);
+        if (current === undefined || current.suspendState || !current.backgroundModes.includes('audioPlayback')) {
+          throw new Error('系统后台音频任务尚未生效');
+        }
+      }
+      await SessionBackgroundKeeper.ensureRunningLock();
+      console.info('[BackgroundPlaybackDiag] stage=ready');
+    });
+    SessionBackgroundKeeper.operation = task.catch(() => {});
+    return task;
   }
 
   static stop(): Promise<void> {
@@ -78,9 +165,23 @@ export class SessionBackgroundKeeper {
       } finally {
         SessionBackgroundKeeper.releaseRunningLock();
         SessionBackgroundKeeper.active = false;
+        SessionBackgroundKeeper.audioActive = false;
+        SessionBackgroundKeeper.playing = false;
+        SessionBackgroundKeeper.playbackContinuityLost = false;
       }
     });
     return SessionBackgroundKeeper.operation;
+  }
+
+  /**
+   * Returns and clears whether the playing stream lost its native background
+   * task since the last check. Callers that receive true must rebuild audio on
+   * the shared epoch; a muted stream cannot prove its own continuity.
+   */
+  static consumePlaybackContinuityLoss(): boolean {
+    const lost = SessionBackgroundKeeper.playbackContinuityLost;
+    SessionBackgroundKeeper.playbackContinuityLost = false;
+    return lost;
   }
 
   /** A UIAbility owns one task: capture must extend it without releasing team audio/connection. */
@@ -103,7 +204,11 @@ export class SessionBackgroundKeeper {
     }
     const modes: string[] = [];
     if (team) {
-      modes.push('audioPlayback', 'multiDeviceConnection');
+      // The team link is Wi-Fi P2P + TCP, not a distributed (DSoftBus) link, so
+      // the system audit rejects multiDeviceConnection after ~60s and cancels the
+      // WHOLE task, muting playback. While audio plays, audioPlayback alone is a
+      // compliant reason to keep the process and its sockets alive.
+      modes.push(SessionBackgroundKeeper.audioActive ? 'audioPlayback' : 'multiDeviceConnection');
     }
     if (recording) {
       modes.push('audioRecording');
@@ -112,11 +217,13 @@ export class SessionBackgroundKeeper {
       if (SessionBackgroundKeeper.backgroundTaskStarted) {
         await backgroundTaskManager.stopBackgroundRunning(context);
         SessionBackgroundKeeper.backgroundTaskStarted = false;
+        SessionBackgroundKeeper.backgroundTaskId = -1;
       }
       return;
     }
     if (SessionBackgroundKeeper.backgroundTaskStarted) {
-      await backgroundTaskManager.updateBackgroundRunning(context, modes);
+      const task = await backgroundTaskManager.updateBackgroundRunning(context, modes);
+      SessionBackgroundKeeper.backgroundTaskId = task?.continuousTaskId ?? SessionBackgroundKeeper.backgroundTaskId;
       return;
     }
     const agent = await wantAgent.getWantAgent({
@@ -125,25 +232,43 @@ export class SessionBackgroundKeeper {
       requestCode: 9527,
       actionFlags: [wantAgent.WantAgentFlags.UPDATE_PRESENT_FLAG]
     });
-    await backgroundTaskManager.startBackgroundRunning(context, modes, agent);
+    const task = await backgroundTaskManager.startBackgroundRunning(context, modes, agent);
     SessionBackgroundKeeper.backgroundTaskStarted = true;
+    SessionBackgroundKeeper.backgroundTaskId = task?.continuousTaskId ?? -1;
   }
 
   /**
-   * 同步 AVSession 播放状态。暂停时仅更新状态为 PAUSE，不销毁会话，
-   * 从而队员/队长暂停后仍保有后台出声能力，恢复播放时无需重新申请。
+   * Audio mode follows real transport ownership; a paused team retains its
+   * connection task and AVSession, then rearms audio at the next prepared start.
    */
-  static async updatePlaybackState(playing: boolean): Promise<void> {
-    const session = SessionBackgroundKeeper.session;
-    if (session === undefined) {
-      return;
-    }
+  static async updatePlaybackState(playing: boolean, force: boolean = false): Promise<void> {
+    const changed = SessionBackgroundKeeper.playing !== playing;
+    SessionBackgroundKeeper.playing = playing;
+    if (!changed && !force) { return; }
+    const task = SessionBackgroundKeeper.operation.then(async () => {
+      const wasAudioActive = SessionBackgroundKeeper.audioActive;
+      SessionBackgroundKeeper.audioActive = playing;
+      if (!playing) {
+        // The next start builds a fresh stream, so earlier loss needs no repair.
+        SessionBackgroundKeeper.playbackContinuityLost = false;
+      }
+      try {
+        if (SessionBackgroundKeeper.active) {
+          await SessionBackgroundKeeper.applyBackgroundModes(true, SessionBackgroundKeeper.recordingActive);
+        }
+      } catch (error) {
+        SessionBackgroundKeeper.audioActive = wasAudioActive;
+        throw error as Error;
+      }
+      const session = SessionBackgroundKeeper.session;
+      if (session !== undefined) {
+        await session.setAVPlaybackState({ state: playing ?
+          avSession.PlaybackState.PLAYBACK_STATE_PLAY : avSession.PlaybackState.PLAYBACK_STATE_PAUSE });
+      }
+    });
+    SessionBackgroundKeeper.operation = task.catch(() => {});
     try {
-      await session.setAVPlaybackState({
-        state: playing
-          ? avSession.PlaybackState.PLAYBACK_STATE_PLAY
-          : avSession.PlaybackState.PLAYBACK_STATE_PAUSE
-      });
+      await task;
     } catch (err) {
       console.warn(`SessionBackgroundKeeper updatePlaybackState: ${(err as Error).message}`);
     }
@@ -172,9 +297,6 @@ export class SessionBackgroundKeeper {
     });
     if (showMediaCard) {
       await session.activate();
-      await session.setAVPlaybackState({
-        state: avSession.PlaybackState.PLAYBACK_STATE_PLAY
-      });
     } else {
       // 队员：去激活以隐藏卡片，但保留会话对象，后台保活不受影响。
       try {
@@ -183,6 +305,8 @@ export class SessionBackgroundKeeper {
         console.warn(`SessionBackgroundKeeper deactivate: ${(err as Error).message}`);
       }
     }
+    await session.setAVPlaybackState({ state: SessionBackgroundKeeper.playing ?
+      avSession.PlaybackState.PLAYBACK_STATE_PLAY : avSession.PlaybackState.PLAYBACK_STATE_PAUSE });
   }
 
   private static async destroyAvSession(): Promise<void> {

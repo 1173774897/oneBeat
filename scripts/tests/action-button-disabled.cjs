@@ -10,12 +10,12 @@ const source = fs.readFileSync(path.join(root, 'entry/src/main/ets/components/Ac
 assert.match(source, /ACTION_DISABLED_OPACITY: number = 0\.68/);
 assert.match(source, /Button\(this\.label[\s\S]*?\.contentModifier\([\s\S]*?\.enabled\(this\.active\)/);
 assert.match(source, /function resolveFaceInkShadow\(config: ButtonConfiguration\)/);
-assert.match(source, /if \(!config\.enabled\) \{\s*return TRANSPARENT_FACE;/,
+assert.match(source, /if \(!config\.enabled && !modifier\.appearance\.preserveDisabledAppearance\) \{\s*return TRANSPARENT_FACE;/,
   'Native blur must follow the live Button enabled state, not a cached appearance');
-assert.match(source, /if \(!this\.active\) \{ return 0; \}/,
+assert.match(source, /if \(!this\.active && !this\.preserveDisabledAppearance\) \{ return 0; \}/,
   'Disabled native-shadow buttons must not reserve blur fringe');
 assert.match(source,
-  /\.renderGroup\(fadeOnExpandedBounds && !this\.active && this\.hardShadow !== undefined\)/,
+  /\.renderGroup\(fadeOnExpandedBounds && !this\.active && !this\.preserveDisabledAppearance && this\.hardShadow !== undefined\)/,
   'renderGroup is only for hard-ink disabled compositing');
 assert.match(source, /private hardInkShadowRow\(\)/,
   'Solid ink uses an Index-style Stack sibling instead of Button.background()');
@@ -46,11 +46,18 @@ assert.ok(measurementStart > 0 && measurementEnd > measurementStart,
 const measurement = source.slice(measurementStart, measurementEnd);
 const hostClick = source.match(/\.onClick\(\(event: ClickEvent\) => \{\s*(if \(this\.active\)[\s\S]*?)\n\s*\}\)/);
 assert.ok(hostClick, 'The native host must own the single guarded business callback');
-const compiled = ts.transpileModule(`export class Probe {
-  active = true; controlWidth = '100%'; controlHeight = 40;
+const resolver = source.slice(source.indexOf('function resolveFaceInkShadow('), source.indexOf('@Component\nstruct ActionButtonFace'));
+const opacity = source.match(/\.opacity\((fadeOnExpandedBounds[^\n]*)\)/);
+assert.ok(opacity, 'Disabled opacity must share the read-only appearance contract');
+const compiled = ts.transpileModule(`const ACTION_DISABLED_OPACITY = 0.68;
+const TRANSPARENT_FACE = { radius: 0, color: '#00000000' };
+export ${resolver}
+export class Probe {
+  active = true; preserveDisabledAppearance = false; controlWidth = '100%'; controlHeight = 40;
   hardShadow: any; inkShadow: any; contentClickEvent: any;
   hardFaceWidth = 0; hardFaceHeight = 0;
   action: (event: any) => void = () => {};
+  compositeOpacity(fadeOnExpandedBounds: boolean): number { return ${opacity[1]}; }
   nativeClick(event: any): void { ${hostClick[1]} }
   ${forward}
   ${extents}
@@ -98,6 +105,31 @@ assert.deepEqual(bounds(), [1 / 3.5, 7 / 3.5, 8 / 3.5, 0]);
 probe.inkShadow = undefined;
 assert.deepEqual(bounds(), [0, 0, 0, 0]);
 assert.equal(probe.shadowNumber({ id: 2 }), 0);
+
+// A member's controls are read-only data displays, while temporary busy states
+// retain the existing dimmed disabled face. Both must reject native actions.
+probe.active = false;
+probe.inkShadow = { radius: 1, offsetX: 3, offsetY: -4, color: '#171B1F' };
+const shadowFor = enabled => context.exports.resolveFaceInkShadow({ enabled,
+  contentModifier: { appearance: { inkShadow: probe.inkShadow,
+    preserveDisabledAppearance: probe.preserveDisabledAppearance } } });
+assert.deepEqual(bounds(), [0, 0, 0, 0]);
+assert.equal(probe.effectiveInkShadow().color, '#00000000');
+assert.equal(shadowFor(false).color, '#00000000');
+assert.equal(probe.compositeOpacity(true), 0.68);
+probe.preserveDisabledAppearance = true;
+assert.deepEqual(bounds(), [1 / 3.5, 7 / 3.5, 8 / 3.5, 0]);
+assert.equal(probe.effectiveInkShadow(), probe.inkShadow);
+assert.equal(shadowFor(false), probe.inkShadow);
+assert.equal(probe.compositeOpacity(true), 1);
+const eventCount = events.length;
+probe.nativeClick(synthetic);
+assert.equal(events.length, eventCount, 'Retaining member ink must never enable the native business action');
+probe.preserveDisabledAppearance = false;
+assert.equal(probe.compositeOpacity(true), 0.68, 'Returning to ordinary disabled mode restores dimming');
+probe.active = true;
+assert.equal(probe.compositeOpacity(true), 1);
+assert.equal(shadowFor(true), probe.inkShadow);
 
 const sized = new context.exports.Probe();
 sized.controlWidth = 'auto'; sized.controlHeight = 'auto';

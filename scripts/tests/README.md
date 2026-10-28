@@ -1,5 +1,21 @@
 # 音频与多人同步回归
 
+2026-10-27 的历史研究见 [评审与开源对比](../../docs/design/team-sync-accuracy-review-2026-10-27.md)，本轮状态见 [分阶段修复](../../docs/design/team-sync-fixes-2026-10-28.md)。历史缺陷数据 `clock-sync-accuracy-probe-results.json` 保留不覆盖。`clock-sync-accuracy-probe.cjs` 现在执行四组生产实现回归，并把当前源码 SHA256 与验证范围写入 `clock-sync-fix-validation-results.json`：
+
+```bash
+/Applications/DevEco-Studio.app/Contents/tools/node/bin/node scripts/tests/clock-sync-accuracy-probe.cjs /Applications/DevEco-Studio.app/Contents/tools/hvigor/hvigor/node_modules/typescript/lib/typescript.js
+```
+
+- `clock-sync-readiness.cjs`：真实 RTT/offset/中点配对、空批次、重复/乱序隔离、训练跨度、skew/残差/过期约束，以及真实 SessionController 的严格 READY 和音频等待后复核。
+- `metronome-shared-clock.cjs`：十分钟 100 ppm 逻辑时钟轨迹、1 ms/s 连续吸收、过期冻结、共享计时器与试听/校准隔离。
+- `metronome-phase-feedback.cjs`：真实 PCM 插/丢帧、已提交/已可听账本、首次硬件采样、尾音/过零点保护、恢复原点、按时间分配的有界修正额度、旧 transport/过期/回退时间戳隔离。
+- `metronome-phase-drift.cjs`：40/60/120/240 BPM × 100/500/±1000 ppm 共 16 组十分钟实际 PCM 路径与理想硬件时钟；同时检查听到的内容偏差和已扣队列的控制残差。
+- `phase-timestamp-quantization-probe.cjs`（研究探针，不在门禁内）：硬件帧位置按 HAL 周期跳变时，比较生产映射、残差中值、上包络和死区候选；结论见 [2026-10-28 再评审](../../docs/design/team-sync-optimization-review-2026-10-28.md)，设 `PROBE_OUT` 写入 `phase-timestamp-quantization-probe-results.json`。
+
+这四组测试已加入统一门禁。时钟质量检查、共享时间轴与 PCM 反馈现均默认开启；`phaseCorrectionEnabled=true`，独立的 `EXPERIMENTAL_EXACT_PLAYBACK_FRAME_MAP=false` 保持关闭。调试包仅在已有会话 `idle/paused` 且输出停妥时接受 `phase-off/phase-on`，用于对照与临时回退；每端分别设置，不允许播放中切换，正常对照后用 `phase-on` 恢复默认行为。
+
+用户双机外放及蓝牙耳机主观听感验收反馈为偏差改善、没有漏拍或音质问题；共同录音和量化统计尚未采集。上述测试使用模拟原生时钟，PASS 保护软件行为；缺少静音窗口时反馈仍可能无法持续校正，详见 [本轮记录](../../docs/design/team-sync-fixes-2026-10-28.md)。
+
 修改 `MetronomeEngine`、`ClockSync`、`SessionController`、延迟保存或路由切换后，运行：
 
 ```bash
@@ -28,6 +44,7 @@ node /path/to/oneBeat/scripts/tests/run-sync-regressions.cjs /path/to/typescript
 | 4／3／6 细分的音频长度与落点；十音色事件、力度与空白节奏保存；十二风格编排与旧八行格子兼容；爵士 Swing／Shuffle／六连滚奏；叮叮镲跨小节尾音；旧版队员拦截 | `drum-subdivision-model.cjs` |
 | 编辑器细分切换只改草稿；单个／全部菱形就近吸附、冲突合并；试听定位、停止续播、异步取消与横向跟随 | `drum-editor-preview.cjs` |
 | 行进页鼓机拍点只显示并拦截穿透点击；节拍器拍点保留三态循环、队长权限、忙碌与退出保护；切换模式后旧回调不改鼓机重音 | `walk-beat-point-mode.cjs` |
+| 队员只读控件保留 BPM／拍号文字、拍点与底栏阴影；队长忙碌和本机录制保持原禁用样式；保留阴影不授予操作权限 | `walk-member-appearance.cjs`、`action-button-disabled.cjs` |
 | 行进页载入按上/下来源显示，编排同时显示卡内微环；原生延迟动画先提交帧，短任务防闪、长任务提示、并发/离页/旧回包隔离；本机PCM等待有界且不改变试听或transport归属 | `walk-loading-feedback.cjs`、`session-audio-configuration-readiness.cjs` |
 | 出口试音完整播放一强一弱；打卡测量的倒数、保存、取消与会话归属 | `route-probe-playback.cjs`、`time-card-calibration.cjs` |
 | 分享打卡按北京时间连续计日，同日幂等且只领一次、月卡期间不消耗领取机会；落盘后才投影 UI、崩溃重放与回拨边界；鼓机启动／恢复／试听到期验权且不异步切断播放 | `share-check-in.cjs` |
@@ -38,7 +55,7 @@ node /path/to/oneBeat/scripts/tests/run-sync-regressions.cjs /path/to/typescript
 
 段落卡片展开状态与编辑目标分开验证：A/B 可同时展开，编辑或应用 B 不收起 A；仅各自箭头切换展开／收起。新增、删除与重新编号保留存活卡片状态，载入新编排恢复首段展开。折叠只关闭本卡片的锚定菜单，不影响其他卡片菜单或任何试听请求、计时器和播放归属。
 
-整曲播放段落高亮按实际播放计划验证：不同重复数的段落边界、循环回首、复合拍分母拍语义、预播放与无效进度；引擎记录写入音频流的小节边界，以本地呈现帧和生效计划历史返回当前可听段落的稳定标识，页面再映射到存活卡片。真实 PCM 用例覆盖非零输出补偿和队列、延迟起播、恢复相位变化，以及音频回调实际插入／丢弃帧，避免把逻辑墙钟或提前提交的 PCM 当成听到的位置。页面用虚拟时钟验证自适应边界刷新（最长 16 ms 复核）、不同音频与共享时钟偏移时的 A/B/C/循环首拍，以及恢复期间缺少锚点时编辑不会重播。打开／关闭浮层和手动折叠保留显示计时器，停止／页面退出／编辑器试听清理；旧异步回包及其他 transport 的 revision 不能恢复或驱动高亮。
+整曲播放段落高亮按实际播放计划验证：不同重复数的段落边界、循环回首、复合拍分母拍语义、预播放与无效进度；引擎记录写入音频流的小节边界，以本地呈现帧和生效计划历史返回当前可听段落的稳定标识，页面再映射到存活卡片。真实 PCM 用例覆盖非零输出补偿和队列、延迟起播、恢复相位变化，以及组队相位修正不能插入／丢弃本地试听帧，避免把逻辑墙钟或提前提交的 PCM 当成听到的位置。组队音频实际插/丢帧及其可听账本由 `metronome-phase-feedback.cjs` 单独验证。页面用虚拟时钟验证自适应边界刷新（最长 16 ms 复核）、不同音频与共享时钟偏移时的 A/B/C/循环首拍，以及恢复期间缺少锚点时编辑不会重播。打开／关闭浮层和手动折叠保留显示计时器，停止／页面退出／编辑器试听清理；旧异步回包及其他 transport 的 revision 不能恢复或驱动高亮。
 
 整曲连续更新用例执行实际 `AppSession`、`MetronomeEngine` 和 `writeData`：新旧 PCM 在小节边界交接，编辑不暂停、不重排起播、不修改原点或 run token；按稳定段落与重复序号处理重复数变化、前面段落缩短和增删。冷音色加载、缓存、连续乱序请求、已准备计划撤销和失败均检查实际输出。停止、正式播放、校准、编辑器接管与退出取消更新；共享配置仍等待原 transport，音频回调不生成 PCM。页面用例另验证 150 ms 合并、首次加载／预备起播时撤销旧启动、晚回包隔离、未应用草稿隔离和速度／拍号的受控重启。独立段落的有限试听及格子草稿试听保持原有行为，本轮热更新只用于整曲。
 
@@ -67,7 +84,7 @@ node /path/to/oneBeat/scripts/tests/run-sync-regressions.cjs /path/to/typescript
 统一入口还运行以下真实业务状态回归：
 
 - `recording-native-audio.cjs`：编译并执行生产 C++ 音频辅助函数。覆盖安静人声补偿、启动尖峰不压低整条录音、持续峰值保护、正常音量/静音/底噪不放大、软限幅连续性、左右声道和分块一致性、原轨不改写、伴奏增益不变，以及 PCM/时间戳转换。
-- `team-acoustic-probe.cjs`：调试包固定命令、录制/权限/会话边界、10 秒被动 MIC 采集、输出变化取消与发布包拒绝；现场抓取步骤见 `docs/design/headphone-speaker-sync-debug-2026-10-22.md`。
+- `team-acoustic-probe.cjs`：调试包固定命令、暂停时 phase-on/off 开关、录制/权限/会话边界、10 秒被动 MIC 采集、输出变化取消与发布包拒绝；现场抓取步骤见 `docs/design/headphone-speaker-sync-debug-2026-10-22.md`。
 - `recording-capture-lifecycle.cjs`：系统授权 STARTED 握手、运行时 MIC 权限、实际输入能量、停止幂等、后台/路由/电话中断与保存失败重试。
 - `recording-share-storage.cjs`：系统分享不自动打卡，显式发布确认、pending恢复与重复确认、成片索引失败的恢复文件、首帧封面提取/补齐/删除、相册复制；团队播放/连接与录制长时任务的联合所有权。
 - `recording-page-flow.cjs`：实际页面业务方法的授权隐藏/销毁差异、取消准备、停止不暂停练习、真实录制层状态、保存重试、播放中不创建视频播放器、队长明确暂停后再预览/分享、队员不能暂停全队，以及MIC音量/提前延后编辑的串行合并与续播。

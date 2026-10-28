@@ -148,6 +148,10 @@ struct MainPage {
   @State showRecordIntro: boolean = false;
   @State showRecordingSaved: boolean = false;
   @State showRecordingSaving: boolean = false;
+  // Set when the user closes the saving dialog. The 200ms poll must not reopen
+  // it for the same export; it resets once the snapshot leaves 'stopping', so
+  // a retry or the next recording shows progress again.
+  private recordingSavingDismissed: boolean = false;
   @State recordingSavePhase: RecordingSavePhase = 'finishing';
   @State savedRecordingLabel: string = '';
   @State savedRecordingScope: RecordingScope = 'solo';
@@ -621,7 +625,11 @@ struct MainPage {
     this.recordingCaptureActive = snapshot.captureActive === true;
     if (this.recordingElapsedMs !== snapshot.elapsedMs) { this.recordingElapsedMs = snapshot.elapsedMs; }
     this.recordingSavePhase = snapshot.savePhase ?? 'finishing';
-    if (snapshot.state === 'stopping' && !this.recordingCaptureActive && !this.showDiscardRecordingConfirm) {
+    if (snapshot.state !== 'stopping') {
+      this.recordingSavingDismissed = false;
+    }
+    if (snapshot.state === 'stopping' && !this.recordingCaptureActive && !this.showDiscardRecordingConfirm &&
+      !this.recordingSavingDismissed) {
       this.showRecordingSaving = true;
       this.showSaveRecovery = false;
       this.showRecordingSaved = false;
@@ -860,6 +868,9 @@ struct MainPage {
   }
 
   private dismissRecordingSaveDialog(): void {
+    if (this.showRecordingSaving) {
+      this.recordingSavingDismissed = true;
+    }
     this.showRecordingSaving = false;
     this.showRecordingSaved = false;
     this.showSaveRecovery = false;
@@ -1100,6 +1111,7 @@ struct MainPage {
     } else {
       ActionButton({
         active: this.leader && !this.busy, controlWidth: this.beatPointSize(), controlHeight: this.beatPointHeight(),
+        preserveDisabledAppearance: !this.leader,
         fill: this.beatPointFill(index), cornerRadius: 5,
         lineWidth: this.beat === index && (this.visualPlaying || this.visualCountIn) ? 3 : 1.5,
         lineColor: this.beat === index && (this.visualPlaying || this.visualCountIn) ? '#35D6E4' : INK,
@@ -1433,6 +1445,7 @@ struct MainPage {
         EditableBpm({
           value: this.bpm,
           editable: this.leader && !this.busy,
+          preserveDisabledAppearance: !this.leader,
           inputId: 'walk-bpm-input',
           controlWidth: 105,
           controlHeight: 62,
@@ -1447,6 +1460,7 @@ struct MainPage {
         Blank()
         ActionButton({
           active: this.leader && !this.busy, controlWidth: 76, controlHeight: 46, fill: Color.Transparent,
+          preserveDisabledAppearance: !this.leader,
           accessibilityLabel: `拍号 ${this.beats}/${this.unit}，编辑拍号`,
           action: () => {
             if (this.leader && !this.busy) {
@@ -1456,7 +1470,7 @@ struct MainPage {
         }) {
           Text(`${this.beats}/${this.unit}`).width(76).height(46).fontSize(27).fontWeight(900)
             .fontStyle(FontStyle.Italic).fontColor(CORAL).textAlign(TextAlign.Center)
-            .textShadow(this.leader && !this.busy ? { radius: 0, offsetX: 2, offsetY: 2, color: INK } :
+            .textShadow(!this.leader || !this.busy ? { radius: 0, offsetX: 2, offsetY: 2, color: INK } :
               { radius: 0, color: '#00000000' })
         }
         Image($rawfile(this.beatUnitIconPath()))
@@ -1613,6 +1627,7 @@ struct MainPage {
           if (this.rhythm === 3) {
             ActionButton({
               active: this.leader, controlWidth: 38, controlHeight: 38, fill: this.showStyles ? LILAC : PAPER,
+              preserveDisabledAppearance: !this.leader,
               accessibilityLabel: this.showStyles ? '收起鼓机编排' : '展开鼓机编排',
               lineWidth: 1.5, lineColor: INK, cornerRadius: 5, inkShadow: CONTROL_SHADOW,
               action: () => this.toggleStyleDrawer()
@@ -1627,6 +1642,7 @@ struct MainPage {
           } else {
             ActionButton({
               active: this.leader, controlWidth: 38, controlHeight: 38, fill: PAPER,
+              preserveDisabledAppearance: !this.leader,
               accessibilityLabel: `切换音色，当前${this.sounds[this.sound]}`,
               lineWidth: 1.5, lineColor: INK, cornerRadius: 5, inkShadow: CONTROL_SHADOW,
               action: () => { void this.changeSound(); }
@@ -1638,6 +1654,7 @@ struct MainPage {
         }
         ActionButton({
           active: this.leader && !this.busy && this.bpm > 40, controlWidth: 38, controlHeight: 38, fill: PAPER,
+          preserveDisabledAppearance: !this.leader,
           accessibilityLabel: '降低 BPM',
           lineWidth: 1.5, lineColor: INK, cornerRadius: 5, inkShadow: CONTROL_SHADOW,
           action: () => { void this.changeBpm(-1); }
@@ -1646,6 +1663,7 @@ struct MainPage {
         }
         ActionButton({
           active: this.leader && !this.busy, controlWidth: 68, controlHeight: 68, fill: CORAL,
+          preserveDisabledAppearance: !this.leader,
           accessibilityLabel: this.state === 'playing' || this.state === 'countdown' ? '停止播放' : '开始播放',
           lineWidth: 2, lineColor: INK, cornerRadius: 34,
           inkShadow: { radius: INK_SHADOW_RADIUS, offsetX: 3, offsetY: 3, color: INK },
@@ -1657,6 +1675,7 @@ struct MainPage {
         }
         ActionButton({
           active: this.leader && !this.busy && this.bpm < 240, controlWidth: 38, controlHeight: 38, fill: PAPER,
+          preserveDisabledAppearance: !this.leader,
           accessibilityLabel: '提高 BPM',
           lineWidth: 1.5, lineColor: INK, cornerRadius: 5, inkShadow: CONTROL_SHADOW,
           action: () => { void this.changeBpm(1); }

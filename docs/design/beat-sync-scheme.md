@@ -1,6 +1,6 @@
 # OneBeat 多设备节拍同步方案
 
-> 本文档描述 OneBeat（多设备同步节拍器）如何在多台 HarmonyOS 设备之间，把节拍声对齐到**亚毫秒级**。
+> 本文档描述 OneBeat（多设备同步节拍器）的跨设备同步设计及历史调查。**亚毫秒级是设计目标，不是已通过量化声学验收的精度承诺。** 2026-10-28 的测时估计保护、严格 READY、共享时钟与 PCM 反馈均已接入正常路径，持续反馈默认开启。用户双手机外放及蓝牙耳机主观听感反馈为偏差改善、没有漏拍或音质问题；尚无录音和量化偏差数据。当前状态与参数见 [分阶段修复记录](team-sync-fixes-2026-10-28.md)，原缺陷证据见 [2026-10-27 精度评审与最小验证](team-sync-accuracy-review-2026-10-27.md)。
 >
 > 涉及模块：时钟同步（`ClockSync`）、Transport 调度（`SessionController` / `AppSession`）、音频引擎（`MetronomeEngine`）、输出设备监测（`AudioOutputMonitor`）、绝对延迟补偿（自动估算 + 手动校准）。
 
@@ -38,7 +38,7 @@ OneBeat 通过 WiFi P2P 组网，以一台设备为**队长（leader）**、其�
 - **时钟同步层**：队员用 NTP 风格的往返测时估算「队长时钟 − 队员时钟」的 offset，并用线性 skew 拟合修正晶振漂移。
 - **调度层**：队长挑一个「未来的整拍下拍」作为 `startAtLeaderMonoMs` 广播出去；每台设备把它换算成自己的 `localStart`。
 - **时延补偿层**：`localStart` 前移一个 `getLatency()` 的输出时延，得到 `audibleStart`，保证「可闻」时刻对齐。
-- **锁钟层**：用硬件时间戳（`getAudioTimestampInfo`）精确算出首拍内容要提前写入多少帧，并在行进中做闭环相位校正。
+- **锁钟层**：用硬件时间戳（`getAudioTimestampInfo`）估计首拍内容的目标帧；行进中共享时间与 PCM 反馈默认开启，受新鲜时间戳、静音窗口和 transport 状态约束，详见 §7。机制启用不等于已获得量化声学精度结论。
 
 ---
 
@@ -72,17 +72,18 @@ offset(t) ≈ skewRefOffsetMs + skewPpm * (t - skewRefAtMs) / 1e6
 
 `getOffsetAt(t)` 按此投影，把「固定偏移」升级为「随时间漂移的偏移」。
 
-拟合输入与约束（2026-10-15 修复，见 §3.4）：
+拟合输入与约束（2026-10-15 的加权修复见 §3.4；2026-10-28 增加数据配对、训练与有效期保护）：
 
 - 只记录每次测量经 `medianFromSamples` 过滤后的结果（`applySample` / `smoothAdjust`），**不记录单个原始 ping**。
 - 加权最小二乘，权重 `1 / max(4, rtt)²`：单次测量误差上界正比于 `rtt/2`，慢链路结果不能与快链路结果等权。
 - NTP 一致性重置：真实 offset 必落在 `[offset − rtt/2, offset + rtt/2]`。新结果与拟合投影之差超过 `rtt/2 + 5ms` 时，历史窗口已被证伪，清空后从新结果重新拟合，并打印 `[ClockFitDiag] action=reset`。
+- 聚合结果使用同一实际样本的 offset、RTT 和测量中点，空批次显式失败。至少 3 个批次、跨度 10 秒，且加权残差 ≤3ms、`|skew|≤1000ppm` 才采用拟合；超限退回 offset，不截断斜率。最后有效测量后最多外推 15 秒，随后冻结；这些策略阈值不是已测硬件精度保证。
 
 ### 3.3 采样与重采样
 
 - `PING_SAMPLES = 11`：起拍前的完整采样次数。测量包含 RTT 和样本间隔，实际耗时随链路变化，不能假定必在约 300ms 内完成；也可能复用已在途的轻量同步。
-- `RESYNC_INTERVAL_MS = 5000`：行进中每 5s 重采样，抑制晶振与网络变化的长期漂移。
-- 网络质量分级：`rtt < 50` good / `< 150` fair / 其余 poor。
+- `RESYNC_INTERVAL_MS = 5000`：行进中每 5s 重采样以更新共享时钟估计；新映射默认经 §7 的共享时间与 PCM 反馈参与持续校正，调试 `phase-off` 可回退。实际修正仍取决于有效硬件观测和静音窗口，不能仅凭周期测时推断音频误差。
+- 网络质量分级：`rtt < 50` good / `< 150` fair / 其余 poor，仅表示响应速度。严格起拍要求至少 3 个有效 ping、样本年龄 ≤3 秒、估计误差 ≤10ms，并在音频准备后发送 READY 前复查。无效／劣质测量保留旧映射但不准入新的严格起拍；质量拒绝不等同于断连。
 
 ### 3.4 案例：队员切回前台后首次开始失败、随后拍子错位约 120ms（2026-10-15）
 
@@ -586,24 +587,15 @@ targetFrame     = renderedFrames(now) + (hardwareStartAt - now) * SR / 1000
 
 ## 7. 行进中的相位锁定
 
-> 2026-10-15 实现核查：本节描述相位校正算法，但当前普通播放不能据此假定闭环已经运行。`audioClockLocked` 初始化/重置为 false，唯一置 true 的 `readAudioPlayheadMs()` 又被调用方 `measurePhaseErrorFrames()` 的 false 提前返回挡住；画面已改用共享墙钟，不再通过画面读取启动该状态。因此首拍偏移未必会在持续行进中自行收敛。此次只记录现状，未启用或修改相位校正；首次开始与同行进页恢复的调查见 [蓝牙延迟调查 §9.18](bt-latency-calibration-debug.md#918-双蓝牙首次行进有固定先后暂停恢复后对齐2026-10-15)。
+> 2026-10-28 当前状态：`phaseCorrectionEnabled=true`，共享音乐时钟与 PCM 反馈默认开启，保留调试开关用于受控 A/B 和回退。早期默认关闭阶段已结束；用户双手机外放及蓝牙耳机主观反馈为体感偏差改善，没有漏拍或音质问题，量化声学统计尚未采集。旧版 `audioClockLocked=false` 阻断首次采样及跨机 offset 未进入持续音频比较器的问题，保留在 [2026-10-27 评审](team-sync-accuracy-review-2026-10-27.md)；实际毫秒级声学指标需按共同采样录音另行统计。
 
-锁钟只定位**首拍**。行进中因晶振漂移、缓冲抖动，音频播放头会慢慢偏离墙钟时间轴。`measurePhaseErrorFrames()` 持续测量：
+反馈开启时，`transportClockAdjustmentAt()` 以最多 1ms/s 吸收可信共享时钟变化，音频期望位置与拍点／画面使用同一音乐网格。`measurePhaseErrorFrames()` 先读取本轮有效硬件观测，再建立播放锁；播放头还扣除已呈现的插／丢帧内容差。待处理残差额外扣除已提交但尚未出声的修正及待执行量，避免重复校正。
 
-```text
-phaseError = round((playhead - expected) * SAMPLE_RATE / 1000)   // 帧
-expected   = nowMs - transportStartLocalMs                        // 理想播放头
-```
+正残差表示音频内容偏快，需要插帧延迟；负残差表示偏慢，需要丢帧追赶。每拍评估门槛为 `AUDIO_PHASE_LOCK_THRESHOLD_FRAMES=44`（约 1ms）。首次反馈额度为 16 帧；之后按经过时间、`AUDIO_PHASE_CORRECTION_RATE_PPM=2000`（约 2ms/s）分配额度，单次最多累计 `AUDIO_PHASE_CORRECTION_MAX_INTERVAL_MS=2000` 毫秒，避免低 BPM 时固定每拍 16 帧追不上共享时钟变化。一次额度可分多次执行，每次静音剪接仍最多 `AUDIO_PHASE_LOCK_MAX_STEP_FRAMES=16` 帧（约 0.36ms）。硬件样本年龄上限 250ms；帧坐标回退后等待新锚点，不复用旧反馈。
 
-> 正值 = 音频偏快 → 需要**插帧**（延迟）；负值 = 音频偏慢 → 需要**丢帧**（追赶）。
+剪接检查真实 PCM：位置两侧各 `AUDIO_PHASE_QUIET_GUARD_FRAMES=16` 帧、全部待丢弃帧的绝对值都不超过 `AUDIO_PHASE_QUIET_SAMPLE_LIMIT=4`。旧的拍内固定安全区已被移除。**持续镲声或长音没有静音窗口时，修正只能等待，不能保证持续收敛。** 待执行量限制在本次时间额度内，避免无限积压；实际执行量仍取决于静音窗口和有效硬件观测，不能把 2000ppm 额度当成无条件可达的校正速率。
 
-相位校正只在节拍内容之间的「安全区」执行，避免打断正在发声的 click：
-
-| 常量 | 值 | 含义 |
-|---|---|---|
-| `AUDIO_PHASE_LOCK_THRESHOLD_FRAMES` | 44（≈1ms） | 超过才触发校正 |
-| `AUDIO_PHASE_LOCK_MAX_STEP_FRAMES` | 16（≈0.36ms） | 单次校正步进上限 |
-| `AUDIO_PHASE_LOCK_SAFE_FRAMES` | — | 拍内安全区，越过才允许插/丢帧 |
+调试包在已有会话 `idle/paused` 且输出停妥时，可通过固定 `phase-on/phase-off` 命令切换；每台设备分别设置，不允许播放中改模式。发布包默认启用反馈但不响应这两个调试命令。临时回退用 `phase-off`，正常对照结束用 `phase-on` 恢复默认行为；新引擎实例默认 true。完整参数、命令及“先双手机外放、再耳机”的量化 A/B 步骤见 [分阶段修复记录](team-sync-fixes-2026-10-28.md)。独立精确帧映射开关仍关闭，本轮没有自动改写已有耳机校准。
 
 ---
 
@@ -625,7 +617,9 @@ expected   = nowMs - transportStartLocalMs                        // 理想播�
 | `AUDIO_CLOCK_LOCK_TIMEOUT_MS` | 300 | 锁超时 |
 | `AUDIO_CLOCK_LOCK_MIN_REMAINING_MS` | 80 | 锁最小剩余 |
 | `AUDIO_PHASE_LOCK_THRESHOLD_FRAMES` | 44 | 相位校正阈值（≈1ms） |
-| `AUDIO_PHASE_LOCK_MAX_STEP_FRAMES` | 16 | 相位校正步进（≈0.36ms） |
+| `AUDIO_PHASE_LOCK_MAX_STEP_FRAMES` | 16 | 单次静音剪接及首次反馈额度（≈0.36ms） |
+| `AUDIO_PHASE_CORRECTION_RATE_PPM` | 2000 | 按经过时间计算后续校正额度（≈2ms/s） |
+| `AUDIO_PHASE_CORRECTION_MAX_INTERVAL_MS` | 2000 | 单次额度累计的最大间隔；pending 也按本次额度有界 |
 
 ### 9.2 会话层（`Constants.ets`）
 

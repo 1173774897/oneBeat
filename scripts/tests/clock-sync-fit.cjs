@@ -31,7 +31,8 @@ function harness() {
     setTimeout: (callback, ms) => { clock.now += ms; Promise.resolve().then(callback); return 0; },
     Math, Number, Promise
   });
-  return { estimator: new exports.ClockSyncEstimator(), Estimator: exports.ClockSyncEstimator, clock, logs };
+  return { estimator: new exports.ClockSyncEstimator(), Estimator: exports.ClockSyncEstimator,
+    MeasurementError: exports.ClockSyncMeasurementError, clock, logs };
 }
 
 function memberController(h) {
@@ -40,10 +41,10 @@ function memberController(h) {
     '../common/Constants': { PING_SAMPLES: 11 },
     '../common/MonotonicClock': { MonotonicClock: { nowMs: () => h.clock.now } },
     BuildProfile: { DEBUG: false },
-    '../protocol/messages': {},
+    '../protocol/messages': { createMessage: (type, payload) => ({ type, payload }) },
     '../network/socket/SessionServer': { SessionServer: class {} },
     '../network/socket/SessionClient': { SessionClient: class {} },
-    '../sync/ClockSync': { ClockSyncEstimator: h.Estimator },
+    '../sync/ClockSync': { ClockSyncEstimator: h.Estimator, ClockSyncMeasurementError: h.MeasurementError },
     '../network/p2p/P2pInvitation': {},
     '../assets/AssetCatalog': {},
     '../common/MeterModel': { defaultBeatPointStates: () => [] },
@@ -153,4 +154,5 @@ async function main() {
   console.log('PASS clock sync fit: rtt weighting, NTP-bound reset, expired-history recovery, real SessionController raw-ping isolation');
 }
 
-main().catch(error => { console.error(error); process.exitCode = 1; });
+module.exports = { harness, memberController };
+if (require.main === module) main().catch(error => { console.error(error); process.exitCode = 1; });

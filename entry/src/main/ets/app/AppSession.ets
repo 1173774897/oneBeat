@@ -64,6 +64,10 @@ export class AppSession {
   // Bootstrap and foreground/radio refreshes may overlap; only their latest
   // completed invitation can publish that manual-code discovery is available.
   private leaderInviteRevision: number = 0;
+  // Serializes background pause/foreground resume so a late stop cannot close
+  // the GATT server that a newer foreground start just opened.
+  private leaderAdvertisingLifecycle: Promise<void> = Promise.resolve();
+  private leaderAdvertisingPausedForBackground: boolean = false;
   private memberJoinFeedbackAttempt: BleMemberJoinFeedbackAttempt | undefined = undefined;
   private shutdownOperation: Promise<void> | undefined = undefined;
   // Once calibration is saved or walking starts, the physical stream belongs
@@ -286,11 +290,95 @@ export class AppSession {
   }
 
   static handleAppForeground(): void {
-    AppSession.instance?.controller.handleAppForeground();
+    const session = AppSession.instance;
+    session?.controller.handleAppForeground();
+    if (session !== undefined) {
+      session.resumeLeaderAdvertisingAfterForeground();
+      void session.restoreAppPlayback(true);
+    }
   }
 
   static handleAppBackground(): void {
-    AppSession.instance?.controller.handleAppBackground();
+    const session = AppSession.instance;
+    session?.controller.handleAppBackground();
+    if (session !== undefined) {
+      session.pauseLeaderAdvertisingForBackground();
+      void session.restoreAppPlayback(false);
+    }
+  }
+
+  /**
+   * The continuous task never declares bluetoothInteraction. About 60s after
+   * entering background the system audit detects BLE advertising/GATT as an
+   * unclaimed mode ("use unclaimed mode 5") and cancels the WHOLE task, which
+   * mutes leader playback. Manual-code discovery is therefore foreground-only;
+   * QR joins and already-connected members keep using Wi-Fi P2P.
+   */
+  private pauseLeaderAdvertisingForBackground(): void {
+    // No invitation/solo check: a bootstrap may still be creating the room and
+    // must observe the pause when its native advertising start completes.
+    if (!this.controller.isLeader) {
+      return;
+    }
+    // Retire in-flight bootstrap/refresh availability before the async stop.
+    this.leaderInviteRevision++;
+    this.controller.bleInviteAvailable = false;
+    this.leaderAdvertisingPausedForBackground = true;
+    this.queueLeaderAdvertisingStop();
+  }
+
+  private queueLeaderAdvertisingStop(): void {
+    this.leaderAdvertisingLifecycle = this.leaderAdvertisingLifecycle
+      .then(() => this.bleDiscovery.stopLeaderAdvertising())
+      .catch((error: Error) => console.warn(`Background BLE pause failed: ${error.message}`));
+  }
+
+  private resumeLeaderAdvertisingAfterForeground(): void {
+    if (!this.leaderAdvertisingPausedForBackground) {
+      return;
+    }
+    this.leaderAdvertisingPausedForBackground = false;
+    const revision = ++this.leaderInviteRevision;
+    this.leaderAdvertisingLifecycle = this.leaderAdvertisingLifecycle.then(async () => {
+      const invitation = this.controller.getP2pInvitation();
+      const stillCurrent = (): boolean => revision === this.leaderInviteRevision &&
+        !this.leaderAdvertisingPausedForBackground && AppSession.instance === this &&
+        this.shutdownOperation === undefined && this.controller.isLeader && !this.controller.soloTeam &&
+        invitation !== undefined && this.controller.getP2pInvitation() === invitation;
+      if (!stillCurrent() || invitation === undefined || !this.bleDiscovery.isBluetoothEnabled()) {
+        return;
+      }
+      await this.bleDiscovery.startLeaderAdvertising(invitation);
+      if (stillCurrent()) {
+        this.controller.bleInviteAvailable = this.bleDiscovery.isBluetoothEnabled();
+      }
+    }).catch((error: Error) => console.warn(`Foreground BLE resume failed: ${error.message}`));
+  }
+
+  private async restoreAppPlayback(foreground: boolean): Promise<void> {
+    const current = (): boolean => AppSession.instance === this && this.shutdownOperation === undefined &&
+      !this.latencyCalibrationActive && !this.drumPreviewActive &&
+      (this.controller.state === 'playing' || this.controller.state === 'countdown');
+    if (!current()) {
+      if (AppSession.instance === this && this.shutdownOperation === undefined &&
+        !this.latencyCalibrationActive && !this.drumPreviewActive) {
+        await SessionBackgroundKeeper.updatePlaybackState(false, true);
+      }
+      return;
+    }
+    try {
+      await SessionBackgroundKeeper.ensurePlaybackReady();
+      if (!current()) { return; }
+      if (foreground) {
+        this.syncEngineFromSession();
+        await this.metronome.restoreAfterForeground(SessionBackgroundKeeper.consumePlaybackContinuityLoss());
+      }
+    } catch (error) {
+      logUserFailure('background-playback-repair', error as Error);
+      if (foreground && current()) {
+        showUserNotice('后台播放恢复失败，请暂停后重试', 'background-playback-repair');
+      }
+    }
   }
 
   async shutdown(): Promise<void> {
@@ -386,7 +474,8 @@ export class AppSession {
     }
     this.metronome.setBpm(this.controller.bpm, this.controller.beatsPerBar);
     this.metronome.setBeatPointStates(this.controller.beatPointStates);
-    this.metronome.setOffsetMs(this.controller.getOffsetMs());
+    this.metronome.setOffsetMs(this.controller.getOffsetMs(), this.controller.getClockSkewPpm(),
+      this.controller.getClockMappingValidUntilMs());
     if (this.controller.rhythm === 3 && this.controller.drumProgram.length > 0) {
       void this.metronome.configureProgram(this.controller.drumProgram).catch((err: Error) => {
         logUserFailure('drum-configuration', err);
@@ -396,11 +485,26 @@ export class AppSession {
     }
   }
 
+  /** The debug-only Want adapter owns access; mode changes cannot retime an active owner. */
+  configureSharedClockExperiment(enabled: boolean): boolean {
+    if (this.shutdownOperation !== undefined || this.latencyCalibrationActive || this.drumPreviewActive ||
+      (this.controller.state !== 'idle' && this.controller.state !== 'paused')) {
+      return false;
+    }
+    return this.metronome.setPhaseCorrectionEnabled(enabled);
+  }
+
   private async prepareCurrentAudioConfiguration(): Promise<boolean> {
     if (this.shutdownOperation !== undefined || this.latencyCalibrationActive) {
       return false;
     }
     this.preemptDrumPreview();
+    try {
+      await SessionBackgroundKeeper.ensurePlaybackReady();
+    } catch (error) {
+      logUserFailure('background-playback-prepare', error as Error);
+      return false;
+    }
     // The controller already owns the strict-start deadline for this path.
     return await this.waitForAudioConfiguration(false);
   }
@@ -892,7 +996,10 @@ export class AppSession {
       this.shutdownOperation === undefined && this.controller.getP2pInvitation() === invitation) {
       try {
         await this.bleDiscovery.startLeaderAdvertising(invitation);
-        if (inviteRevision === this.leaderInviteRevision) {
+        if (this.leaderAdvertisingPausedForBackground) {
+          // Backgrounded while the native start was in flight; see pauseLeaderAdvertisingForBackground.
+          this.queueLeaderAdvertisingStop();
+        } else if (inviteRevision === this.leaderInviteRevision) {
           this.controller.bleInviteAvailable = AppSession.instance === this &&
             this.shutdownOperation === undefined && this.controller.getP2pInvitation() === invitation &&
             this.bleDiscovery.isBluetoothEnabled();
@@ -946,9 +1053,13 @@ export class AppSession {
         this.controller.leaderHost = group.goIpAddress;
       }
     }
-    if (this.bleDiscovery.isBluetoothEnabled()) {
+    if (this.leaderAdvertisingPausedForBackground) {
+      // Radio events can still arrive in background; foreground resume re-advertises.
+    } else if (this.bleDiscovery.isBluetoothEnabled()) {
       await this.bleDiscovery.startLeaderAdvertising(invitation);
-      if (inviteRevision === this.leaderInviteRevision) {
+      if (this.leaderAdvertisingPausedForBackground) {
+        this.queueLeaderAdvertisingStop();
+      } else if (inviteRevision === this.leaderInviteRevision) {
         this.controller.bleInviteAvailable = AppSession.instance === this &&
           this.shutdownOperation === undefined && this.controller.getP2pInvitation() === invitation &&
           this.bleDiscovery.isBluetoothEnabled();

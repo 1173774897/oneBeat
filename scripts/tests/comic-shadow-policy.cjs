@@ -134,12 +134,12 @@ assert.match(kit, /ActionButton\(\{[\s\S]*?hardShadow: this\.hardShadow, inkShad
   'ComicButton must pass both shadow forms to the shared disabled renderer');
 assert.match(actionButton, /inkShadow: this\.hardShadow === undefined \? this\.effectiveInkShadow\(\) : undefined/,
   'Solid button faces disable their native shadow to avoid doubled ink');
-assert.match(actionButton, /if \(!this\.active\) \{ return \{ radius: 0, color: '#00000000' \}; \}/,
-  'Disabled native blur must drop so it cannot bleed through a faded face');
+assert.match(actionButton, /if \(!this\.active && !this\.preserveDisabledAppearance\) \{ return \{ radius: 0, color: '#00000000' \}; \}/,
+  'Ordinary disabled faces drop native blur; read-only member faces may retain ink');
 assert.match(actionButton, /\.shadow\(this\.faceInkShadow\)/,
   'Face shadow follows the live enabled state instead of a cached appearance');
 assert.match(actionButton, /resolveFaceInkShadow\(config\)/,
-  'Disabled native blur must drop so it cannot bleed through a faded face');
+  'Ordinary disabled faces drop native blur; read-only member faces may retain ink');
 assert.match(actionButton, /\.position\(\{ x: this\.hardShadow\.offsetX[\s\S]*?\.hitTestBehavior\(HitTestMode\.None\)/,
   'Solid button backing stays outside intrinsic layout and independent of input handling');
 for (const file of ['DrumMachinePage', 'LeaderLobbyPage', 'RecordingLibraryPage', 'SavedRecordingPage', 'StorePage']) {

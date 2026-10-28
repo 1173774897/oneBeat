@@ -885,9 +885,9 @@ async function testBackgroundOwners() {
   await h.keeper.setRecordingActive(true);
   await h.keeper.setRecordingActive(false);
   assert.deepEqual(h.trace, [
-    { action: 'start', modes: ['audioPlayback', 'multiDeviceConnection'] },
-    { action: 'update', modes: ['audioPlayback', 'multiDeviceConnection', 'audioRecording'] },
-    { action: 'update', modes: ['audioPlayback', 'multiDeviceConnection'] }
+    { action: 'start', modes: ['multiDeviceConnection'] },
+    { action: 'update', modes: ['multiDeviceConnection', 'audioRecording'] },
+    { action: 'update', modes: ['multiDeviceConnection'] }
   ]);
   await h.keeper.stop();
   assert.equal(h.trace.at(-1).action, 'stop', 'Only removing the final owner stops the native task');
@@ -910,13 +910,13 @@ async function testBackgroundOwners() {
   await mediaFailure.keeper.start(true);
   await mediaFailure.keeper.setRecordingActive(true);
   assert.deepEqual(mediaFailure.trace.at(-1), {
-    action: 'update', modes: ['audioPlayback', 'multiDeviceConnection', 'audioRecording']
-  }, 'Optional AVSession failure cannot release the already-started team background owner');
+    action: 'update', modes: ['multiDeviceConnection', 'audioRecording']
+  }, 'Media setup failure cannot release the already-started team connection owner');
   await mediaFailure.keeper.start(true);
   assert.equal(mediaFailure.createCount(), 2, 'The optional media card can be retried without creating another task');
   assert.equal(mediaFailure.trace.filter(item => item.action === 'start').length, 1);
   await mediaFailure.keeper.setRecordingActive(false);
-  assert.deepEqual(mediaFailure.trace.at(-1).modes, ['audioPlayback', 'multiDeviceConnection']);
+  assert.deepEqual(mediaFailure.trace.at(-1).modes, ['multiDeviceConnection']);
   await mediaFailure.keeper.stop();
   assert.equal(mediaFailure.trace.at(-1).action, 'stop');
 
@@ -925,7 +925,7 @@ async function testBackgroundOwners() {
   failedUpdate.failUpdate(1);
   await assert.rejects(failedUpdate.keeper.setRecordingActive(true), /simulated background mode/);
   await failedUpdate.keeper.setRecordingActive(true);
-  assert.deepEqual(failedUpdate.trace.at(-1).modes, ['audioPlayback', 'multiDeviceConnection', 'audioRecording'],
+  assert.deepEqual(failedUpdate.trace.at(-1).modes, ['multiDeviceConnection', 'audioRecording'],
     'A rejected recording mode update must not poison the serial queue or claim ownership');
 }
 

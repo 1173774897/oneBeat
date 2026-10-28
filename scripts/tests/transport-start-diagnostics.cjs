@@ -32,7 +32,13 @@ function harness(leader = false) {
     offset = 7;
     getOffsetMs() { return this.offset; }
     getRttMs() { return 2; }
-    applySample(sample) { this.offset = sample.offsetMs + 0.25; }
+    applySample(sample) { this.offset = sample.offsetMs + 0.25; return true; }
+    // Readiness policy is covered with the real estimator in clock-sync-readiness.
+    static getSampleReadiness() {
+      return { ready: true, reason: 'ready', mode: 'offset', sampleAgeMs: 0,
+        errorEstimateMs: 2.5, validSampleCount: 5, skewPpm: 0 };
+    }
+    getReadiness() { return ClockSyncEstimator.getSampleReadiness(); }
     static measureWithSender(_sender, count) {
       measurements.push(count);
       return measurement.promise;

@@ -95,7 +95,7 @@ function renderer() {
   assert.equal(recovered.transportRevision, 3);
   assert.equal(recovered.transportStartLocalMs, 1000);
   const recoveryTransition = recovered.pendingAudioTransition;
-  assert.equal(recoveryTransition.beatIndex, 4);
+  assert.equal(recoveryTransition.beatIndex, 5, 'Recovery reserves cold-start lead on a future shared beat');
   assert.equal(recoveryTransition.countInBeats, 0, 'Recovery must not replay the rehearsal bar');
   assert.equal(recoveryTransition.token, 7);
   recovered.fillAudioData(new ArrayBuffer((recoveryTransition.targetFrame + 1) * 2));

@@ -8,7 +8,7 @@ import { RecordingPlaybackObserver } from './RecordingPlaybackObserver';
 
 const PROBE_DURATION_MS: number = 10000;
 
-/** Debug-only, bounded observation of the existing team output; never a transport or calibration command. */
+/** Fixed debug commands for bounded output observation and paused-transport clock A/B trials. */
 export class TeamAcousticProbe {
   private static active: boolean = false;
   private static generation: number = 0;
@@ -19,7 +19,8 @@ export class TeamAcousticProbe {
     // private recordings, and debug commands accept no caller-controlled path/duration.
     if (context.applicationInfo.debug !== true) { return; }
     const command = want.parameters?.['onebeatProbe'];
-    if (command !== 'mic' && command !== 'snapshot' && command !== 'export') { return; }
+    if (command !== 'mic' && command !== 'snapshot' && command !== 'export' &&
+      command !== 'phase-on' && command !== 'phase-off') { return; }
     if (TeamAcousticProbe.active) {
       console.info('[TeamAcousticProbe] stage=reject reason=probe-busy');
       return;
@@ -35,6 +36,14 @@ export class TeamAcousticProbe {
       }
       const session = AppSession.get();
       if (session === undefined) { throw new Error('no-session'); }
+      if (command === 'phase-on' || command === 'phase-off') {
+        const enabled = command === 'phase-on';
+        if (!session.configureSharedClockExperiment(enabled)) {
+          throw new Error('phase-mode-requires-idle-or-paused-team');
+        }
+        console.info(`[TeamAcousticProbe] stage=phase-mode enabled=${enabled}`);
+        return;
+      }
       if (command === 'snapshot') {
         console.info('[TeamAcousticProbe] stage=snapshot data=' +
           JSON.stringify(session.metronome.readMicExperimentPlaybackSnapshot(true)));

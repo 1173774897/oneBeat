@@ -1,0 +1,37 @@
+{
+  "generatedAt": "2026-10-28T03:19:05.704Z",
+  "historicalBaseline": "docs/design/clock-sync-accuracy-probe-results.json",
+  "sourceSha256": {
+    "entry/src/main/ets/sync/ClockSync.ets": "1fa5e2fec0a11bb7fe344d6a70d47defde7c7d6d8d1003a5d80b5c5e3f6acb57",
+    "entry/src/main/ets/session/SessionController.ets": "962edce61670e6a2f12f184500fd1f338db7d4d59edb3b36b6bb81c0db699463",
+    "entry/src/main/ets/audio/MetronomeEngine.ets": "6399e7ca60010323ef4eccb6782ebf3b2f7e277c5d4e53b630005ecb9184f937",
+    "entry/src/main/ets/app/AppSession.ets": "05a122ef82a1d3e9d7ea28d55b8b61e87bd4cb91a7cbd92918adfaf3b349a172",
+    "entry/src/main/ets/audio/TeamAcousticProbe.ets": "47766806e974a006f711628d9e37a571c19bf8c229733e8a35ffc4558c7cdaab"
+  },
+  "checks": [
+    {
+      "suite": "clock-sync-readiness.cjs",
+      "passed": true,
+      "output": "PASS clock readiness: paired midpoint/RTT, invalid and duplicate isolation, bounded trained drift, expiry, real measurement and strict READY rejection, quality versus disconnect"
+    },
+    {
+      "suite": "metronome-shared-clock.cjs",
+      "passed": true,
+      "output": "PASS shared musical clock: ten-minute drift, continuous bounded slew, monotonic negative corrections, expiry, preview/calibration isolation, adjusted timer deadlines and transport reset"
+    },
+    {
+      "suite": "metronome-phase-feedback.cjs",
+      "passed": true,
+      "output": "PASS phase feedback: default-on feedback and explicit rollback, first hardware lock, true audible insert/drop mapping, pending/queued correction accounting, PCM-tail safety, owner isolation, timestamp freshness and route reset"
+    },
+    {
+      "suite": "metronome-phase-drift.cjs",
+      "passed": true,
+      "output": "PASS phase drift: 16 ten-minute PCM cases, 40–240 BPM, 100/500/±1000 ppm; maximum simulated audible error 2.652 ms; not hardware/acoustic certification"
+    }
+  ],
+  "clockAdmissionEnabled": true,
+  "phaseCorrectionEnabledByDefault": true,
+  "hardwareAcousticValidation": "not performed by this software regression command",
+  "scope": "Deterministic execution of production clock, strict READY and PCM feedback methods with simulated native clocks. No acoustic accuracy certification."
+}

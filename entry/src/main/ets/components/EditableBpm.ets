@@ -30,6 +30,7 @@ class BpmInputFocusFrame extends FrameCallback {
 export struct EditableBpm {
   @Prop @Watch('onValueChanged') value: number = 120;
   @Prop @Watch('onEditabilityChanged') editable: boolean = false;
+  @Prop preserveDisabledAppearance: boolean = false;
   @Prop inputId: string = 'editable-bpm';
   @Prop controlWidth: Length = 96;
   @Prop controlHeight: number = 50;
@@ -207,6 +208,7 @@ export struct EditableBpm {
           .onBlur(() => this.commitEditing())
       } else {
         ActionButton({ label: `${this.value}`, active: this.editable,
+          preserveDisabledAppearance: this.preserveDisabledAppearance,
           controlHeight: this.controlHeight, fill: '#00000000', cornerRadius: this.controlCornerRadius,
           accessibilityLabel: `${this.value} BPM`, action: () => this.startEditing()
         }) {
@@ -221,7 +223,7 @@ export struct EditableBpm {
             .fontStyle(this.italicValue ? FontStyle.Italic : FontStyle.Normal)
             .fontColor(this.valueColor)
             .textAlign(TextAlign.Center)
-            .textShadow(this.editable ? this.valueShadow : { radius: 0, color: '#00000000' })
+            .textShadow(this.editable || this.preserveDisabledAppearance ? this.valueShadow : { radius: 0, color: '#00000000' })
         }
       }
     }.width(this.controlWidth).height(this.controlHeight).clip(false)

@@ -30,7 +30,12 @@ function harness() {
   };
   let permission = 0;
   let gate;
-  const session = { controller: { state: 'playing' }, metronome: {
+  const session = { controller: { state: 'playing' },
+    configureSharedClockExperiment(enabled) {
+      if (this.controller.state !== 'paused' && this.controller.state !== 'idle') return false;
+      events.push(['phase-mode', enabled]);
+      return true;
+    }, metronome: {
     readMicExperimentPlaybackSnapshot(details) {
       events.push(['snapshot', details]);
       return { ...output, ...(details ? {} : {
@@ -95,11 +100,28 @@ function harness() {
   await release.command('mic');
   await release.command('snapshot');
   await release.command('export');
+  await release.command('phase-on');
+  await release.command('phase-off');
   assert.equal(release.events.length, 0, 'Release builds must not read session, capture, or export');
 
   const unknown = harness();
   await unknown.command('volume-on');
-  assert.equal(unknown.events.length, 0, 'Only the fixed passive whitelist is callable');
+  assert.equal(unknown.events.length, 0, 'Only the fixed debug whitelist is callable');
+
+  const phase = harness();
+  await phase.command('phase-on');
+  assert.ok(!phase.events.some(event => event[0] === 'phase-mode'), 'Playing must reject mode changes');
+  phase.session.controller.state = 'paused';
+  phase.setPermission(-1);
+  await phase.command('phase-on');
+  await phase.command('phase-off');
+  assert.deepEqual(phase.events.filter(event => event[0] === 'phase-mode'),
+    [['phase-mode', true], ['phase-mode', false]]);
+  assert.ok(!phase.events.some(event => event[0] === 'run'), 'Clock mode never opens a microphone');
+  phase.recording.captureActive = true;
+  await phase.command('phase-on');
+  assert.equal(phase.events.filter(event => event[0] === 'phase-mode').length, 2,
+    'Recording ownership prevents experiment mode changes');
 
   const successful = harness();
   const before = JSON.stringify(successful.output);

@@ -83,6 +83,8 @@ function harness({ sampleBankClass, engineOptions = {}, drumAccess = () => true 
     emit() { this.listener(); }
     getRemoteSessionEndReason() { return undefined; }
     getOffsetMs() { return 0; }
+    getClockSkewPpm() { return 0; }
+    getClockMappingValidUntilMs() { return Infinity; }
     setBeatIndex() {}
     completeCountIn() {}
     async disconnect() {}
@@ -102,6 +104,7 @@ function harness({ sampleBankClass, engineOptions = {}, drumAccess = () => true 
     '../common/MonotonicClock': { MonotonicClock: { nowMs: () => h.now } },
     '../common/MeterModel': { defaultBeatPointStates: count => Array(count).fill('normal') },
     '../session/SessionBackgroundKeeper': { SessionBackgroundKeeper: {
+      async ensurePlaybackReady() {},
       setControlHandler() {}, async updatePlaybackState(playing) { backgroundUpdates.push(playing); }, async stop() {}
     } },
     '@kit.ArkUI': { promptAction: { showToast() {} }, router: {} }

@@ -103,6 +103,8 @@ function harness(initialWireless = true, leader = true) {
     setUiListener() {}
     setTransportPreparationHandler(handler) { this.prepareAudio = handler; }
     getOffsetMs() { return 12; }
+    getClockSkewPpm() { return 0; }
+    getClockMappingValidUntilMs() { return Infinity; }
     async disconnect() {}
     async startTransport() { this.transportCommands.push('start'); }
     async pauseTransport() { this.transportCommands.push('pause'); }
@@ -126,6 +128,7 @@ function harness(initialWireless = true, leader = true) {
     '../common/MonotonicClock': { MonotonicClock: { nowMs: () => now } },
     '../common/MeterModel': { defaultBeatPointStates: () => [] },
     '../session/SessionBackgroundKeeper': { SessionBackgroundKeeper: {
+      async ensurePlaybackReady() {},
       setControlHandler() {}, async stop() {}
     } },
     '@kit.ArkUI': { promptAction: { showToast: ({ message }) => toasts.push(message) }, router: {} }

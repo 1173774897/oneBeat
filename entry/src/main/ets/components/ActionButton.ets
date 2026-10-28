@@ -13,6 +13,7 @@ export interface ActionButtonHardShadow {
 }
 
 interface ActionButtonAppearance {
+  preserveDisabledAppearance: boolean;
   fill: ResourceColor;
   cornerRadius: Length | BorderRadiuses;
   lineWidth: Length | EdgeWidths;
@@ -43,7 +44,7 @@ class ActionButtonContentModifier implements ContentModifier<ButtonConfiguration
 
 function resolveFaceInkShadow(config: ButtonConfiguration): ShadowOptions {
   const modifier = config.contentModifier as ActionButtonContentModifier;
-  if (!config.enabled) {
+  if (!config.enabled && !modifier.appearance.preserveDisabledAppearance) {
     return TRANSPARENT_FACE;
   }
   const ink = modifier.appearance.inkShadow;
@@ -91,7 +92,7 @@ struct ActionButtonFace {
 function actionButtonContent(config: ButtonConfiguration) {
   ActionButtonFace({
     appearance: (config.contentModifier as ActionButtonContentModifier).appearance,
-    faceEnabled: config.enabled,
+    faceEnabled: config.enabled || (config.contentModifier as ActionButtonContentModifier).appearance.preserveDisabledAppearance,
     pressed: config.enabled && config.pressed,
     faceInkShadow: resolveFaceInkShadow(config),
     content: (config.contentModifier as ActionButtonContentModifier).content
@@ -108,6 +109,7 @@ function actionButtonContent(config: ButtonConfiguration) {
 
 /**
  * A native button with a custom face and one disabled fade for face plus shadow.
+ * preserveDisabledAppearance keeps role-restricted readouts fully visible without enabling input.
  * Put only the button's own visual content in the optional builder. Preserve
  * business guards in the action: enabled can change after a gesture has begun.
  * Keep callback/builder identities stable while mounted and read live caller
@@ -117,6 +119,8 @@ function actionButtonContent(config: ButtonConfiguration) {
 export struct ActionButton {
   @Prop label: string = '';
   @Prop active: boolean = true;
+  // Role-restricted readouts keep their ink while native input and action guards stay disabled.
+  @Prop preserveDisabledAppearance: boolean = false;
   @Prop controlWidth: Length = '100%';
   @Prop controlHeight: Length = 40;
   @Prop fill: ResourceColor = '#FFF9EE';
@@ -176,7 +180,7 @@ export struct ActionButton {
       const offset = horizontal ? this.hardShadow.offsetX : this.hardShadow.offsetY;
       return Math.max(0, leading ? -offset : offset);
     }
-    if (!this.active) { return 0; }
+    if (!this.active && !this.preserveDisabledAppearance) { return 0; }
     if (this.inkShadow === undefined) { return 0; }
     const offset = this.shadowNumber(horizontal ? this.inkShadow.offsetX : this.inkShadow.offsetY);
     const fringe = 3 * Math.max(0, this.shadowNumber(this.inkShadow.radius)) + 1;
@@ -200,12 +204,13 @@ export struct ActionButton {
   private effectiveInkShadow(): ShadowOptions | undefined {
     if (this.inkShadow === undefined) { return undefined; }
     // Native blur on a semi-transparent disabled face reads as shadow bleeding through.
-    if (!this.active) { return { radius: 0, color: '#00000000' }; }
+    if (!this.active && !this.preserveDisabledAppearance) { return { radius: 0, color: '#00000000' }; }
     return this.inkShadow;
   }
 
   private appearance(): ActionButtonAppearance {
     return {
+      preserveDisabledAppearance: this.preserveDisabledAppearance,
       fill: this.fill, cornerRadius: this.cornerRadius, lineWidth: this.lineWidth, lineColor: this.lineColor,
       contentPadding: this.contentPadding, autoWidth: this.controlWidth === 'auto', controlHeight: this.controlHeight,
       inkShadow: this.hardShadow === undefined ? this.effectiveInkShadow() : undefined, hitRegion: this.hitRegion
@@ -278,8 +283,8 @@ export struct ActionButton {
       top: -this.shadowOutset(false, true), bottom: -this.shadowOutset(false, false) })
     .clip(false)
     // renderGroup on native-shadow buttons clips or leaves ghost ink when faded; hard ink still needs it.
-    .renderGroup(fadeOnExpandedBounds && !this.active && this.hardShadow !== undefined)
-    .opacity(fadeOnExpandedBounds ? (this.active ? 1 : ACTION_DISABLED_OPACITY) : 1)
+    .renderGroup(fadeOnExpandedBounds && !this.active && !this.preserveDisabledAppearance && this.hardShadow !== undefined)
+    .opacity(fadeOnExpandedBounds && !this.active && !this.preserveDisabledAppearance ? ACTION_DISABLED_OPACITY : 1)
   }
 
   build() {

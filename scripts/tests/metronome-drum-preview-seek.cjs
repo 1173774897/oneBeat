@@ -157,7 +157,8 @@ async function main() {
     assert.ok(shared);
     const sharedPcm = writeTarget(h, shared, 512);
     assert.equal(e.transportPreviewStartPositionBeats, undefined);
-    assert.equal(shared.timelineElapsedFrames, undefined);
+    assert.equal(shared.timelineElapsedFrames, 0,
+      'The default shared-clock feedback starts at elapsed zero without inheriting the preview seek');
     assertSource(sharedPcm, e.pendingSequence[0], 0, 'Shared transport starts at its original downbeat');
   }
 

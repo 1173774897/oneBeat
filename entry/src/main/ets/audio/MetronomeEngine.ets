@@ -42,6 +42,11 @@ const AUDIO_CLOCK_LOCK_RETRY_MS: number = 8;
 const AUDIO_CLOCK_LOCK_TIMEOUT_MS: number = 300;
 const AUDIO_CLOCK_LOCK_MIN_REMAINING_MS: number = 80;
 const AUDIO_CALLBACK_STALL_MS: number = 1500;
+// Two same-direction observations above 50 ms exceed the hardware's ~20 ms
+// timestamp quantum. Smaller drift stays with the normal inaudible slew.
+const AUDIO_FOREGROUND_REPHASE_MS: number = 50;
+const AUDIO_FOREGROUND_RECHECK_MS: number = 80;
+const AUDIO_FOREGROUND_RECHECK_TIMEOUT_MS: number = 2000;
 const ROUTE_PROBE_POLL_MS: number = 20;
 const ROUTE_PROBE_WARMUP_MS: number = 300;
 const ROUTE_PROBE_WARMUP_TIMEOUT_MS: number = 4000;
@@ -63,12 +68,18 @@ const DITHER_FLOOR_GAIN: number = 0.0001;
 // 播放中持续相位锁定的校正参数。
 // 相位误差（音频播放头相对墙钟时间轴）超过该阈值时启动插帧/丢帧校正。
 const AUDIO_PHASE_LOCK_THRESHOLD_FRAMES: number = 44; // 约 1ms
-// 每次校正的最大步长，保证插帧/丢帧足够渐进、听感不可察觉。
+// Bound each quiet splice to limit local changes to the PCM waveform.
 const AUDIO_PHASE_LOCK_MAX_STEP_FRAMES: number = 16; // 约 0.36ms
-// 拍点内“安全区”起点：越过强拍 click 衰减尾后（约 1.25 倍 click 时长）才允许校正，
-// 避免在 click 瞬态上插帧/丢帧造成可闻毛刺。
-const AUDIO_PHASE_LOCK_SAFE_FRAMES: number =
-  Math.ceil(Math.max(ACCENT_DURATION_MS, WEAK_DURATION_MS) * 1.25 * SAMPLE_RATE / 1000);
+// A time-based budget must exceed the musical-clock slew even at low BPM.
+// This is a control limit, not a measured audio-crystal bound.
+const AUDIO_PHASE_CORRECTION_RATE_PPM: number = 2000;
+const AUDIO_PHASE_CORRECTION_MAX_INTERVAL_MS: number = 2000;
+const AUDIO_PHASE_CLOCK_MAX_AGE_MS: number = 250;
+const AUDIO_PHASE_CORRECTION_CAPACITY: number = 128;
+// The rendered dither is at most four PCM units. Beat position alone cannot
+// identify silence: subdivisions and sustained cymbal tails can occur anywhere.
+const AUDIO_PHASE_QUIET_SAMPLE_LIMIT: number = 4;
+const AUDIO_PHASE_QUIET_GUARD_FRAMES: number = 16;
 
 function applyDitherFloorToRange(samples: Int16Array, start: number, end: number): void {
   for (let i = start; i < end; i++) {
@@ -410,6 +421,11 @@ export class MetronomeEngine {
   private experimentLastInterruptForce: number = -1;
   private observedWriteCallbackCount: number = 0;
   private lastWriteProgressMs: number = 0;
+  private audioWriteDiscontinuity: boolean = false;
+  private audioClockContinuityLost: boolean = false;
+  private backgroundPlaybackInterrupted: boolean = false;
+  private audioFocusInterrupted: boolean = false;
+  private foregroundContinuityRequest: number = 0;
   // A2DP 冷启动诊断：renderer.start() 之后、首个 writeData 回调之前的等待时间。
   private diagFirstWriteAfterStartPending: boolean = false;
   private accentBuffer: ArrayBuffer = ClickSound.buildAccentBuffer();
@@ -426,6 +442,13 @@ export class MetronomeEngine {
   private beatPointStates: BeatPointState[] = defaultBeatPointStates(4);
   private beatIndex: number = 0;
   private offsetMs: number = 0;
+  private clockMappingAtMs: number = 0;
+  private clockMappingSkewPpm: number = 0;
+  private clockMappingValidUntilMs: number = Number.POSITIVE_INFINITY;
+  private transportOffsetAtStartMs: number = 0;
+  private disciplinedOffsetMs: number = 0;
+  private disciplinedOffsetAtMs: number = 0;
+  private transportUsesSharedClock: boolean = false;
   private nextBeatAtMs: number = 0;
   private rhythm: number = 0;
   private soundId: number = -1;
@@ -471,6 +494,19 @@ export class MetronomeEngine {
   private queueDepthFrames: number = 0;
   /** 播放中待执行的相位校正帧数（正值=插帧延迟，负值=丢帧追赶）。 */
   private phaseCorrectionFrames: number = 0;
+  private phaseCorrectionEnabled: boolean = true;
+  // Corrections belong to submitted stream coordinates. Their acoustic effect
+  // starts only after the hardware head and output latency cross that point.
+  private phaseCorrectionStarts: Float64Array = new Float64Array(AUDIO_PHASE_CORRECTION_CAPACITY);
+  private phaseCorrectionDeltas: Float64Array = new Float64Array(AUDIO_PHASE_CORRECTION_CAPACITY);
+  private phaseCorrectionHead: number = 0;
+  private phaseCorrectionCount: number = 0;
+  private phaseCorrectionCompletedFrames: number = 0;
+  private phaseCorrectionSubmittedFrames: number = 0;
+  private phaseCorrectionAudibleFrames: number = 0;
+  private phaseFeedbackStartFrame: number = -1;
+  private phaseFeedbackSampleFresh: boolean = false;
+  private phaseCorrectionCheckAtMs: number = -1;
   private audioFrameCursor: number = 0;
   private lastUnderflowCount: number = 0;
   private transportRevision: number = 0;
@@ -521,6 +557,10 @@ export class MetronomeEngine {
   private handleWriteData(data: ArrayBuffer): audio.AudioDataCallbackResult {
     this.writeCallbackCount++;
     const callbackEntryMonoMs = MonotonicClock.nowMs();
+    if (this.audioStreaming && this.lastWriteProgressMs > 0 &&
+      callbackEntryMonoMs - this.lastWriteProgressMs > AUDIO_CALLBACK_STALL_MS) {
+      this.audioWriteDiscontinuity = true;
+    }
     this.lastWriteProgressMs = callbackEntryMonoMs;
     const previousEntry = this.previousWriteCallbackEntryMonoMs;
     const previousCallbackGapMs = previousEntry !== undefined && callbackEntryMonoMs >= previousEntry &&
@@ -1275,8 +1315,56 @@ export class MetronomeEngine {
     this.beatCallback = callback;
   }
 
-  setOffsetMs(offsetMs: number): void {
+  /** Mapping is leader minus local; its expiry bounds extrapolation during a lost resync. */
+  setOffsetMs(offsetMs: number, skewPpm: number = 0,
+    validUntilMs: number = Number.POSITIVE_INFINITY): void {
+    if (!Number.isFinite(offsetMs) || !Number.isFinite(skewPpm) || Number.isNaN(validUntilMs)) {
+      return;
+    }
+    const now = MonotonicClock.nowMs();
+    this.transportClockAdjustmentAt(now);
     this.offsetMs = offsetMs;
+    this.clockMappingAtMs = now;
+    this.clockMappingSkewPpm = skewPpm;
+    this.clockMappingValidUntilMs = validUntilMs;
+    if (!this.running) {
+      this.resetTransportClockDiscipline(now);
+    }
+  }
+
+  private mappedOffsetAt(localMs: number): number {
+    const elapsed = Math.max(0, Math.min(localMs, this.clockMappingValidUntilMs) - this.clockMappingAtMs);
+    return this.offsetMs + this.clockMappingSkewPpm * elapsed / 1e6;
+  }
+
+  private resetTransportClockDiscipline(nowMs: number): void {
+    this.disciplinedOffsetMs = this.mappedOffsetAt(nowMs);
+    this.disciplinedOffsetAtMs = nowMs;
+  }
+
+  /** Keep the musical clock monotonic while a new network estimate is absorbed.
+   *  The 1 ms/s slew is a control limit for shared playback, not
+   *  an assumption about device crystals or a promise of acoustic accuracy.
+   */
+  private transportClockAdjustmentAt(nowMs: number): number {
+    if (!this.phaseCorrectionEnabled || !this.transportUsesSharedClock) {
+      return 0;
+    }
+    const elapsed = Math.max(0, nowMs - this.disciplinedOffsetAtMs);
+    const limit = elapsed / 1000;
+    const difference = this.mappedOffsetAt(nowMs) - this.disciplinedOffsetMs;
+    this.disciplinedOffsetMs += Math.max(-limit, Math.min(limit, difference));
+    this.disciplinedOffsetAtMs = Math.max(nowMs, this.disciplinedOffsetAtMs);
+    return this.disciplinedOffsetMs - this.transportOffsetAtStartMs;
+  }
+
+  private transportElapsedAt(nowMs: number): number {
+    return nowMs - this.transportStartLocalMs + this.transportClockAdjustmentAt(nowMs);
+  }
+
+  /** nextBeatAtMs stays on the original musical grid; timers need current local time. */
+  private localTimeForTransportGrid(gridAtMs: number, nowMs: number): number {
+    return gridAtMs - this.transportClockAdjustmentAt(nowMs);
   }
 
   setBpm(bpm: number, beatsPerBar: number): void {
@@ -1347,7 +1435,7 @@ export class MetronomeEngine {
     const now = MonotonicClock.nowMs();
     // 视觉时间轴与音频硬件播放头解耦：统一走 ClockSync 对齐后的墙钟逻辑时间轴，
     // 保证各机画面一致。音频侧的对齐（相位校正）仍使用 readAudioPlayheadMs，不受影响。
-    const playheadMs = now - this.transportStartLocalMs;
+    const playheadMs = this.transportElapsedAt(now);
     const beatMs = 60000 / Math.max(1, this.transportBpm);
     const started = playheadMs >= 0;
     const presentedAtLocalMs = this.transportStartLocalMs + playheadMs;
@@ -1446,6 +1534,12 @@ export class MetronomeEngine {
       this.experimentLastInterruptHint = event.hintType;
       this.experimentLastInterruptForce = event.forceType;
       console.warn(`MetronomeEngine audio interrupt: hint=${event.hintType}, force=${event.forceType}, token=${this.runToken}`);
+      if (event.hintType === audio.InterruptHint.INTERRUPT_HINT_PAUSE ||
+        event.hintType === audio.InterruptHint.INTERRUPT_HINT_STOP) {
+        this.audioFocusInterrupted = true;
+      } else if (event.hintType === audio.InterruptHint.INTERRUPT_HINT_RESUME) {
+        this.audioFocusInterrupted = false;
+      }
       // A forced pause must remain paused until the system grants focus back.
       // Restarting immediately would compete with calls or other audio owners.
       if (event.hintType === audio.InterruptHint.INTERRUPT_HINT_RESUME && this.running) {
@@ -1840,6 +1934,13 @@ export class MetronomeEngine {
     const interval = 60000 / this.transportBpm;
     // ClockSync offset is leader - client, so convert leader time back to the local clock.
     let localStart = startAtLeaderMonoMs - this.offsetMs;
+    const useSharedClock = previewStartPositionBeats === undefined && outputCompensationOverrideMs === undefined;
+    if (this.phaseCorrectionEnabled && useSharedClock) {
+      // Evaluate the mapping at the deadline, not just at receipt. The second
+      // projection solves the small affine skew without introducing a new epoch.
+      localStart = startAtLeaderMonoMs - this.mappedOffsetAt(localStart);
+      localStart = startAtLeaderMonoMs - this.mappedOffsetAt(localStart);
+    }
     let firstBeatIndex = beatIndex;
     let remainingCountInBeats = Math.max(0, countInBeats);
     const now = MonotonicClock.nowMs();
@@ -1855,6 +1956,10 @@ export class MetronomeEngine {
     this.beatIndex = firstBeatIndex;
     this.nextBeatAtMs = localStart;
     this.transportStartLocalMs = localStart;
+    this.transportUsesSharedClock = useSharedClock;
+    this.resetTransportClockDiscipline(now);
+    this.transportOffsetAtStartMs = this.phaseCorrectionEnabled && useSharedClock ?
+      this.mappedOffsetAt(localStart) : this.disciplinedOffsetMs;
     this.transportStartBeatIndex = firstBeatIndex;
     this.transportCountInBeats = remainingCountInBeats;
     this.transportCountInDurationMs = remainingCountInBeats * interval;
@@ -1946,6 +2051,11 @@ export class MetronomeEngine {
     this.startTimingTransition = undefined;
     this.startWriteBufferContext = undefined;
     this.runToken++;
+    this.phaseCorrectionFrames = 0;
+    this.audioWriteDiscontinuity = false;
+    this.audioClockContinuityLost = false;
+    this.backgroundPlaybackInterrupted = false;
+    this.audioFocusInterrupted = false;
     this.running = true;
     this.transportPreviewStartPositionBeats = undefined;
     this.pendingAudioTransition = undefined;
@@ -1963,7 +2073,20 @@ export class MetronomeEngine {
     this.startTimingTransition = undefined;
     this.startWriteBufferContext = undefined;
     this.runToken++;
+    this.resetPhaseCorrectionState();
     this.cancelTimers();
+  }
+
+  /** Controlled A/B only: change this while stopped, then start a new transport. */
+  setPhaseCorrectionEnabled(enabled: boolean): boolean {
+    if (this.running || this.audioStreaming) {
+      return false;
+    }
+    if (this.phaseCorrectionEnabled === enabled) { return true; }
+    this.phaseCorrectionEnabled = enabled;
+    this.resetPhaseCorrectionState();
+    this.resetTransportClockDiscipline(MonotonicClock.nowMs());
+    return true;
   }
 
   private cancelTimers(): void {
@@ -2163,15 +2286,22 @@ export class MetronomeEngine {
     }
     let interval = 60000 / this.transportBpm;
     const now = MonotonicClock.nowMs();
-    if (this.nextBeatAtMs < now) {
-      const skipped = Math.floor((now - this.nextBeatAtMs) / interval);
+    const musicalNow = this.transportStartLocalMs + this.transportElapsedAt(now);
+    // A resync can move the local deadline later. Do not emit an early beat
+    // merely because a timer was armed before that estimate arrived.
+    if (musicalNow < this.nextBeatAtMs) {
+      this.timerId = setTimeout(() => this.emitBeatAndScheduleNext(token), this.nextBeatAtMs - musicalNow);
+      return;
+    }
+    if (this.nextBeatAtMs < musicalNow) {
+      const skipped = Math.floor((musicalNow - this.nextBeatAtMs) / interval);
       if (skipped > 0) {
         this.nextBeatAtMs += skipped * interval;
         this.beatIndex += skipped;
       }
     }
     const beatInBar = (this.beatIndex % this.transportBeatsPerBar) + 1;
-    this.beatCallback(this.beatIndex, beatInBar, this.nextBeatAtMs);
+    this.beatCallback(this.beatIndex, beatInBar, this.localTimeForTransportGrid(this.nextBeatAtMs, now));
     this.beatIndex++;
 
     if (beatInBar === 1) {
@@ -2180,7 +2310,8 @@ export class MetronomeEngine {
     interval = 60000 / this.transportBpm;
     this.nextBeatAtMs += interval;
     this.checkAudioProgress(now);
-    const wait = Math.max(0, this.nextBeatAtMs - MonotonicClock.nowMs());
+    const afterCallback = MonotonicClock.nowMs();
+    const wait = Math.max(0, this.localTimeForTransportGrid(this.nextBeatAtMs, afterCallback) - afterCallback);
     this.timerId = setTimeout(() => this.emitBeatAndScheduleNext(token), wait);
   }
 
@@ -2530,32 +2661,35 @@ export class MetronomeEngine {
         continue;
       }
 
-      // 播放中持续相位锁定：在拍点 dither floor（静音区）插帧/丢帧，逐步校正相位误差，
-      // 避免在 click 瞬态上操作产生可闻毛刺。
-      if (this.phaseCorrectionFrames !== 0) {
-        const samplesPerBeat = Math.max(1, Math.round(bar.samplesPerBeat));
-        const posInBeat = this.audioFrameCursor % samplesPerBeat;
-        if (posInBeat >= AUDIO_PHASE_LOCK_SAFE_FRAMES) {
+      let phaseCopyLimit = outputLimit - outputCursor;
+      if (this.phaseCorrectionFrames !== 0 && this.canCorrectAudioPhase() &&
+        this.phaseCorrectionCount < AUDIO_PHASE_CORRECTION_CAPACITY) {
+        const stepFrames = Math.min(Math.abs(this.phaseCorrectionFrames),
+          AUDIO_PHASE_LOCK_MAX_STEP_FRAMES);
+        const dropFrames = this.phaseCorrectionFrames < 0 ? stepFrames : 0;
+        const quietCursor = this.findQuietPhaseCorrectionCursor(bar, this.audioFrameCursor,
+          phaseCopyLimit, dropFrames);
+        if (quietCursor === this.audioFrameCursor) {
           if (this.phaseCorrectionFrames > 0) {
-            const insertFrames = Math.min(this.phaseCorrectionFrames, outputLimit - outputCursor);
+            const insertFrames = Math.min(stepFrames, outputLimit - outputCursor);
+            this.recordPhaseCorrection(this.audioSubmittedFrames, insertFrames);
             applyDitherFloorToRange(output, outputCursor, outputCursor + insertFrames);
             outputCursor += insertFrames;
             this.audioSubmittedFrames += insertFrames;
             this.phaseCorrectionFrames -= insertFrames;
             continue;
           }
-          const dropFrames = Math.min(-this.phaseCorrectionFrames,
-            bar.frameCount - this.audioFrameCursor, outputLimit - outputCursor);
+          this.recordPhaseCorrection(this.audioSubmittedFrames, -dropFrames);
           this.audioFrameCursor += dropFrames;
           this.phaseCorrectionFrames += dropFrames;
-          if (this.audioFrameCursor >= bar.frameCount) {
-            this.advanceAudioBar();
-          }
           continue;
+        } else if (quietCursor > this.audioFrameCursor) {
+          phaseCopyLimit = quietCursor - this.audioFrameCursor;
         }
       }
 
-      const copyFrames = Math.min(bar.frameCount - this.audioFrameCursor, outputLimit - outputCursor);
+      const copyFrames = Math.min(bar.frameCount - this.audioFrameCursor,
+        outputLimit - outputCursor, phaseCopyLimit);
       const preview = this.drumPreviewPlan;
       if (preview !== undefined && !preview.armed && !preview.renderedFill &&
         this.activeSequence === preview.rendered.plan.sequence) {
@@ -2617,7 +2751,10 @@ export class MetronomeEngine {
     if (transition.token !== this.runToken) {
       return;
     }
-    this.phaseCorrectionFrames = 0;
+    this.resetPhaseCorrectionState();
+    this.audioWriteDiscontinuity = false;
+    this.audioClockContinuityLost = false;
+    this.backgroundPlaybackInterrupted = false;
     if (transition.kind === 'pause') {
       this.audioStreaming = false;
       if (DEBUG) {
@@ -2649,6 +2786,7 @@ export class MetronomeEngine {
       (transition.timelineElapsedFrames ?? 0);
     this.audioTimelineOutputLatencyMs = transition.outputLatencyMs;
     this.audioTimelineToken = transition.token;
+    this.phaseFeedbackStartFrame = transition.targetFrame;
     this.audioSequenceTransportRevision = this.transportRevision;
     const preview = this.drumPreviewPlan;
     if (preview !== undefined && !preview.armed && preview.started &&
@@ -2836,9 +2974,11 @@ export class MetronomeEngine {
       return;
     }
     if (transition.kind === 'play' && !transition.routeRephase &&
-      this.transportPreviewStartPositionBeats !== undefined) {
-      // A physical recovery starts later on the same elapsed preview timeline;
-      // its PCM seek includes the source offset, its clock origin does not.
+      (this.transportPreviewStartPositionBeats !== undefined ||
+      (this.phaseCorrectionEnabled && this.transportUsesSharedClock))) {
+      // Recovery resumes a later beat of the same transport, not elapsed zero.
+      // Otherwise feedback would mistake the entire pre-recovery duration for
+      // drift. Preview seeks include a source offset but share this elapsed origin.
       transition.timelineElapsedFrames = Math.round(Math.max(0,
         transition.beatIndex - this.transportStartBeatIndex) * 60 * SAMPLE_RATE / this.transportBpm);
     }
@@ -3265,12 +3405,12 @@ export class MetronomeEngine {
       this.schedulePauseFromLeader(pendingPauseAt + this.offsetMs);
       if (pendingPauseAt > MonotonicClock.nowMs()) {
         this.timerId = setTimeout(() => this.emitBeatAndScheduleNext(token),
-          Math.max(0, this.nextBeatAtMs - MonotonicClock.nowMs()));
+          Math.max(0, this.localTimeForTransportGrid(this.nextBeatAtMs, MonotonicClock.nowMs()) - MonotonicClock.nowMs()));
       }
       return false;
     }
     this.timerId = setTimeout(() => this.emitBeatAndScheduleNext(token),
-      Math.max(0, this.nextBeatAtMs - MonotonicClock.nowMs()));
+      Math.max(0, this.localTimeForTransportGrid(this.nextBeatAtMs, MonotonicClock.nowMs()) - MonotonicClock.nowMs()));
     let abandoned = false;
     const current = (): boolean => !abandoned && token === this.runToken && this.running &&
       this.scheduledPauseAtLocalMs === undefined;
@@ -3406,15 +3546,16 @@ export class MetronomeEngine {
       const earliestAudible = now + queueMs + Math.max(oldCompensationMs, compensationMs) +
         ROUTE_REPHASE_GUARD_MS;
       const beatMs = 60000 / Math.max(1, this.transportBpm);
-      let steps = Math.max(0, Math.ceil((earliestAudible - this.transportStartLocalMs) / beatMs));
-      let audibleAt = this.transportStartLocalMs + steps * beatMs;
+      const adjustment = this.transportClockAdjustmentAt(now);
+      let steps = Math.max(0, Math.ceil((earliestAudible + adjustment - this.transportStartLocalMs) / beatMs));
+      let audibleAt = this.localTimeForTransportGrid(this.transportStartLocalMs + steps * beatMs, now);
       let targetFrame = this.estimateTargetStreamFrame(audibleAt - compensationMs);
       // A slow timestamp query can consume the guard. Choose a later real beat,
       // never clamp an already-late beat into the queue at a non-beat time.
       for (let i = 0; i < 8 && targetFrame < this.audioSubmittedFrames +
         Math.round(ROUTE_REPHASE_GUARD_MS * SAMPLE_RATE / 1000); i++) {
         steps++;
-        audibleAt = this.transportStartLocalMs + steps * beatMs;
+        audibleAt = this.localTimeForTransportGrid(this.transportStartLocalMs + steps * beatMs, now);
         targetFrame = this.estimateTargetStreamFrame(audibleAt - compensationMs);
       }
       if (targetFrame < this.audioSubmittedFrames +
@@ -3528,6 +3669,7 @@ export class MetronomeEngine {
 
   private resetAudioTimestampState(): void {
     this.productionClockSample = undefined;
+    this.audioClockContinuityLost = false;
     this.audioTimelineToken = -1;
     this.audioTimelineLeadFrames = 0;
     this.audioTimelineOutputLatencyMs = 0;
@@ -3544,7 +3686,7 @@ export class MetronomeEngine {
     this.lastAudioSampleMonoMs = 0;
     this.lastTimestampQueryMonoMs = -1;
     this.queueDepthFrames = 0;
-    this.phaseCorrectionFrames = 0;
+    this.resetPhaseCorrectionState();
     this.calibrationFrameOriginExact = false;
   }
 
@@ -3827,26 +3969,105 @@ export class MetronomeEngine {
     this.readRenderedStreamFrames(renderer, MonotonicClock.nowMs());
   }
 
+  private resetPhaseCorrectionState(): void {
+    this.phaseCorrectionFrames = 0;
+    this.phaseCorrectionHead = 0;
+    this.phaseCorrectionCount = 0;
+    this.phaseCorrectionCompletedFrames = 0;
+    this.phaseCorrectionSubmittedFrames = 0;
+    this.phaseCorrectionAudibleFrames = 0;
+    this.phaseFeedbackStartFrame = -1;
+    this.phaseFeedbackSampleFresh = false;
+    this.phaseCorrectionCheckAtMs = -1;
+    this.audioClockLocked = false;
+    this.lastTimestampQueryMonoMs = -1;
+  }
+
+  private recordPhaseCorrection(streamFrame: number, deltaFrames: number): void {
+    const index = (this.phaseCorrectionHead + this.phaseCorrectionCount) % AUDIO_PHASE_CORRECTION_CAPACITY;
+    this.phaseCorrectionStarts[index] = streamFrame;
+    this.phaseCorrectionDeltas[index] = deltaFrames;
+    this.phaseCorrectionCount++;
+    this.phaseCorrectionSubmittedFrames += deltaFrames;
+  }
+
+  private audiblePhaseCorrectionAt(streamFrame: number): number {
+    while (this.phaseCorrectionCount > 0) {
+      const start = this.phaseCorrectionStarts[this.phaseCorrectionHead];
+      const delta = this.phaseCorrectionDeltas[this.phaseCorrectionHead];
+      if (streamFrame < start + Math.max(0, delta)) {
+        // During inserted silence source time is held; a dropped source span
+        // advances it only when its first surviving output sample is audible.
+        return this.phaseCorrectionCompletedFrames +
+          (delta > 0 ? Math.max(0, Math.min(delta, streamFrame - start)) : 0);
+      }
+      this.phaseCorrectionCompletedFrames += delta;
+      this.phaseCorrectionHead = (this.phaseCorrectionHead + 1) % AUDIO_PHASE_CORRECTION_CAPACITY;
+      this.phaseCorrectionCount--;
+    }
+    return this.phaseCorrectionCompletedFrames;
+  }
+
+  private findQuietPhaseCorrectionCursor(bar: RenderedBar, start: number,
+    availableFrames: number, dropFrames: number): number {
+    const guard = AUDIO_PHASE_QUIET_GUARD_FRAMES;
+    const end = Math.min(bar.frameCount - dropFrames - guard, start + availableFrames);
+    for (let cursor = Math.max(guard, start); cursor < end; cursor++) {
+      let quiet = true;
+      // A zero crossing is not silence. Require quiet PCM on both sides of
+      // the splice as well as every dropped sample, including cymbal tails.
+      for (let sample = cursor - guard; sample <= cursor + dropFrames + guard; sample++) {
+        if (Math.abs(bar.samples[sample]) > AUDIO_PHASE_QUIET_SAMPLE_LIMIT) {
+          quiet = false;
+          break;
+        }
+      }
+      if (quiet) {
+        return cursor;
+      }
+    }
+    // A continuous tone has no safe gap. Leave the request pending instead of
+    // cutting its tail; rate correction for sustained PCM needs a resampler.
+    return -1;
+  }
+
   private readAudioPlayheadMs(nowMs: number): number | undefined {
+    this.phaseFeedbackSampleFresh = false;
     const renderer = this.renderer;
-    if (renderer === undefined || !this.rendererStarted) {
+    if (renderer === undefined || !this.rendererStarted ||
+      this.audioTimelineToken !== this.runToken || this.phaseFeedbackStartFrame < 0) {
       return undefined;
     }
-    if (this.audioClockLocked && this.lastTimestampQueryMonoMs >= 0 &&
-      nowMs - this.lastTimestampQueryMonoMs < 8) {
-      return this.lastAudioPlayheadMs + Math.max(0, nowMs - this.lastAudioSampleMonoMs);
-    }
     this.lastTimestampQueryMonoMs = nowMs;
+    const previousRawFrame = this.lastAudioRawFrame;
     const renderedFrames = this.readRenderedStreamFrames(renderer, nowMs);
     if (renderedFrames === undefined) {
       return this.audioClockLocked ?
         this.lastAudioPlayheadMs + Math.max(0, nowMs - this.lastAudioSampleMonoMs) : undefined;
     }
-    const playheadMs = (renderedFrames - this.audioTimelineLeadFrames) * 1000 / SAMPLE_RATE;
+    if (!Number.isFinite(this.lastAudioTimestampAgeMs) || this.lastAudioTimestampAgeMs < -1 ||
+      this.lastAudioTimestampAgeMs > AUDIO_PHASE_CLOCK_MAX_AGE_MS) {
+      return undefined;
+    }
+    if (previousRawFrame >= 0 && this.lastAudioRawFrame < previousRawFrame) {
+      // A changed frame coordinate cannot consume the correction ledger. Wait
+      // for a newly anchored transport/route before using feedback again.
+      this.audioClockContinuityLost = true;
+      this.resetPhaseCorrectionState();
+      return undefined;
+    }
+    const audibleStreamFrame = renderedFrames - this.audioTimelineOutputLatencyMs * SAMPLE_RATE / 1000;
+    if (audibleStreamFrame < this.phaseFeedbackStartFrame) {
+      return undefined;
+    }
+    this.phaseCorrectionAudibleFrames = this.audiblePhaseCorrectionAt(audibleStreamFrame);
+    const playheadMs = (renderedFrames - this.audioTimelineLeadFrames -
+      this.phaseCorrectionAudibleFrames) * 1000 / SAMPLE_RATE;
     if (!Number.isFinite(playheadMs)) {
       return undefined;
     }
     this.audioClockLocked = true;
+    this.phaseFeedbackSampleFresh = true;
     this.lastAudioPlayheadMs = playheadMs;
     this.lastAudioSampleMonoMs = nowMs;
     return playheadMs;
@@ -3873,6 +4094,7 @@ export class MetronomeEngine {
         console.warn(`[ClockDiag] exact frame epoch lost previous=${this.lastAudioRawFrame} ` +
           `current=${sample.framePos}`);
         this.calibrationFrameOriginExact = false;
+        this.audioClockContinuityLost = true;
         this.audioTimestampBaseReady = false;
         this.audioTimestampClockOffsetMs = undefined;
         this.lastAudioRawFrame = -1;
@@ -3932,6 +4154,9 @@ export class MetronomeEngine {
           `elapsedFrames=${elapsedFrames.toFixed(0)} playedEstimate=${playedEstimate.toFixed(0)} ` +
           `baseFrame=${this.audioTimestampBaseFrame.toFixed(0)}`);
       } else if (this.lastAudioRawFrame >= 0 && info.framePos < this.lastAudioRawFrame) {
+        // Other observers can see the regression before phase feedback does.
+        // Retain that evidence until a new transition proves the content origin.
+        this.audioClockContinuityLost = this.audioStreaming || this.audioClockContinuityLost;
         const previousBaseFrame = this.audioTimestampBaseFrame;
         if (this.calibrationFramePosRegressedBeyondQuantum(this.lastAudioRawFrame, info.framePos)) {
           // The legacy recovery remains unchanged, but its diagnostic cannot
@@ -4039,18 +4264,38 @@ export class MetronomeEngine {
     }
   }
 
-  /** 当前音频播放头相对墙钟时间轴的相位误差（帧）。正值=音频偏快，需插帧延迟；负值=音频偏慢，需丢帧追赶。 */
+  private canCorrectAudioPhase(): boolean {
+    return this.phaseCorrectionEnabled && this.running && this.audioStreaming && !this.audioClockContinuityLost &&
+      this.audioTimelineToken === this.runToken &&
+      this.audioSequenceTransportRevision === this.transportRevision &&
+      !this.activeSequenceFinished && !this.recoveringAudio && !this.outputRouteRephasePreparing &&
+      this.pendingAudioTransition === undefined && this.calibrationSignal === undefined &&
+      this.transportOutputCompensationOverrideMs === undefined &&
+      this.transportPreviewStartPositionBeats === undefined && this.drumPreviewPlan === undefined;
+  }
+
+  /** Residual after all queued corrections; positive means the audible source is early. */
   private measurePhaseErrorFrames(): number {
-    if (!this.audioClockLocked || !this.audioStreaming || this.activeSequenceFinished) {
-      return 0;
+    return this.readPhaseErrorFrames() ?? 0;
+  }
+
+  /** Unavailable feedback cannot prove continuity after a background suspension. */
+  private readPhaseErrorFrames(): number | undefined {
+    if (!this.canCorrectAudioPhase()) {
+      return undefined;
     }
     const nowMs = MonotonicClock.nowMs();
     const playhead = this.readAudioPlayheadMs(nowMs);
-    if (playhead === undefined) {
-      return 0;
+    if (playhead === undefined || !this.phaseFeedbackSampleFresh) {
+      return undefined;
     }
-    const expected = nowMs - this.transportStartLocalMs;
-    return Math.round((playhead - expected) * SAMPLE_RATE / 1000);
+    const expected = this.transportElapsedAt(nowMs);
+    // Submitted corrections can be hundreds of milliseconds ahead of the ear.
+    // Count those and pending work once, while keeping readAudioPlayheadMs an
+    // observation of the content that has actually reached acoustic output.
+    const inFlightFrames = this.phaseCorrectionSubmittedFrames - this.phaseCorrectionAudibleFrames;
+    return Math.round((playhead - expected) * SAMPLE_RATE / 1000) -
+      inFlightFrames - this.phaseCorrectionFrames;
   }
 
   private reportUnderflowIfNeeded(): void {
@@ -4075,13 +4320,26 @@ export class MetronomeEngine {
       renderer.state !== audio.AudioState.STATE_RUNNING || this.activeSequenceFinished) {
       return;
     }
-    // 播放中持续相位锁定：每拍评估一次相位误差，超出阈值就调度一小步插帧/丢帧，
-    // 实际校正会在 fillAudioData 的 dither floor（静音区）中渐进完成。
+    // This runs once per beat. Phase feedback uses only fresh hardware
+    // observations; unavailable timestamps retain stall detection, not steering.
+    const firstCheck = this.phaseCorrectionCheckAtMs < 0;
+    const elapsedMs = firstCheck ? 0 : Math.max(0,
+      Math.min(AUDIO_PHASE_CORRECTION_MAX_INTERVAL_MS, nowMs - this.phaseCorrectionCheckAtMs));
+    this.phaseCorrectionCheckAtMs = nowMs;
+    const budgetFrames = firstCheck ? AUDIO_PHASE_LOCK_MAX_STEP_FRAMES :
+      Math.floor(elapsedMs * SAMPLE_RATE * AUDIO_PHASE_CORRECTION_RATE_PPM / 1e9);
     const phaseError = this.measurePhaseErrorFrames();
-    if (Math.abs(phaseError) >= AUDIO_PHASE_LOCK_THRESHOLD_FRAMES) {
-      const step = Math.max(-AUDIO_PHASE_LOCK_MAX_STEP_FRAMES,
-        Math.min(AUDIO_PHASE_LOCK_MAX_STEP_FRAMES, phaseError));
-      this.phaseCorrectionFrames += step;
+    if (budgetFrames > 0 && Math.abs(phaseError) >= AUDIO_PHASE_LOCK_THRESHOLD_FRAMES) {
+      const requested = Math.max(-budgetFrames, Math.min(budgetFrames, phaseError));
+      // No quiet window must not accumulate seconds of future insert/drop work.
+      // Keep at most one interval's budget pending; residual remains observable.
+      const pending = Math.max(-budgetFrames, Math.min(budgetFrames, this.phaseCorrectionFrames + requested));
+      const step = pending - this.phaseCorrectionFrames;
+      this.phaseCorrectionFrames = pending;
+      console.info(`[PhaseLockDiag] residualFrames=${phaseError} stepFrames=${step} ` +
+        `pendingFrames=${this.phaseCorrectionFrames} ` +
+        `queuedFrames=${this.phaseCorrectionSubmittedFrames - this.phaseCorrectionAudibleFrames} ` +
+        `clockAdjustmentMs=${this.transportClockAdjustmentAt(nowMs).toFixed(3)}`);
     }
     if (this.observedWriteCallbackCount !== this.writeCallbackCount) {
       this.observedWriteCallbackCount = this.writeCallbackCount;
@@ -4093,8 +4351,85 @@ export class MetronomeEngine {
     }
   }
 
+  /** Background policy mute need not send audioInterrupt; inspect continuity on return. */
+  async restoreAfterForeground(continuityLost: boolean = false): Promise<void> {
+    // Native policy can mute playback while PCM callbacks keep flowing. Carry
+    // task-loss evidence across a concurrent foreground check or route wait.
+    this.backgroundPlaybackInterrupted = this.backgroundPlaybackInterrupted || continuityLost;
+    const request = ++this.foregroundContinuityRequest;
+    const token = this.runToken;
+    const revision = this.transportRevision;
+    const deadline = MonotonicClock.nowMs() + AUDIO_FOREGROUND_RECHECK_TIMEOUT_MS;
+    let previousPhaseMs = 0;
+    let consecutiveErrors = 0;
+    for (;;) {
+      // Every wait can hand ownership to a new transport, an incoming call or
+      // calibration. A stale foreground check must never restart that owner.
+      const excluded = request !== this.foregroundContinuityRequest || token !== this.runToken ||
+        revision !== this.transportRevision || !this.running || this.audioFocusInterrupted ||
+        this.activeSequenceFinished || this.transportOutputCompensationOverrideMs !== undefined ||
+        this.transportPreviewStartPositionBeats !== undefined || this.drumPreviewPlan !== undefined ||
+        this.calibrationSignal !== undefined;
+      if (excluded) {
+        console.info(`[ForegroundPlaybackDiag] stage=skipped token=${token} currentToken=${this.runToken} ` +
+          `running=${this.running} focusInterrupted=${this.audioFocusInterrupted}`);
+        return;
+      }
+      const now = MonotonicClock.nowMs();
+      const busy = this.recoveringAudio || this.pendingAudioTransition !== undefined ||
+        this.outputRouteRephasePreparing;
+      const renderer = this.renderer;
+      if (renderer === undefined) {
+        console.info(`[ForegroundPlaybackDiag] stage=skipped reason=no-renderer token=${token}`);
+        return;
+      }
+      if (!busy) {
+        const stalled = now - this.lastWriteProgressMs >= AUDIO_CALLBACK_STALL_MS;
+        const phaseFrames = this.readPhaseErrorFrames();
+        const phaseMs = phaseFrames === undefined ? undefined : phaseFrames * 1000 / SAMPLE_RATE;
+        console.info(`[ForegroundPlaybackDiag] stage=check writeGap=${this.audioWriteDiscontinuity} ` +
+          `backgroundInterrupted=${this.backgroundPlaybackInterrupted} ` +
+          `clockLost=${this.audioClockContinuityLost} stalled=${stalled} state=${renderer.state} ` +
+          `phaseMs=${phaseMs === undefined ? 'unavailable' : phaseMs.toFixed(1)}`);
+        if (this.backgroundPlaybackInterrupted || this.audioWriteDiscontinuity || this.audioClockContinuityLost || stalled ||
+          renderer.state !== audio.AudioState.STATE_RUNNING) {
+          await this.recoverAudio('foreground continuity lost');
+          return;
+        }
+        if (phaseMs !== undefined) {
+          if (Math.abs(phaseMs) < AUDIO_FOREGROUND_REPHASE_MS) { return; }
+          consecutiveErrors = phaseMs * previousPhaseMs > 0 ? consecutiveErrors + 1 : 1;
+          previousPhaseMs = phaseMs;
+          if (consecutiveErrors >= 2) {
+            await this.recoverAudio('foreground phase mismatch confirmed');
+            return;
+          }
+        } else {
+          consecutiveErrors = 0;
+          // The explicit A/B switch disables phase feedback; unavailable API
+          // samples in that mode must not silently enable a different correction.
+          if (!this.phaseCorrectionEnabled || !this.transportUsesSharedClock) { return; }
+          if (now >= deadline && this.audioStreaming && this.audioTimelineToken === token &&
+            this.audioSequenceTransportRevision === revision) {
+            await this.recoverAudio('foreground phase clock remained unavailable');
+            return;
+          }
+        }
+      } else {
+        consecutiveErrors = 0;
+      }
+      if (now >= deadline) {
+        console.info(`[ForegroundPlaybackDiag] stage=deferred token=${token} ` +
+          `recovering=${this.recoveringAudio} transition=${this.pendingAudioTransition !== undefined} ` +
+          `routePreparing=${this.outputRouteRephasePreparing}`);
+        return;
+      }
+      await MetronomeEngine.delay(Math.min(AUDIO_FOREGROUND_RECHECK_MS, deadline - now));
+    }
+  }
+
   private async recoverAudio(reason: string): Promise<void> {
-    if (!this.running || this.recoveringAudio || this.activeSequenceFinished) { return; }
+    if (!this.running || this.audioFocusInterrupted || this.recoveringAudio || this.activeSequenceFinished) { return; }
     // Switching endpoints can emit a focus-resume event while route preparation
     // already owns the renderer. A second recovery would overwrite its target.
     if (this.outputRouteRephasePreparing) { return; }
@@ -4108,18 +4443,26 @@ export class MetronomeEngine {
     }
     this.recoveringAudio = true;
     const token = this.runToken;
-    const now = MonotonicClock.nowMs();
-    const interval = 60000 / this.transportBpm;
-    const skipped = Math.max(0, Math.ceil((now - this.nextBeatAtMs) / interval));
-    const beatIndex = this.beatIndex + skipped;
-    const localStart = this.nextBeatAtMs + skipped * interval;
-    const countInBeats = Math.max(0,
-      this.transportStartBeatIndex + this.transportCountInBeats - beatIndex);
-    console.warn(`MetronomeEngine audio recovery: ${reason}, beat=${beatIndex}, token=${token}`);
     try {
       // Recovery is the exceptional path where rebuilding the physical stream
       // is intentional; normal pause/resume/configuration changes keep it alive.
       await this.haltRenderer();
+      if (token !== this.runToken || !this.running || this.audioFocusInterrupted) { return; }
+      const now = MonotonicClock.nowMs();
+      const interval = 60000 / this.transportBpm;
+      const compensation = this.transportOutputCompensationOverrideMs ?? this.outputLatencyMs;
+      // Select after stop completes, with enough hardware lead for a cold start.
+      // Clamping an already-late target would resume the right beat at the wrong time.
+      const earliestAudible = now + AUDIO_PREROLL_MS + Math.max(0, compensation);
+      const adjustment = this.transportClockAdjustmentAt(now);
+      const elapsedBeats = Math.max(0,
+        Math.ceil((earliestAudible - this.transportStartLocalMs + adjustment) / interval));
+      const beatIndex = this.transportStartBeatIndex + elapsedBeats;
+      const localStart = this.localTimeForTransportGrid(this.transportStartLocalMs + elapsedBeats * interval, now);
+      const countInBeats = Math.max(0,
+        this.transportStartBeatIndex + this.transportCountInBeats - beatIndex);
+      console.warn(`MetronomeEngine audio recovery: ${reason}, beat=${beatIndex}, token=${token} ` +
+        `headroomMs=${(localStart - now).toFixed(1)}`);
       await this.startAudioStream(localStart, beatIndex, countInBeats, token,
         this.transportOutputCompensationOverrideMs);
     } catch (err) {

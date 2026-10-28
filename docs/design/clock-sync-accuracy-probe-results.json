@@ -1,0 +1,397 @@
+{
+  "status": "PASS",
+  "passMeaning": "Reproductions and prototype hypotheses passed; this is not production synchronization certification.",
+  "command": "/Applications/DevEco-Studio.app/Contents/tools/node/bin/node scripts/tests/clock-sync-accuracy-probe.cjs /Applications/DevEco-Studio.app/Contents/tools/hvigor/hvigor/node_modules/typescript/lib/typescript.js",
+  "sourceSha256": {
+    "entry/src/main/ets/sync/ClockSync.ets": "cfc9c149b8146cea58b5673afaa91b6126ddb509bbff8b6c7c11d32b758d58f6",
+    "entry/src/main/ets/audio/MetronomeEngine.ets": "7c45f805d37bee2f66c90a163629c53bc63b4f7ac60a4ffa537e933ee7636cf6"
+  },
+  "prototypeParameters": {
+    "minimumSamples": 3,
+    "minimumSpanMs": 10000,
+    "maximumAbsSkewPpm": 1000,
+    "validation": "Experimental only; requires device and network measurements."
+  },
+  "aggregation": {
+    "threeSamples": {
+      "samples": [
+        {
+          "offsetMs": 0,
+          "rttMs": 2
+        },
+        {
+          "offsetMs": 40,
+          "rttMs": 100
+        },
+        {
+          "offsetMs": 45,
+          "rttMs": 110
+        }
+      ],
+      "trueOffsetMs": 0,
+      "baseline": {
+        "offsetMs": 20,
+        "rttMs": 2,
+        "impliedIntervalMs": [
+          19,
+          21
+        ],
+        "containsTruth": false
+      },
+      "prototype": {
+        "offsetMs": 0,
+        "rttMs": 2,
+        "impliedIntervalMs": [
+          -1,
+          1
+        ],
+        "containsTruth": true
+      }
+    },
+    "fiveSamples": {
+      "samples": [
+        {
+          "offsetMs": 0,
+          "rttMs": 2
+        },
+        {
+          "offsetMs": 40,
+          "rttMs": 100
+        },
+        {
+          "offsetMs": 45,
+          "rttMs": 110
+        },
+        {
+          "offsetMs": 10,
+          "rttMs": 200
+        },
+        {
+          "offsetMs": 0,
+          "rttMs": 300
+        }
+      ],
+      "trueOffsetMs": 0,
+      "baseline": {
+        "offsetMs": 40,
+        "rttMs": 2,
+        "impliedIntervalMs": [
+          39,
+          41
+        ],
+        "containsTruth": false
+      },
+      "prototype": {
+        "offsetMs": 40,
+        "rttMs": 100,
+        "impliedIntervalMs": [
+          -10,
+          90
+        ],
+        "containsTruth": true
+      }
+    },
+    "note": "Production takes ceil(n/2), capped at 3: three inputs select two candidates, five select three."
+  },
+  "shortSpanJitter": {
+    "samples": [
+      {
+        "atMs": 0,
+        "offsetMs": 0,
+        "rttMs": 12
+      },
+      {
+        "atMs": 100,
+        "offsetMs": 4,
+        "rttMs": 12
+      }
+    ],
+    "evaluateAtMs": 5100,
+    "trueOffsetMs": 0,
+    "baseline": {
+      "offsetMs": 204,
+      "errorMs": 204,
+      "skewPpm": 40000,
+      "hasSkewFit": true
+    },
+    "prototype": {
+      "offsetMs": 4,
+      "errorMs": 4,
+      "skewPpm": 0,
+      "hasSkewFit": false
+    }
+  },
+  "asymmetry": {
+    "timestampsMs": {
+      "t0": 10000,
+      "t1": 10009,
+      "t2": 10009,
+      "t3": 10010
+    },
+    "indistinguishableWorlds": [
+      {
+        "trueOffsetMs": 0,
+        "forwardDelayMs": 9,
+        "reverseDelayMs": 1,
+        "errorMs": 4
+      },
+      {
+        "trueOffsetMs": 4,
+        "forwardDelayMs": 5,
+        "reverseDelayMs": 5,
+        "errorMs": 0
+      }
+    ],
+    "baseline": {
+      "offsetMs": 4,
+      "rttMs": 10,
+      "quality": "good"
+    },
+    "prototype": {
+      "offsetMs": 4,
+      "rttMs": 10
+    },
+    "conclusion": "Same timestamps cannot distinguish path asymmetry from clock offset; pairing or skew gates cannot fix it."
+  },
+  "invalidBatch": {
+    "inputDescription": [
+      "NaN offset",
+      "negative RTT",
+      "infinite RTT"
+    ],
+    "previousValidOffsetMs": 5000,
+    "baseline": {
+      "aggregate": {
+        "offsetMs": 0,
+        "rttMs": 999
+      },
+      "offsetAfterApplyingMs": 0
+    },
+    "prototype": {
+      "aggregate": null,
+      "offsetAfterRejectingMs": 5000
+    },
+    "limitation": "Direct estimator API path, not a full network batch or SessionController admission-policy test."
+  },
+  "stableDrift": {
+    "samples": [
+      {
+        "atMs": 0,
+        "offsetMs": 0,
+        "rttMs": 12
+      },
+      {
+        "atMs": 5000,
+        "offsetMs": 0.5,
+        "rttMs": 12
+      },
+      {
+        "atMs": 10000,
+        "offsetMs": 1,
+        "rttMs": 12
+      },
+      {
+        "atMs": 15000,
+        "offsetMs": 1.5,
+        "rttMs": 12
+      },
+      {
+        "atMs": 20000,
+        "offsetMs": 2,
+        "rttMs": 12
+      },
+      {
+        "atMs": 25000,
+        "offsetMs": 2.5,
+        "rttMs": 12
+      },
+      {
+        "atMs": 30000,
+        "offsetMs": 3,
+        "rttMs": 12
+      },
+      {
+        "atMs": 35000,
+        "offsetMs": 3.5,
+        "rttMs": 12
+      },
+      {
+        "atMs": 40000,
+        "offsetMs": 4,
+        "rttMs": 12
+      },
+      {
+        "atMs": 45000,
+        "offsetMs": 4.5,
+        "rttMs": 12
+      },
+      {
+        "atMs": 50000,
+        "offsetMs": 5,
+        "rttMs": 12
+      },
+      {
+        "atMs": 55000,
+        "offsetMs": 5.5,
+        "rttMs": 12
+      },
+      {
+        "atMs": 60000,
+        "offsetMs": 6,
+        "rttMs": 12
+      }
+    ],
+    "evaluateAtMs": 65000,
+    "trueOffsetMs": 6.5,
+    "baseline": {
+      "offsetMs": 6.499999999999991,
+      "errorMs": -8.881784197001252e-15,
+      "skewPpm": 99.9999999999998,
+      "hasSkewFit": true
+    },
+    "prototype": {
+      "offsetMs": 6.499999999999991,
+      "errorMs": -8.881784197001252e-15,
+      "skewPpm": 99.9999999999998,
+      "hasSkewFit": true
+    }
+  },
+  "slowPacket": {
+    "samples": [
+      {
+        "atMs": 0,
+        "offsetMs": 1,
+        "rttMs": 12
+      },
+      {
+        "atMs": 5000,
+        "offsetMs": -1,
+        "rttMs": 12
+      },
+      {
+        "atMs": 10000,
+        "offsetMs": 1,
+        "rttMs": 12
+      },
+      {
+        "atMs": 15000,
+        "offsetMs": -1,
+        "rttMs": 12
+      },
+      {
+        "atMs": 20000,
+        "offsetMs": 1,
+        "rttMs": 12
+      },
+      {
+        "atMs": 25000,
+        "offsetMs": -1,
+        "rttMs": 12
+      },
+      {
+        "atMs": 30000,
+        "offsetMs": 1,
+        "rttMs": 12
+      },
+      {
+        "atMs": 35000,
+        "offsetMs": -1,
+        "rttMs": 12
+      },
+      {
+        "atMs": 40000,
+        "offsetMs": 1,
+        "rttMs": 12
+      },
+      {
+        "atMs": 45000,
+        "offsetMs": -1,
+        "rttMs": 12
+      },
+      {
+        "atMs": 50000,
+        "offsetMs": -150,
+        "rttMs": 380
+      }
+    ],
+    "evaluateAtMs": 55000,
+    "trueOffsetMs": 0,
+    "baseline": {
+      "offsetMs": -0.4735034749210969,
+      "errorMs": -0.4735034749210969,
+      "skewPpm": -14.110314145754694,
+      "hasSkewFit": true
+    },
+    "prototype": {
+      "offsetMs": -0.47350347492109696,
+      "errorMs": -0.47350347492109696,
+      "skewPpm": -14.110314145754694,
+      "hasSkewFit": true
+    },
+    "equalWeightControlOffsetMs": -54.81818181818174
+  },
+  "capExperiment": {
+    "samples": [
+      {
+        "atMs": 0,
+        "offsetMs": 0,
+        "rttMs": 100
+      },
+      {
+        "atMs": 5000,
+        "offsetMs": 20,
+        "rttMs": 100
+      },
+      {
+        "atMs": 10000,
+        "offsetMs": 40,
+        "rttMs": 100
+      }
+    ],
+    "evaluateAtMs": 15000,
+    "trueOffsetMs": 0,
+    "baseline": {
+      "offsetMs": 59.999999999999986,
+      "errorMs": 59.999999999999986,
+      "skewPpm": 3999.999999999999,
+      "hasSkewFit": true
+    },
+    "prototype": {
+      "offsetMs": 29.999999999999996,
+      "errorMs": 29.999999999999996,
+      "skewPpm": 1000,
+      "hasSkewFit": true
+    }
+  },
+  "continuousPlayback": {
+    "executedMethods": [
+      "MetronomeEngine.setOffsetMs",
+      "MetronomeEngine.measurePhaseErrorFrames"
+    ],
+    "defaultLockGate": {
+      "audioStreaming": true,
+      "rendererPresent": true,
+      "audioClockLockedBefore": false,
+      "audioClockLockedAfter": false,
+      "phaseErrorFrames": 0,
+      "playheadReadCount": 0,
+      "renderedFrameReadCount": 0
+    },
+    "elapsedMs": 600000,
+    "relativeDriftPpm": 100,
+    "remoteElapsedErrorMs": 60,
+    "appliedOffsetBeforeMs": 0,
+    "appliedOffsetAfterMs": 60,
+    "transportStartLocalMs": 1000,
+    "phaseErrorBeforeFrames": 0,
+    "phaseErrorAfterFrames": 0,
+    "limitation": "readAudioPlayheadMs is mocked to an ideal local DAC; no renderer or acoustic accuracy measured"
+  },
+  "limitations": [
+    "Synthetic deterministic inputs; no Wi-Fi P2P, scheduling load, packet timestamp capture or network transport exercised.",
+    "TypeScript transpilation with dependency mocks is not an ArkTS device build.",
+    "No acoustic output, Bluetooth route, output latency calibration, hardware timestamp validity or audible glitch measurement.",
+    "Prototype does not repair the playback clock-domain disconnect, guarantee convergence or remove fixed network asymmetry.",
+    "A 1000 ppm cap can suppress real drift beyond that experiment parameter; no universal hardware bound is asserted."
+  ]
+}

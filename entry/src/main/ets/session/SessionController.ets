@@ -38,7 +38,7 @@ import {
 import { SessionServer } from '../network/socket/SessionServer';
 import { SessionClient } from '../network/socket/SessionClient';
 import { SessionPeerConnection } from '../network/transport/SessionPeerConnection';
-import { ClockSyncEstimator, SyncSample } from '../sync/ClockSync';
+import { ClockSyncEstimator, ClockSyncMeasurementError, SyncSample } from '../sync/ClockSync';
 import {
   P2pRoomInvitation,
   randomAuthNonce,
@@ -541,6 +541,14 @@ export class SessionController {
 
   getOffsetMs(): number {
     return this.clockSync.getOffsetMs();
+  }
+
+  getClockSkewPpm(): number {
+    return this.isLeader ? 0 : this.clockSync.getSkewPpm();
+  }
+
+  getClockMappingValidUntilMs(): number {
+    return this.isLeader ? Number.POSITIVE_INFINITY : this.clockSync.getMappingValidUntilMs();
   }
 
   getRttMs(): number {
@@ -1743,11 +1751,16 @@ export class SessionController {
     let result = 'failure';
     let sampleOffset = 'unavailable';
     let sampleRtt = 'unavailable';
+    let clockReason = 'measurement_failed';
     try {
       const sample = await this.measureClockSync(PING_SAMPLES);
       sampleOffset = sample.offsetMs.toFixed(2);
       sampleRtt = sample.rttMs.toFixed(2);
-      this.clockSync.applySample(sample);
+      const admission = ClockSyncEstimator.getSampleReadiness(sample);
+      clockReason = admission.reason;
+      if (!admission.ready || !this.clockSync.applySample(sample)) {
+        throw new ClockSyncMeasurementError('clock preparation rejected: ' + clockReason);
+      }
       this.scheduleRandomAvatarReveals();
       this.notifyUi();
       result = 'success';
@@ -1757,11 +1770,20 @@ export class SessionController {
     }
     const audioReady = audioReadyWork === undefined || await audioReadyWork;
     if (!audioReady) { result = 'failure'; }
+    // Audio preparation can outlive the accepted clock sample. Recheck at ACK,
+    // not only before that await; READY covers this measurement, not future delivery.
+    const readiness = this.clockSync.getReadiness();
+    if (result === 'success' && !readiness.ready) {
+      result = 'failure';
+      clockReason = readiness.reason;
+    }
     console.info(`[TransportPrepareDiag] role=member stage=finish id=${payload.id} result=${result} ` +
       `requestedSampleCount=${PING_SAMPLES} actualSampleCount=${actualSampleCount} reused=${reused} ` +
       `elapsedMs=${(MonotonicClock.nowMs() - startedAtMs).toFixed(1)} ` +
       `offsetBeforeMs=${offsetBeforeMs.toFixed(2)} sampleOffsetMs=${sampleOffset} ` +
-      `usedOffsetMs=${this.clockSync.getOffsetMs().toFixed(2)} rttMs=${sampleRtt}`);
+      `usedOffsetMs=${this.clockSync.getOffsetMs().toFixed(2)} rttMs=${sampleRtt} ` +
+      `clockReason=${clockReason} sampleAgeMs=${readiness.sampleAgeMs.toFixed(1)} ` +
+      `clockErrorEstimateMs=${readiness.errorEstimateMs.toFixed(2)} clockMode=${readiness.mode}`);
     if (this.isMemberTransportConnected()) {
       try {
         await this.sendToLeader(createMessage('TRANSPORT_READY', {
@@ -1878,16 +1900,26 @@ export class SessionController {
     }
     try {
       const sample = await this.measureClockSync(5);
+      const admission = ClockSyncEstimator.getSampleReadiness(sample);
+      if (!admission.ready) {
+        throw new ClockSyncMeasurementError('clock resync rejected: ' + admission.reason);
+      }
       const delta = Math.abs(sample.offsetMs - this.clockSync.getOffsetMs());
-      if (delta > 3) {
-        this.clockSync.smoothAdjust(sample);
-      } else {
-        this.clockSync.applySample(sample);
+      const accepted = delta > 3 ? this.clockSync.smoothAdjust(sample) : this.clockSync.applySample(sample);
+      if (!accepted) {
+        throw new ClockSyncMeasurementError('clock resync sample out of order');
       }
       this.consecutiveResyncFailures = 0;
       this.scheduleRandomAvatarReveals();
       this.notifyUi();
     } catch (_e) {
+      if ((_e as Error).name === 'ClockSyncMeasurementError') {
+        // Receiving unusable timestamps proves the peer is reachable. Preserve
+        // the last mapping (with its expiry) without treating poor precision as a disconnect.
+        this.consecutiveResyncFailures = 0;
+        console.info(`[ClockFitDiag] action=quality-rejected reason=${(_e as Error).message}`);
+        return;
+      }
       this.consecutiveResyncFailures += 1;
       if (this.consecutiveResyncFailures >= MEMBER_RESYNC_FAILURE_LIMIT &&
         this.remoteSessionEndReason === undefined) {

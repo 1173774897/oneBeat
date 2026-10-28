@@ -38,6 +38,8 @@ function harness() {
     setTransportPreparationHandler(handler) { this.prepareAudio = handler; }
     getRemoteSessionEndReason() { return undefined; }
     getOffsetMs() { return 0; }
+    getClockSkewPpm() { return 0; }
+    getClockMappingValidUntilMs() { return Infinity; }
     setBeatIndex() {}
     completeCountIn() {}
   }
@@ -54,6 +56,7 @@ function harness() {
     '../common/UserFeedback': { showUserNotice() {}, logUserFailure: (...args) => failures.push(args) },
     '../store/EntitlementStore': { isProDrumMachineAccessible: () => true },
     '../session/SessionBackgroundKeeper': { SessionBackgroundKeeper: {
+      async ensurePlaybackReady() {},
       setControlHandler() {}, async updatePlaybackState() {}
     } },
     '@kit.ArkUI': { router: {} }
@@ -82,6 +85,27 @@ function harness() {
       await flush();
     }
   };
+}
+
+async function testClockExperimentOwnership() {
+  const ready = harness();
+  assert.equal(ready.engine.phaseCorrectionEnabled, true);
+  assert.equal(ready.session.configureSharedClockExperiment(false), true);
+  assert.equal(ready.session.configureSharedClockExperiment(true), true);
+  assert.equal(ready.engine.phaseCorrectionEnabled, true);
+  assert.equal(ready.session.configureSharedClockExperiment(false), true);
+  assert.equal(ready.engine.phaseCorrectionEnabled, false);
+  for (const boundary of ['playing', 'counting', 'preview', 'calibration', 'shutdown', 'streaming']) {
+    const h = harness();
+    assert.equal(h.session.configureSharedClockExperiment(false), true);
+    if (boundary === 'playing' || boundary === 'counting') h.session.controller.state = boundary;
+    if (boundary === 'preview') h.session.drumPreviewActive = true;
+    if (boundary === 'calibration') h.session.latencyCalibrationActive = true;
+    if (boundary === 'shutdown') h.session.shutdownOperation = Promise.resolve();
+    if (boundary === 'streaming') h.engine.audioStreaming = true;
+    assert.equal(h.session.configureSharedClockExperiment(true), false, `${boundary} owns audio configuration`);
+    assert.equal(h.engine.phaseCorrectionEnabled, false);
+  }
 }
 
 async function testColdAndCachedPcm() {
@@ -119,6 +143,7 @@ async function testOrdinaryAndStrictPreparation() {
   const strict = harness();
   strict.drum();
   const ready = strict.session.controller.prepareAudio();
+  await flush();
   assert.equal(strict.loads.length, 1);
   assert.equal(strict.timers.size, 0, 'Transport preparation retains its controller-owned budget without a second timeout');
   strict.loads[0].resolve();
@@ -220,6 +245,7 @@ async function testTimeoutAndFailure() {
 }
 
 async function main() {
+  await testClockExperimentOwnership();
   await testColdAndCachedPcm();
   await testOrdinaryAndStrictPreparation();
   await testConfigurationReplacement();
