@@ -48,7 +48,7 @@ function harness() {
     '../audio/MetronomeEngine': { MetronomeEngine: class { constructor() { return e; } } },
     '../audio/AudioOutputMonitor': { AudioOutputMonitor: { start() {}, stop() {} } },
     '../network/p2p/WifiP2pManager': { WifiP2pManager: class {} },
-    '../network/p2p/BleRoomDiscovery': { BleRoomDiscovery: class {} },
+    '../network/p2p/BleRoomDiscovery': { BleRoomDiscovery: class { setJoinRequestListener() {} setMemberDisplayName() {} } },
     '../network/p2p/P2pInvitation': {},
     '../common/Constants': { PROTOCOL_VERSION: 6, TRANSPORT_START_PREPARE_TIMEOUT_MS: BUDGET_MS },
     '../common/MonotonicClock': { MonotonicClock: { nowMs: () => h.now } },

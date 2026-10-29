@@ -96,7 +96,7 @@ function harness({ sampleBankClass, engineOptions = {}, drumAccess = () => true 
       start() {}, stop() {}, isBluetoothA2dpActive: () => true, isBuiltInSpeakerActive: () => false
     } },
     '../network/p2p/WifiP2pManager': { WifiP2pManager: class { async teardown() {} } },
-    '../network/p2p/BleRoomDiscovery': { BleRoomDiscovery: class { async stopLeaderAdvertising() {} } },
+    '../network/p2p/BleRoomDiscovery': { BleRoomDiscovery: class { async stopLeaderAdvertising() {} setJoinRequestListener() {} setMemberDisplayName() {} } },
     '../network/p2p/P2pInvitation': {},
     '../common/UserFeedback': { showUserNotice() {}, logUserFailure() {} },
     '../store/EntitlementStore': { isProDrumMachineAccessible: drumAccess },

@@ -15,6 +15,8 @@
 - `phase-resync.cjs`：大偏差一次性重新对齐（外放和蓝牙均适用；含冷却、噪声不触发、关闭包络时不触发），包络重算平移超过门槛后立即重新对齐，以及切换路由后等计数器新鲜且在走再对齐。
 - 包络测试另含：新建 renderer 首次启动直接用计数器原点（`origin-on/off` 调试切换）；重启后 45ms 内的首次读数作为冻结原点；重新校准只在启动 1 秒内生效。
 - `frame-map-broken-restart.cjs` 另含：冷启动目标被夹住超过 15ms 时改到共享网格上之后的拍重新对齐。
+- `ble-advertising-tag.cjs`、`ble-room-lookup.cjs`：按扫描响应里的加入码标签跳过其他房间，读不到标签时仍走 GATT；GATT 读取期间暂停扫描；查找时在同一连接上预先登记加入尝试；输码时预读邀请，命中即不再建连。
+- `p2p-join-readiness.cjs`：另含队长不在列表时立即重新发起 P2P 搜索。`home-navigation.cjs`：首页不在页面栈时重建首页。
 - `frame-map-broken-restart.cjs`：播放位置映射超过已写入数据（欠载期间计数器空转）时判定基准已坏，下次开始播放前物理重启音频。
 - `phase-timestamp-quantization-probe.cjs`（研究探针，不在门禁内）：硬件帧位置按 HAL 周期跳变时，比较生产映射、残差中值、上包络和死区候选；结论见 [2026-10-28 再评审](../../docs/design/team-sync-optimization-review-2026-10-28.md)，设 `PROBE_OUT` 写入 `phase-timestamp-quantization-probe-results.json`。
 

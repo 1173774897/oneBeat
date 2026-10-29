@@ -1655,7 +1655,7 @@ struct StorePage {
         Column({ space: 14 }) {
           Row() {
             Text('‹').fontSize(32).width(32).onClick(() => router.back())
-            Text('收藏小铺').fontSize(32).fontWeight(900).fontStyle(FontStyle.Italic)
+            Text('奇遇小铺').fontSize(32).fontWeight(900).fontStyle(FontStyle.Italic)
             Blank()
             this.redemptionEntrance()
           }.width('100%')

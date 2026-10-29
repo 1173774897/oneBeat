@@ -8,6 +8,13 @@ const DISCOVERY_TIMEOUT_MS: number = 30000;
 const DISCOVERY_REFRESH_WAIT_MS: number = 3000;
 const MEMBER_GROUP_RELEASE_TIMEOUT_MS: number = 3000;
 const CONNECTION_STATE_POLL_MS: number = 350;
+// A P2P find does one all-channel scan, then listens on the 2.4GHz social
+// channels. A group owner created after that scan (e.g. on 5GHz, following the
+// leader's Wi-Fi) is never found by it: device 2026-10-29, every join whose
+// discovery started 2s before the leader's createGroup timed out after 30s with
+// an empty peer list, and every retry found the leader at once. Restart the
+// find while the leader is missing so each attempt begins with a full scan.
+const DISCOVERY_RESTART_MS: number = 3000;
 const GROUP_OWNER_CAPABILITY: number = 1;
 const FOREIGN_P2P_MESSAGE: string = '设备正在使用其他 P2P 连接，请先结束投屏、互传或附近共享后重试';
 const JOIN_REJECTED_MESSAGE: string = '队长已拒绝本次加入请求，请和队长确认后再试一次';
@@ -34,6 +41,10 @@ function p2pError(err: Error, fallback: string): Error {
 }
 
 export class WifiP2pManager {
+  // When the current P2P find began. A find older than the leader's group may
+  // never report it (see DISCOVERY_RESTART_MS), and the member's warm-up find
+  // usually starts during the BLE lookup, several seconds before P2P.
+  private discoveryStartedAtMs: number = 0;
   private static groupReleaseOperation: Promise<void> | undefined = undefined;
   private ownsGroup: boolean = false;
   private ownedGroupName: string = '';
@@ -150,6 +161,7 @@ export class WifiP2pManager {
           if (cached[i].deviceName.trim() === targetDeviceName) {
             wifiManager.startDiscoverDevices();
             this.discovering = true;
+            this.discoveryStartedAtMs = Date.now();
             return;
           }
         }
@@ -183,6 +195,7 @@ export class WifiP2pManager {
         wifiManager.on('p2pPeerDeviceChange', callback);
         wifiManager.startDiscoverDevices();
         this.discovering = true;
+        this.discoveryStartedAtMs = Date.now();
       } catch (err) {
         settled = true;
         cleanup();
@@ -202,6 +215,7 @@ export class WifiP2pManager {
     const attempted: Set<string> = new Set();
     let foundPeer = false;
     let lastError = '';
+    let lastPeerSummary = '';
     try {
       while (Date.now() - startedAt < DISCOVERY_TIMEOUT_MS) {
         let peers: wifiManager.WifiP2pDevice[] = [];
@@ -216,6 +230,16 @@ export class WifiP2pManager {
             hasGroupOwner = true;
             break;
           }
+        }
+        // Names and full addresses are personal data: log only whether a peer
+        // matches the invitation, its status/GO bit and an address suffix.
+        const summary = peers.map((peer: wifiManager.WifiP2pDevice) =>
+          `${leaderDeviceName.length > 0 && peer.deviceName.trim() === leaderDeviceName ? 'name' : '-'}/` +
+          `s${peer.deviceStatus}/go${(peer.groupCapabilities & GROUP_OWNER_CAPABILITY) !== 0 ? 1 : 0}/` +
+          `${peer.deviceAddress.slice(-5)}${attempted.has(peer.deviceAddress) ? '/tried' : ''}`).join(',');
+        if (summary !== lastPeerSummary) {
+          lastPeerSummary = summary;
+          console.info(`[JoinDiag] stage=p2p-peers elapsedMs=${Date.now() - startedAt} peers=[${summary}]`);
         }
         for (let i = 0; i < peers.length; i++) {
           const peer = peers[i];
@@ -235,11 +259,16 @@ export class WifiP2pManager {
           }
           foundPeer = true;
           attempted.add(peer.deviceAddress);
+          const candidateAt = Date.now();
+          console.info(`[JoinDiag] stage=p2p-candidate addr=${peer.deviceAddress.slice(-5)} ` +
+            `status=${peer.deviceStatus} elapsedMs=${candidateAt - startedAt}`);
           try {
             return await this.connectCandidate(peer, invitation, rejectionSignal);
           } catch (err) {
             const connectionError = err as Error;
             lastError = connectionError.message ?? 'P2P 连接失败';
+            console.warn(`[JoinDiag] stage=p2p-candidate-failed addr=${peer.deviceAddress.slice(-5)} ` +
+              `attemptMs=${Date.now() - candidateAt} reason=${lastError}`);
             if (lastError === JOIN_REJECTED_MESSAGE || lastError === JOIN_CONFIRM_TIMEOUT_MESSAGE ||
               lastError === FOREIGN_P2P_MESSAGE || lastError === JOIN_CANCELLED_MESSAGE ||
               (this.ownsGroup && this.ownedGroupName === invitation.groupName)) {
@@ -250,6 +279,17 @@ export class WifiP2pManager {
             }
             await this.resetPreviousMemberAttempt();
             await this.prepareMemberDiscovery(leaderDeviceName);
+          }
+        }
+        if (!foundPeer && Date.now() - this.discoveryStartedAtMs >= DISCOVERY_RESTART_MS) {
+          console.info(`[JoinDiag] stage=p2p-rediscover elapsedMs=${Date.now() - startedAt}`);
+          await this.stopDiscovery();
+          try {
+            wifiManager.startDiscoverDevices();
+            this.discovering = true;
+            this.discoveryStartedAtMs = Date.now();
+          } catch (err) {
+            lastError = (err as Error).message ?? '';
           }
         }
         await sleep(900);

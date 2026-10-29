@@ -67,6 +67,14 @@ export async function hasTeamNetworkPermissions(context: common.UIAbilityContext
   return missing.length === 0;
 }
 
+/** Checks without prompting; join-page prefetch must not raise a permission dialog. */
+export async function hasBluetoothDiscoveryPermission(context: common.UIAbilityContext): Promise<boolean> {
+  const atManager = abilityAccessCtrl.createAtManager();
+  const tokenId = context.applicationInfo.accessTokenId;
+  const missing = await collectMissingPermissions(atManager, tokenId, [BLUETOOTH_PERMISSION]);
+  return missing.length === 0;
+}
+
 export async function ensureBluetoothDiscoveryPermission(context: common.UIAbilityContext): Promise<boolean> {
   const atManager = abilityAccessCtrl.createAtManager();
   const tokenId = context.applicationInfo.accessTokenId;

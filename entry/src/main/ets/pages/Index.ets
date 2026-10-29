@@ -268,7 +268,7 @@ struct Index {
       Button({ type: ButtonType.Normal }) {
         Row({ space: 10 }) {
           Row({ space: 8 }) {
-            Text('收藏小铺').fontSize(19).fontWeight(900).fontStyle(FontStyle.Italic).fontColor(INK)
+            Text('奇遇小铺').fontSize(19).fontWeight(900).fontStyle(FontStyle.Italic).fontColor(INK)
             Text('角色 / 场景 / 鼓机').fontSize(10).fontWeight(FontWeight.Bold).fontColor(INK)
               .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).layoutWeight(1)
           }.layoutWeight(1).alignItems(VerticalAlign.Center)
@@ -276,7 +276,7 @@ struct Index {
       }.width('100%').height(HOME_STORE_HEIGHT)
         .padding({ left: 16, right: 14 }).backgroundColor(LILAC)
         .border({ width: HOME_ENTRY_BORDER, color: INK }).borderRadius(HOME_ENTRY_RADIUS)
-        .onClick(() => this.goPrimary('store')).accessibilityText('进入收藏小铺，角色、场景、鼓机')
+        .onClick(() => this.goPrimary('store')).accessibilityText('进入奇遇小铺，角色、场景、鼓机')
     }.width('100%').height(HOME_STORE_HEIGHT).clip(false)
   }
 

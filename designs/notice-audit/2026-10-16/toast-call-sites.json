@@ -337,7 +337,7 @@
       "file": "entry/src/main/ets/pages/LeaderLobbyPage.ets",
       "line": 927,
       "registered_page": true,
-      "call": "promptAction.showToast({ message: '请先在收藏小铺解锁这个场景' })",
+      "call": "promptAction.showToast({ message: '请先在奇遇小铺解锁这个场景' })",
       "audit_id": "T036",
       "recommendation": "保留真实操作失败，统一短文案；一次操作仅一个主要反馈出口"
     },

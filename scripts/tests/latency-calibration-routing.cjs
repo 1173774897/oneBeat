@@ -120,7 +120,7 @@ function harness(initialWireless = true, leader = true) {
       isBuiltInSpeakerActive: () => !wireless
     } },
     '../network/p2p/WifiP2pManager': { WifiP2pManager: class { async teardown() {} } },
-    '../network/p2p/BleRoomDiscovery': { BleRoomDiscovery: class { async stopLeaderAdvertising() {} } },
+    '../network/p2p/BleRoomDiscovery': { BleRoomDiscovery: class { async stopLeaderAdvertising() {} setJoinRequestListener() {} setMemberDisplayName() {} } },
     '../network/p2p/P2pInvitation': {},
     '../common/UserFeedback': { showUserNotice: message => toasts.push(message), logUserFailure() {} },
     '../store/EntitlementStore': { isProDrumMachineAccessible: () => true },

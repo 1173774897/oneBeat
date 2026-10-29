@@ -37,6 +37,10 @@ const MIC_PLAYBACK_REFERENCE_RATE_HZ: number = 44100;
 /** Informational join stages; session readiness still requires authentication and clock sync. */
 export type MemberJoinStage = 'connecting' | 'joining' | 'preparing';
 
+/** AppStorage key: nickname of the member whose join request awaits the leader. */
+export const JOIN_REQUEST_NAME_KEY: string = 'pendingJoinRequestName';
+const JOIN_REQUEST_NOTICE_MS: number = 30000;
+
 export class AppSession {
   private static instance: AppSession | undefined = undefined;
   private static retiringSession: AppSession | undefined = undefined;
@@ -45,6 +49,7 @@ export class AppSession {
   readonly metronome: MetronomeEngine = new MetronomeEngine();
   readonly p2p: WifiP2pManager = new WifiP2pManager();
   readonly bleDiscovery: BleRoomDiscovery = new BleRoomDiscovery();
+  private joinRequestNoticeTimer: number = -1;
   private lastTransportKey: string = '';
   private drumPreviewToken: number = 0;
   // Local audition owns both preparation and playback. Roster/settings UI
@@ -86,6 +91,8 @@ export class AppSession {
     AppStorage.setOrCreate('btCalibrationTracksConnection', false);
     AppStorage.setOrCreate('btCalibrationNeedsRemeasure', false);
     AppStorage.setOrCreate('audioOutputRouteEpoch', 0);
+    AppStorage.setOrCreate(JOIN_REQUEST_NAME_KEY, '');
+    this.bleDiscovery.setJoinRequestListener((displayName: string) => this.showJoinRequest(displayName));
     AudioOutputMonitor.start((active: boolean, routeSignature: string) => {
       const previousRouteSignature = this.previousAudioOutputRouteSignature;
       const routeChanged = this.bluetoothRouteStateInitialized &&
@@ -419,6 +426,8 @@ export class AppSession {
 
   private async shutdownExclusive(): Promise<void> {
     this.releaseDrumPreviewOwnership();
+    this.showJoinRequest('');
+    this.bleDiscovery.setJoinRequestListener(undefined);
     this.latencyRouteProbeToken++;
     this.latencyRouteProbeOwner = -1;
     this.memberJoinFeedbackAttempt?.cancel();
@@ -1203,12 +1212,49 @@ export class AppSession {
     }
   }
 
+  /**
+   * Leader: names who is asking while the system P2P dialog is up. That dialog
+   * shows the peer's cached Wi-Fi record, which after a quick rejoin is an
+   * address string rather than the phone model. '' clears the notice.
+   */
+  private showJoinRequest(displayName: string): void {
+    if (this.joinRequestNoticeTimer >= 0) {
+      clearTimeout(this.joinRequestNoticeTimer);
+      this.joinRequestNoticeTimer = -1;
+    }
+    if (displayName.length === 0 || AppSession.instance !== this || !this.controller.isLeader) {
+      AppStorage.setOrCreate(JOIN_REQUEST_NAME_KEY, '');
+      return;
+    }
+    AppStorage.setOrCreate(JOIN_REQUEST_NAME_KEY, displayName);
+    showUserNotice(`「${displayName}」正在申请加入，请在系统弹窗中确认`, 'join-request');
+    // The system dialog times out on its own; never leave a stale name showing.
+    this.joinRequestNoticeTimer = setTimeout(() => {
+      this.joinRequestNoticeTimer = -1;
+      AppStorage.setOrCreate(JOIN_REQUEST_NAME_KEY, '');
+    }, JOIN_REQUEST_NOTICE_MS);
+  }
+
+  /** Reads nearby rooms' invitations while the member types the code. */
+  startJoinPrefetch(): void {
+    if (AppSession.instance !== this || this.shutdownOperation !== undefined || this.controller.isLeader) {
+      return;
+    }
+    this.bleDiscovery.setMemberDisplayName(this.controller.displayName);
+    this.bleDiscovery.startInvitationPrefetch(PROTOCOL_VERSION);
+  }
+
+  async discardJoinPrefetch(): Promise<void> {
+    await this.bleDiscovery.discardInvitationPrefetch();
+  }
+
   async memberJoinByCode(
     code: string,
     onRoomFound?: () => void,
     onProgress?: (stage: MemberJoinStage) => void
   ): Promise<void> {
     const trimmed = code.trim();
+    this.bleDiscovery.setMemberDisplayName(this.controller.displayName);
     // 预热 P2P 设备发现，与 BLE 扫描并行，避免连接阶段冷启动等待
     const discoveryWarmup = this.p2p.prepareMemberDiscovery().catch(() => {});
     const invitation = await this.bleDiscovery.resolveInvitationByCode(trimmed, PROTOCOL_VERSION);

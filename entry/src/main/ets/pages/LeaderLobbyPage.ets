@@ -155,6 +155,12 @@ const INVITE_NOTICE_ACTION_HEIGHT: number = 44;
 const INVITE_NOTICE_FILL: string = '#FFF1CC';
 const INVITE_NOTICE_INK: string = '#77602A';
 
+// Join-request banner, pinned over the top of the lobby (below the safe area).
+const JOIN_REQUEST_BANNER_TOP_OFFSET: number = 8;
+const JOIN_REQUEST_BANNER_SIDE_INSET: number = 18;
+const JOIN_REQUEST_BANNER_PADDING_X: number = 12;
+const JOIN_REQUEST_BANNER_PADDING_Y: number = 10;
+
 @Entry
 @Component
 struct LeaderLobbyPage {
@@ -163,6 +169,8 @@ struct LeaderLobbyPage {
   @StorageLink('safeAreaBottom') bottomSafeInset: number = 0;
   @StorageLink('selectedSceneKey') selectedSceneKey: string = 'sunset_coast';
   @StorageLink('btAudioActive') @Watch('onBluetoothAudioRouteChanged') btAudioActive: boolean = false;
+  // Set by AppSession from the member's BLE join registration (JOIN_REQUEST_NAME_KEY).
+  @StorageLink('pendingJoinRequestName') joinRequestName: string = '';
   @StorageLink('btCalibrationTracksConnection') btCalibrationTracksConnection: boolean = false;
   @StorageLink('btCalibrationNeedsRemeasure') btCalibrationNeedsRemeasure: boolean = false;
   @StorageLink('storeEntitlementEpoch') @Watch('onStoreEntitlementsChanged') storeEntitlementEpoch: number = 0;
@@ -1343,7 +1351,7 @@ struct LeaderLobbyPage {
   private async chooseScene(key: string): Promise<void> {
     if (!this.leader || this.loading || key === this.selectedSceneKey) { return; }
     if (!isSceneAccessible(key)) {
-      showUserNotice('请先在收藏小铺解锁这个场景', 'lobby-scene');
+      showUserNotice('请先在奇遇小铺解锁这个场景', 'lobby-scene');
       return;
     }
     const request = this.beginAction('lobby-scene');
@@ -2582,6 +2590,30 @@ struct LeaderLobbyPage {
       }
       if (this.bluetoothRouteConfirmVisible) {
         this.bluetoothRouteConfirmationOverlay()
+      }
+      if (this.leader && this.joinRequestName.length > 0) {
+        // Pinned to the top, above the scrolled content: the system P2P dialog
+        // (a higher window) covered both the toast and an in-flow banner near
+        // the bottom (device 2026-10-29 18:41).
+        Column() {
+          Text(`「${this.joinRequestName}」正在申请加入，请在系统弹窗中确认`)
+            .fontSize(14)
+            .fontWeight(900)
+            .fontColor(INK)
+            .width('100%')
+            .padding({ left: JOIN_REQUEST_BANNER_PADDING_X, right: JOIN_REQUEST_BANNER_PADDING_X,
+              top: JOIN_REQUEST_BANNER_PADDING_Y, bottom: JOIN_REQUEST_BANNER_PADDING_Y })
+            .backgroundColor('#FFF1B8')
+            .border({ width: 1.5, color: INK })
+            .borderRadius(10)
+            .id('lobby-join-request-banner')
+        }
+        .width('100%')
+        .height('100%')
+        .justifyContent(FlexAlign.Start)
+        .padding({ left: JOIN_REQUEST_BANNER_SIDE_INSET, right: JOIN_REQUEST_BANNER_SIDE_INSET,
+          top: JOIN_REQUEST_BANNER_TOP_OFFSET + this.topSafeInset })
+        .hitTestBehavior(HitTestMode.Transparent)
       }
     }.height('100%').width('100%').backgroundColor(PAPER)
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])

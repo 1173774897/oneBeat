@@ -444,5 +444,28 @@ async function assertRejected(h, work, message) {
     'A newly supplied invitation cannot authorize deletion of an unrelated current group');
   assert.equal(replacedAttempt.manager.ownsGroup, false);
 
-  console.log('PASS: first-join approval waits for bounded group/IP readiness; P2P event/rejection cleanup and exact group ownership preserve foreign connections');
+  // A find that began before the leader created its group never sees it (device
+  // 2026-10-29: empty peer list for 30s). Discovery restarts while the leader is
+  // missing, and the restarted find (a fresh full scan) reports it.
+  const staleFind = harness();
+  staleFind.state.peers = [];
+  staleFind.state.peerRead = async () => (staleFind.calls.start >= 2 ? [staleFind.peer] : []);
+  staleFind.state.onConnect = () => {
+    staleFind.state.linked = staleFind.connected;
+    staleFind.emit('p2pConnectionChange', staleFind.connected);
+  };
+  const staleFindWork = observe(staleFind.manager.connectToLeader(invitation));
+  await staleFind.advanceTo(3000);
+  assert.equal(staleFind.calls.connect, 0, 'No leader is visible before discovery restarts');
+  // The first poll follows the up-to-3s wait for a discovery event; the restart
+  // comes DISCOVERY_RESTART_MS later.
+  await staleFind.advanceTo(8000);
+  assert.ok(staleFind.calls.start >= 2, 'Discovery restarts while the leader is missing');
+  assert.ok(staleFind.calls.stop >= 1, 'The stale find is stopped before restarting');
+  assert.equal(staleFind.calls.connect, 1, 'The restarted find reports the leader and the join proceeds');
+  await staleFind.advanceTo(15000);
+  await staleFindWork.done;
+  assert.equal(staleFindWork.state, 'resolved', `Join succeeds after rediscovery: ${staleFindWork.error?.message}`);
+
+  console.log('PASS: first-join approval waits for bounded group/IP readiness; discovery restarts while the leader is missing; P2P event/rejection cleanup and exact group ownership preserve foreign connections');
 })().catch(error => { console.error(error); process.exitCode = 1; });

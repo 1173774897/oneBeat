@@ -9,6 +9,7 @@ import {
   bluetoothPermissionDeniedHint,
   cameraPermissionDeniedHint,
   ensureBluetoothDiscoveryPermission,
+  hasBluetoothDiscoveryPermission,
   ensureCameraPermission,
   ensureTeamNetworkPermissions,
   hasTeamNetworkPermissions,
@@ -70,6 +71,8 @@ struct MemberJoinPage {
   }
 
   aboutToDisappear(): void {
+    // Unused prefetched invitations and their kept GATT link end with the page.
+    void AppSession.get()?.discardJoinPrefetch();
     this.pageActive = false;
     this.initializationToken++;
     this.joinRequestToken++;
@@ -104,6 +107,10 @@ struct MemberJoinPage {
         return;
       }
       if (accessible) {
+        if (isBluetoothDiscoveryAvailable() && await hasBluetoothDiscoveryPermission(ctx) &&
+          this.canWarmUpDiscovery(session, initializationToken)) {
+          session.startJoinPrefetch();
+        }
         await session.p2p.prepareMemberDiscovery();
       } else if (granted) {
         this.wirelessSettingsAvailable = true;

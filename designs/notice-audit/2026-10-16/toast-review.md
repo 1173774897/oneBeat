@@ -39,7 +39,7 @@
 | T033 | [LeaderLobbyPage.ets:754](/Users/lizhe/work/oneBeat/entry/src/main/ets/pages/LeaderLobbyPage.ets:754) | '随机头像同步失败，请重试' | 保留真实操作失败，统一短文案；一次操作仅一个主要反馈出口 |
 | T034 | [LeaderLobbyPage.ets:817](/Users/lizhe/work/oneBeat/entry/src/main/ets/pages/LeaderLobbyPage.ets:817) | '角色同步失败，请重试' | 保留真实操作失败，统一短文案；一次操作仅一个主要反馈出口 |
 | T035 | [LeaderLobbyPage.ets:920](/Users/lizhe/work/oneBeat/entry/src/main/ets/pages/LeaderLobbyPage.ets:920) | '出发同步失败，请重试' | 保留真实操作失败，统一短文案；一次操作仅一个主要反馈出口 |
-| T036 | [LeaderLobbyPage.ets:927](/Users/lizhe/work/oneBeat/entry/src/main/ets/pages/LeaderLobbyPage.ets:927) | '请先在收藏小铺解锁这个场景' | 保留真实操作失败，统一短文案；一次操作仅一个主要反馈出口 |
+| T036 | [LeaderLobbyPage.ets:927](/Users/lizhe/work/oneBeat/entry/src/main/ets/pages/LeaderLobbyPage.ets:927) | '请先在奇遇小铺解锁这个场景' | 保留真实操作失败，统一短文案；一次操作仅一个主要反馈出口 |
 | T037 | [LeaderLobbyPage.ets:934](/Users/lizhe/work/oneBeat/entry/src/main/ets/pages/LeaderLobbyPage.ets:934) | '场景同步失败，请重试' | 保留真实操作失败，统一短文案；一次操作仅一个主要反馈出口 |
 | T038 | [LeaderLobbyPage.ets:969](/Users/lizhe/work/oneBeat/entry/src/main/ets/pages/LeaderLobbyPage.ets:969) | 'PRO 定制鼓机包含在畅游月卡中' | 保留权益守卫，一次操作不重复提示 |
 | T039 | [LeaderLobbyPage.ets:1026](/Users/lizhe/work/oneBeat/entry/src/main/ets/pages/LeaderLobbyPage.ets:1026) | '进入行进页失败，请重试' | 保留真实操作失败，统一短文案；一次操作仅一个主要反馈出口 |

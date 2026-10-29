@@ -53,7 +53,7 @@ function harness(specs = [{}]) {
         if (spec.connect === 'fail') this.emit(0);
         else if (spec.connect !== 'hold') this.emit(2);
       },
-      setBLEMtuSize() {},
+      setBLEMtuSize() { handlers.get('BLEMtuChange')?.(128); },
       getServices() {
         this.serviceQueries++;
         return spec.services?.promise ?? Promise.resolve(services);
@@ -91,6 +91,14 @@ function harness(specs = [{}]) {
     '@kit.BasicServicesKit': { commonEventManager: {
       createSubscriber: async () => ({}), subscribe() {}, unsubscribe: async () => {}
     } },
+    // Pure parsing helpers: use the real module.
+    './BleAdvertisingTag': (() => {
+      const tagContext = { exports: {}, Uint8Array, parseInt };
+      vm.runInNewContext(ts.transpileModule(fs.readFileSync(
+        'entry/src/main/ets/network/p2p/BleAdvertisingTag.ets', 'utf8'), { compilerOptions: {
+        module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021 } }).outputText, tagContext);
+      return tagContext.exports;
+    })(),
     './P2pInvitation': { parseP2pRoomInvitation: JSON.parse, validateP2pRoomInvitation() {},
       randomAuthNonce: () => (++nonce).toString(16).padStart(32, '0').slice(-16).repeat(2) }
   };
@@ -273,7 +281,34 @@ async function main() {
   replacement.deliverLeaderWrite(nextCommand.replace('P:', 'C:'));
   assert.equal(replacement.discovery.leaderJoinAttempts.has('device'), false);
 
-  console.log('PASS: actual BLE feedback lifecycle cancels connect, service, registration and retry work; closes bounded GATT handles; retains rejection polling and exact-attempt cleanup');
+  // The member's nickname travels with P: so the leader app can say who is
+  // asking while the system dialog may only show an address string.
+  const named = harness([{}]);
+  await named.discovery.startLeaderAdvertising(invitation);
+  const notices = [];
+  named.discovery.setJoinRequestListener(name => notices.push(name));
+  named.deliverLeaderWrite('P:0123456789abcdef:小明:跑者');
+  assert.equal(named.discovery.leaderJoinAttempts.get('device').attemptId, '0123456789abcdef');
+  assert.equal(named.discovery.leaderJoinAttempts.get('device').displayName, '小明:跑者',
+    'Only the first colon after the id separates the nickname');
+  assert.deepEqual(notices, ['小明:跑者']);
+  named.deliverLeaderWrite('C:0123456789abcdef');
+  assert.deepEqual(notices, ['小明:跑者', ''], 'A withdrawn request clears the notice');
+  named.deliverLeaderWrite('P:0123456789abcdef');
+  assert.equal(named.discovery.leaderJoinAttempts.get('device').displayName, '', 'The nickname is optional');
+  named.deliverLeaderWrite('P:0123456789abcdefX');
+  assert.equal(named.discovery.leaderJoinAttempts.get('device').attemptId, '0123456789abcdef',
+    'A malformed registration is refused');
+  named.discovery.applyDialogDecision('rejected');
+  assert.equal(notices.at(-1), '', 'A dialog decision clears the notice');
+
+  // Member side: the registration carries the nickname.
+  const member = harness([{}]);
+  member.discovery.setMemberDisplayName('小明');
+  await member.start();
+  assert.match(member.clients[0].writes[0], /^P:[0-9a-f]{16}:小明$/);
+
+  console.log('PASS: actual BLE feedback lifecycle cancels connect, service, registration and retry work; closes bounded GATT handles; retains rejection polling and exact-attempt cleanup; registration carries the nickname to the leader notice');
 }
 
 main().catch(error => { console.error(error); process.exitCode = 1; });
