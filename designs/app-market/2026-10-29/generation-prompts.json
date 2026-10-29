@@ -1,0 +1,13 @@
+{
+  "mode": "built-in image_gen",
+  "assets": [
+    {
+      "name": "duo-hero.png",
+      "prompt": "Use case: ads-marketing. Asset type: transparent editorial illustration for the Chinese app 同拍 / OneBeat app-market screenshot, brand campaign. Input image 1 is the exact ORIGINAL APP ICON and character identity reference; input image 2 is the same brand's duo sticker illustration and ink/print style reference. Create ONE polished cutout illustration of exactly these two youthful cartoon skaters full-body together, side by side, both wearing their protective helmets. Left character: lavender-purple skin, messy dark-green hair, lime helmet with black ventilation holes, oversized lavender hoodie, orange pads and lime inline skates. Right character: warm peach skin, black hair obscuring eyes, glossy black helmet, acid-yellow jacket, black shorts, black shoes, holding a black skateboard. Preserve their distinct identities and very laid-back expressions, thick black ink contours, printed comic texture and cream sticker outline from the references. Have them stride forward together at the same rhythm, one small phone held casually in the right character's hand, the left character giving a thumbs up. Dynamic but clean readable full-body silhouettes, relaxed companionship, not racing or athletics. Around them only 3 sparse teal/coral beat marks and one small star. Full bodies and skates visible; generous transparent margin around all sides. Front three-quarter view, centered compact roughly square composition, professional premium illustration, lightly distressed ink texture inside shapes. No scenery, no box, no poster frame, NO WORDS, no letters, no brand wordmark, no numbers, no shadows on the background. Genuinely transparent background.",
+      "reference_images": [
+        "AppScope/resources/base/media/app_icon.png",
+        "designs/media-covers/2026-10-28/01-duo-in-sync.png"
+      ]
+    }
+  ]
+}
