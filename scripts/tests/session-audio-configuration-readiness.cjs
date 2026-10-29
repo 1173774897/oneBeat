@@ -57,6 +57,7 @@ function harness() {
     '../store/EntitlementStore': { isProDrumMachineAccessible: () => true },
     '../session/SessionBackgroundKeeper': { SessionBackgroundKeeper: {
       async ensurePlaybackReady() {},
+      async updateMediaTitle() {},
       setControlHandler() {}, async updatePlaybackState() {}
     } },
     '@kit.ArkUI': { router: {} }

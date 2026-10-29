@@ -37,6 +37,7 @@ const { MetronomeEngine } = load('MetronomeEngine');
 function engine() { const e = new MetronomeEngine(); e.configure(0, 0); return e; }
 function renderer() {
   return { state: state.STATE_RUNNING, handlers: {}, on(type, cb) { this.handlers[type] = cb; },
+    off() {}, async release() {}, getAudioStreamIdSync: () => 1,
     async stop() { this.state = state.STATE_STOPPED; }, async flush() {},
     async start() { this.state = state.STATE_RUNNING; },
     getAudioTimestampInfoSync: () => ({ framePos: 0, timestamp: now * 1000000 }),
@@ -69,9 +70,13 @@ function renderer() {
 
   // Native start cannot be recalled; a pause while it is pending must prevent
   // its late completion from restoring the logical transport or transition.
+  // A stalled, already-used stream is replaced by a new renderer (exact zero
+  // origin); the replacement's native start is the one left pending here.
   let completeStart;
   e.renderer.stop = async () => { e.renderer.state = state.STATE_STOPPED; };
-  e.renderer.start = () => new Promise(resolve => {
+  nextRenderer = renderer();
+  nextRenderer.state = 1;
+  nextRenderer.start = () => new Promise(resolve => {
     starts++;
     completeStart = () => { e.renderer.state = state.STATE_RUNNING; resolve(); };
   });

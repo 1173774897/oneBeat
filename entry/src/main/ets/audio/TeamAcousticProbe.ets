@@ -20,7 +20,9 @@ export class TeamAcousticProbe {
     if (context.applicationInfo.debug !== true) { return; }
     const command = want.parameters?.['onebeatProbe'];
     if (command !== 'mic' && command !== 'snapshot' && command !== 'export' &&
-      command !== 'phase-on' && command !== 'phase-off') { return; }
+      command !== 'phase-on' && command !== 'phase-off' &&
+      command !== 'envelope-on' && command !== 'envelope-off' &&
+      command !== 'origin-on' && command !== 'origin-off') { return; }
     if (TeamAcousticProbe.active) {
       console.info('[TeamAcousticProbe] stage=reject reason=probe-busy');
       return;
@@ -42,6 +44,22 @@ export class TeamAcousticProbe {
           throw new Error('phase-mode-requires-idle-or-paused-team');
         }
         console.info(`[TeamAcousticProbe] stage=phase-mode enabled=${enabled}`);
+        return;
+      }
+      if (command === 'envelope-on' || command === 'envelope-off') {
+        const enabled = command === 'envelope-on';
+        if (!session.configurePlaybackEnvelopeExperiment(enabled)) {
+          throw new Error('envelope-mode-requires-idle-or-paused-team');
+        }
+        console.info(`[TeamAcousticProbe] stage=envelope-mode enabled=${enabled}`);
+        return;
+      }
+      if (command === 'origin-on' || command === 'origin-off') {
+        const enabled = command === 'origin-on';
+        if (!session.configureFreshOriginExperiment(enabled)) {
+          throw new Error('origin-mode-requires-idle-or-paused-team');
+        }
+        console.info(`[TeamAcousticProbe] stage=origin-mode enabled=${enabled}`);
         return;
       }
       if (command === 'snapshot') {

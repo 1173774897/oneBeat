@@ -2,10 +2,12 @@ import { Context, wantAgent } from '@kit.AbilityKit';
 import { backgroundTaskManager } from '@kit.BackgroundTasksKit';
 import { avSession } from '@kit.AVSessionKit';
 import { runningLock } from '@kit.BasicServicesKit';
+import { image } from '@kit.ImageKit';
 
 const BUNDLE_NAME: string = 'com.onebeat.app';
 const ABILITY_NAME: string = 'EntryAbility';
 const SESSION_TAG: string = 'onebeat-audio';
+const MEDIA_COVER_PATH: string = 'comic/brand/media_session_cover.png';
 const RUNNING_LOCK_NAME: string = 'com.onebeat.app.team-session';
 const RUNNING_LOCK_HOLD_MS: number = 10 * 60 * 1000;
 const RUNNING_LOCK_RENEW_MS: number = 5 * 60 * 1000;
@@ -23,6 +25,8 @@ export class SessionBackgroundKeeper {
   private static backgroundTaskId: number = -1;
   private static operation: Promise<void> = Promise.resolve();
   private static session: avSession.AVSession | undefined = undefined;
+  private static mediaCover: image.PixelMap | undefined = undefined;
+  private static mediaTitle: string = '单人练习';
   private static controlHandler: TransportControlHandler | undefined = undefined;
   private static sessionRunningLock: runningLock.RunningLock | undefined = undefined;
   private static runningLockRenewTimer: number = -1;
@@ -61,6 +65,27 @@ export class SessionBackgroundKeeper {
 
   static setControlHandler(handler: TransportControlHandler): void {
     SessionBackgroundKeeper.controlHandler = handler;
+  }
+
+  /** Cache presentation before AVSession creation; repeated UI updates must not resend artwork. */
+  static async updateMediaTitle(title: string): Promise<void> {
+    if (SessionBackgroundKeeper.mediaTitle === title) {
+      return;
+    }
+    SessionBackgroundKeeper.mediaTitle = title;
+    const task = SessionBackgroundKeeper.operation.then(async () => {
+      const session = SessionBackgroundKeeper.session;
+      const context = SessionBackgroundKeeper.context;
+      if (session !== undefined && context !== undefined) {
+        await SessionBackgroundKeeper.updateAvMetadata(session, context);
+      }
+    });
+    SessionBackgroundKeeper.operation = task.catch(() => {});
+    try {
+      await task;
+    } catch (err) {
+      console.warn(`SessionBackgroundKeeper update media metadata: ${(err as Error).message}`);
+    }
   }
 
   /**
@@ -168,6 +193,7 @@ export class SessionBackgroundKeeper {
         SessionBackgroundKeeper.audioActive = false;
         SessionBackgroundKeeper.playing = false;
         SessionBackgroundKeeper.playbackContinuityLost = false;
+        SessionBackgroundKeeper.mediaTitle = '单人练习';
       }
     });
     return SessionBackgroundKeeper.operation;
@@ -290,11 +316,7 @@ export class SessionBackgroundKeeper {
       SessionBackgroundKeeper.session = session;
     }
     const session = SessionBackgroundKeeper.session;
-    await session.setAVMetadata({
-      assetId: 'onebeat-metronome',
-      title: '同拍',
-      artist: '同拍'
-    });
+    await SessionBackgroundKeeper.updateAvMetadata(session, context);
     if (showMediaCard) {
       await session.activate();
     } else {
@@ -320,6 +342,46 @@ export class SessionBackgroundKeeper {
       console.warn(`SessionBackgroundKeeper destroyAvSession: ${(err as Error).message}`);
     }
     SessionBackgroundKeeper.session = undefined;
+    const cover = SessionBackgroundKeeper.mediaCover;
+    SessionBackgroundKeeper.mediaCover = undefined;
+    try {
+      await cover?.release();
+    } catch (err) {
+      console.warn(`SessionBackgroundKeeper release media cover: ${(err as Error).message}`);
+    }
+  }
+
+  private static async updateAvMetadata(session: avSession.AVSession, context: Context): Promise<void> {
+    await session.setAVMetadata({
+      assetId: 'onebeat-metronome',
+      title: SessionBackgroundKeeper.mediaTitle,
+      artist: '同拍 · ONEBEAT',
+      mediaImage: await SessionBackgroundKeeper.loadMediaCover(context)
+    });
+  }
+
+  private static async loadMediaCover(context: Context): Promise<image.PixelMap | undefined> {
+    if (SessionBackgroundKeeper.mediaCover !== undefined) {
+      return SessionBackgroundKeeper.mediaCover;
+    }
+    let source: image.ImageSource | undefined = undefined;
+    try {
+      const content = await context.resourceManager.getRawFileContent(MEDIA_COVER_PATH);
+      source = image.createImageSource(content.buffer.slice(content.byteOffset, content.byteOffset + content.byteLength));
+      // Native media surfaces receive pixels instead of an app-private rawfile URI.
+      // Keep one decoded cover for this AVSession; lifecycle refreshes reuse it.
+      SessionBackgroundKeeper.mediaCover = await source.createPixelMap();
+    } catch (err) {
+      // Artwork failure must not prevent playback or the remaining metadata.
+      console.warn(`SessionBackgroundKeeper load media cover: ${(err as Error).message}`);
+    } finally {
+      try {
+        await source?.release();
+      } catch (err) {
+        console.warn(`SessionBackgroundKeeper release image source: ${(err as Error).message}`);
+      }
+    }
+    return SessionBackgroundKeeper.mediaCover;
   }
 
   private static async ensureRunningLock(): Promise<void> {

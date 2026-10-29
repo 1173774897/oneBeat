@@ -51,7 +51,10 @@ function harness(rhythm = 0, state = 'paused', gate) {
     isLeader: true, rhythm, state, bpm: 120, beatsPerBar: 4, beatUnit: 4, soloTeam: true,
     drumProgram: '', beatPointStates: meter.defaultBeatPointStates(4), getMembers: () => [],
     broadcastSnapshot: async () => { broadcasts++; },
-    restartRunningTransportAfterConfiguration: async () => { restarts++; }
+    restartRunningTransportAfterConfiguration: async () => { restarts++; },
+    // Live changes go through the coalescer; count each request as one restart
+    // (coalescing itself is covered by transport-restart-configuration-order.cjs).
+    requestCoalescedConfigurationRestart: async () => { restarts++; }
   });
   const session = { controller, metronome: { getVisualSnapshot: () => ({ running: false }) },
     waitForCurrentAudioConfiguration: async () => true };

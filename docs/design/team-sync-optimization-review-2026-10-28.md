@@ -1,5 +1,7 @@
 # 组队同步再评审：硬件播放位置测量与暂停路径
 
+> **实施状态（2026-10-28 当日更新）**：§4-A 上包络已实现并**默认开启**，可用调试命令 `envelope-off/on` 回退；§5 第 1、3 条已实现。详见 §7。下文 §1–§6 保留为实施前的评审记录。
+
 日期：2026-10-28。承接 [10-27 精度评审](team-sync-accuracy-review-2026-10-27.md)（已对比 Ableton Link、Snapcast、IRCAM sync）和 [10-28 分阶段修复](team-sync-fixes-2026-10-28.md)。本轮没有改动正式播放行为；新增一个研究探针和结果文件，不进入回归门禁。
 
 **结论：网络校时已经不是主要误差来源。当前最大的可改进点在“读硬件播放位置”这一步：设备上的帧位置按 HAL 周期跳变，时间戳却是查询时刻，生产算法把这种单向滞后当成真实相位误差，持续反馈因此几乎每拍都在追噪声。** 建议下一步把播放位置估计改为“多次读数取上包络”，但它会改变各机的绝对起拍位置，必须先放在调试开关后做双机声学 A/B，再决定是否默认开启。暂停路径有约 0.35–0.5s 的可省等待，精度损失可以忽略。
@@ -103,3 +105,80 @@ PROBE_OUT=docs/design/phase-timestamp-quantization-probe-results.json \
   scripts/tests/phase-timestamp-quantization-probe.cjs \
   /Applications/DevEco-Studio.app/Contents/tools/hvigor/hvigor/node_modules/typescript/lib/typescript.js
 ```
+
+## 7. 实施记录（2026-10-28）
+
+用户要求包络直接默认开启，以便两台真机测试效果。
+
+**播放位置上包络**（`MetronomeEngine.ets`）
+
+- 生产分支 `readRenderedStreamFrames()` 改用括号换算的 ACTIVE 时间戳（`readDrumPreviewNativeSample()`），记录 `framePos − timestamp×SR`，取窗口内最大值外推到调用时刻。窗口容量 `PLAYBACK_ENVELOPE_CAPACITY=16`，时限 `PLAYBACK_ENVELOPE_MAX_AGE_MS=2000`。帧位置与上一次相同的读数（同一 HAL 周期）合并为一条，不占窗口。
+- `writeData` 回调每次补采一个样本（每回调多一次 `getAudioTimestampInfoSync`），使窗口在起拍后约 1 秒内填满。
+- 每次物理启动在窗口积累 `PLAYBACK_ENVELOPE_REBASE_MIN_SAMPLES=8` 个不同周期后，用无滞后位置按原公式重算一次 `audioTimestampBaseFrame`。日志 `ProductionClockDiag ... reason=envelope-rebase deltaMs=…` 记录平移量；欠载启动不重算。
+- 新渲染器、新物理启动、帧坐标倒退或 `resetAudioTimestampState()` 时清空窗口。括号读失败时，这一次退回旧的直接读法，播放时钟不会因估计器失效。
+- 精确帧映射实验开关（`EXPERIMENTAL_EXACT_PLAYBACK_FRAME_MAP`）生效时不使用包络。
+- 运行时开关：`setPlaybackPositionEnvelopeEnabled()`，仅在停止时允许切换；调试包命令 `envelope-off` / `envelope-on`（规则同 `phase-off/on`，需队伍空闲或暂停）。重新开启时允许温渲染器重算一次基准。
+
+```sh
+hdc -t <device-id> shell aa start -a EntryAbility -b com.onebeat.app --ps onebeatProbe envelope-off
+hdc -t <device-id> shell aa start -a EntryAbility -b com.onebeat.app --ps onebeatProbe envelope-on
+```
+
+每端需看到 `[TeamAcousticProbe] stage=envelope-mode enabled=…`。**切换后需要重新打卡校准蓝牙偏差，不能沿用另一种模式下测得的值。** 新引擎实例默认开启，切换不持久化。
+
+探针按设备回调节奏（约 93ms）喂数据后，引擎实现与旧算法的对比（帧位置滞后模型，12×240s，真实漂移 0）：
+
+| 方案 | 起拍固定偏差 | 稳态抖动 SD | 稳态最坏 | 每拍修正率 |
+|---|---|---|---|---|
+| 旧算法（`envelope-off`） | 8.7–10.4ms | 2.14ms | 16.0ms | 0.90 |
+| 引擎包络（默认） | 1.1–1.4ms | 0.68ms | 4.3ms | 0.24 |
+
+仍是模型结果，不是声学测量。真机上应看到 `PhaseLockDiag` 的修正次数明显减少、正负不再成对出现，并出现一次 `envelope-rebase`。
+
+**暂停**
+
+- `SessionController.pauseTransport()`：所有已认证队员在 `PAUSE_SKIP_PREPARE_MAX_PING_AGE_MS = 2×RESYNC_INTERVAL_MS`（10s，小于 15s 映射有效期）内发过 `PING` 时，跳过准备直接广播暂停；任一队员超时（例如在后台被冻结）则仍先准备。阈值无效时保守地走准备。按下到停声预计从约 1.0–1.2s 降到约 0.65s。
+- `MetronomeEngine.getVisualSnapshot()`：到达 `scheduledPauseAtLocalMs` 即视为停止，人物与路面和静音在同一时刻停下，不再等迟到的计时器。
+
+**测试**
+
+- 新增 `playback-position-envelope.cjs`、`visual-pause-instant.cjs`，纳入门禁；`transport-start-readiness.cjs` 增加“PING 新鲜时跳过准备”与“PING 过期仍准备”；`team-acoustic-probe.cjs` 覆盖 `envelope-on/off`。
+- `production-clock-diagnostics.cjs`、`metronome-start-buffer-diagnostics.cjs`、`metronome-playback-baseline.cjs` 专门锁定旧帧映射，改为显式关闭包络运行，用来证明 `envelope-off` 与旧实现逐值一致。
+- 门禁 66/66 通过，ArkTS 构建成功，已安装到两台调试设备。
+
+### 7.1 真机复测后的修正（2026-10-28 晚）
+
+用户在两台设备上连续按 +/- 改 BPM，两机产生明显偏差且长时间不消失；外放和蓝牙都能复现。日志结论与修正：
+
+| 现象（日志证据） | 原因 | 修正 |
+|---|---|---|
+| 蓝牙下每次重新起拍，`StartTimingDiag` 的 `rendered` 都等于 `submittedAtEstimate`；随后残差 +19～+67ms | 蓝牙 A2DP 的帧位置在整块交给协议栈时跳涨，会超前于真实播放，违反“只会滞后”的假设；上包络取最大值选中超前读数，再被已提交帧数截住 | **蓝牙路由下不用包络**，回到旧的单次读数（路由判断缓存 500ms，`[EnvelopeDiag] stage=route active=…`）；外放和有线保留包络 |
+| 外放下 `audio underflow: 11`（队长）／`4`（队员），回调间隔最长 211ms；随后队长残差约 −124ms，每拍只修约 1ms，鼓机节奏下要修几分钟 | 连续改 BPM 时重新生成音频占住 JS 线程，渲染欠载；欠载会把后续内容整体推后，两机推后量不同。包络正确测到了这个真实偏差，慢在修正手段 | **大偏差直接重新对齐**：连续 3 次同方向、彼此相差 ≤10ms、且超过 30ms 的残差，触发 `rescheduleForOutputRouteChange()`，在不重启渲染器的情况下把本机内容挪到共享时间线的下一个拍上，冷却 5s（`AUDIO_PHASE_RESYNC_*`，日志 `[PhaseLockDiag] stage=resync`）。参考 shairport-sync 超过 50ms 即重同步 |
+| 行进中由蓝牙切到外放（用户要求对齐） | 包络在新路由上从空窗口开始；若路由重排先算目标帧、之后才重算基准，坐标会在重排后平移 | 路由切换时立即刷新路由缓存；路由重排在选目标前等待包络窗口积累 8 个周期并完成（或跳过）重算，最多 1.5s（`ROUTE_REPHASE_ENVELOPE_WAIT_MS`）。基准重算只在本次物理启动以来**没有欠载**时进行，否则保留原基准（原始帧计数连续，原基准仍有效），日志 `stage=rebase-skipped` |
+
+另外修正：同一 HAL 周期内合并读数时不再刷新被保留读数的时间，确保计数器停住时 2s 时限生效。
+
+欠载本身仍会造成一次可闻的卡顿，现在会在约 3 拍内重新对齐，不再长期错开。若要减少欠载，可考虑把连续改 BPM 合并成一次重启（防抖），尚未实施。
+
+新增 `phase-resync.cjs`；`playback-position-envelope.cjs` 增加蓝牙回退用例；`metronome-phase-feedback.cjs` 的额度用例改用 25ms 偏差（低于重新对齐阈值）。门禁 67/67 通过，已安装到两台设备。
+
+### 7.2 第二轮复测（一台蓝牙一台外放仍有小偏差）
+
+日志：外放连按改 BPM 时，队长欠载后偏 −63ms，3 拍内重新对齐；蓝牙队长偏 −104ms 也已重新对齐。剩余的小偏差来自两处：
+
+- 队员（外放）几次小欠载各偏 10–20ms，低于 30ms 门槛，只能每拍约 1ms 慢修，持续约 30s（21:34:44–21:35:16，−895→−75 帧）。**修正**：重新对齐门槛按路由区分：包络路由（外放/有线，测量噪声约 1ms）为 15ms（`AUDIO_PHASE_RESYNC_ENVELOPE_THRESHOLD_MS`），蓝牙旧算法仍为 30ms。
+- 队员一段约 −88ms 的偏差没有触发：中间几拍拿不到新鲜读数，`measurePhaseErrorFrames()` 返回 0，把连续确认计数清零了。**修正**：拿不到读数时不改变计数（`lastPhaseErrorAvailable`）。
+
+`phase-resync.cjs` 增加对应用例。蓝牙下仍使用旧单次读数，测量噪声约 ±20ms，这一路由的精度上限暂未改进。
+
+### 7.3 第三轮复测
+
+| 现象（日志） | 原因 | 修正 |
+|---|---|---|
+| 队长蓝牙下连续 3 次重新对齐（+52/+48/+38ms），每次之后残差又回到约 +50ms | 旧单次读数在蓝牙下有约 60ms 的锯齿形测量误差：残差在 13 拍内下降约 59ms，而期间实际只修了约 7ms。重新对齐把测量假象当成真实偏差，反而挪动了声音 | 重新对齐**只在包络路由（外放/有线）启用**，门槛 15ms；蓝牙只保留原来的有界慢修 |
+| 队员（外放）冷启动后约 2s 测到 −69ms；`EnvelopeDiag` 起拍初期离散 81ms，随后 `max-jump −68.91ms` | 物理启动后约 1s 内硬件计数器不稳定（预填充），一次超前读数成为窗口最大值，过期时估计值骤降 | 物理启动后 `PLAYBACK_ENVELOPE_WARMUP_MS=1000` 内的读数不进包络，沿用与冷启动定位相同的旧读法 |
+| 连按改 BPM 引发欠载 | 每次修改都立即广播快照，各机在 JS 线程同步渲染新 PCM | **播放中的设置修改合并**：BPM、音色、拍号、拍点、节奏型在最后一次操作 350ms 后只做一次广播加重启（`CONFIGURATION_RESTART_COALESCE_MS`），期间只刷新显示（`sessionEpoch`），不重渲染音频；等待中若有暂停、开始等其他传输请求或已停止，则只发布配置、不重启；断开时取消。鼓机编排的严格切换不合并 |
+
+git 历史中没有找到 BPM 合并的旧实现，原有的只是“新请求取消旧请求”，它只能避免多次起拍，避免不了每次修改都重渲染。
+
+测试：`transport-restart-configuration-order.cjs` 改为验证 350ms 合并窗口、三次连续修改只渲染和重启一次、等待中暂停不会被重启覆盖；`phase-resync.cjs` 改为蓝牙永不重新对齐；`playback-position-envelope.cjs` 增加启动预热排除；`walk-beat-point-mode.cjs`、`drum-lobby-editor-settings.cjs` 把合并函数桩为一次重启。门禁 67/67 通过，已安装到两台设备。

@@ -22,6 +22,8 @@ async function schedule(h, framesAhead) {
 async function renderCase(bufferFrames, offsetFrames, { previousFuture = false,
   rollbackAtCompletion = false, boundary = false } = {}) {
   const h = fixture({ queueMs: 0 });
+  // Legacy map: envelope sampling adds one timestamp read per callback by design.
+  h.engine.playbackPositionEnvelopeEnabled = false;
   const e = h.engine;
   const framesAhead = bufferFrames + offsetFrames;
   const transition = await schedule(h, framesAhead);
@@ -83,7 +85,12 @@ async function main() {
 
   {
     const h = fixture({ queueMs: 0, frameBiasFrames: 5000 });
+    // Legacy map: envelope sampling adds one timestamp read per callback by design.
+    h.engine.playbackPositionEnvelopeEnabled = false;
     const e = h.engine;
+    // A first-start cap: inside the startup grace it is diagnosed, not treated
+    // as a broken map that forces a restart.
+    e.rendererStartedAtLocalMs = h.now - 500;
     const original = h.renderer.getAudioTimestampInfoSync.bind(h.renderer);
     let reads = 0;
     h.renderer.getAudioTimestampInfoSync = () => {
@@ -130,6 +137,8 @@ async function main() {
 
   {
     const h = fixture({ queueMs: 0 });
+    // Legacy map: envelope sampling adds one timestamp read per callback by design.
+    h.engine.playbackPositionEnvelopeEnabled = false;
     await schedule(h, 10000);
     assert.ok(h.engine.startTargetEstimate.frameMapping);
     h.renderer.getAudioTimestampInfoSync = () => {
@@ -148,6 +157,8 @@ async function main() {
 
   for (const direct of ['fillAudioData', 'applyAudioTransition']) {
     const h = fixture({ queueMs: 0 });
+    // Legacy map: envelope sampling adds one timestamp read per callback by design.
+    h.engine.playbackPositionEnvelopeEnabled = false;
     const e = h.engine;
     // A previous real callback must not leave context for either direct entry.
     e.handleWriteData(new ArrayBuffer(100 * 2));
@@ -165,6 +176,8 @@ async function main() {
 
   {
     const h = fixture({ queueMs: 0 });
+    // Legacy map: envelope sampling adds one timestamp read per callback by design.
+    h.engine.playbackPositionEnvelopeEnabled = false;
     const e = h.engine;
     const transition = await schedule(h, 10000);
     const oldSidecar = e.startTimingTransition;
@@ -181,6 +194,8 @@ async function main() {
 
   {
     const h = fixture({ queueMs: 0 });
+    // Legacy map: envelope sampling adds one timestamp read per callback by design.
+    h.engine.playbackPositionEnvelopeEnabled = false;
     const e = h.engine;
     await schedule(h, 10000);
     const original = e.fillAudioData.bind(e);

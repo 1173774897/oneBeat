@@ -42,6 +42,10 @@ function harness(bluetooth = true) {
       renderer.state = AUDIO_STATE.STATE_STOPPED;
     },
     flush: async () => { trace.push('flush'); },
+    // A used stream is replaced on restart; the mock models the new native
+    // renderer as this same object so stop/start gates keep applying.
+    on() {}, off() {},
+    release: async () => { trace.push('release'); renderer.state = AUDIO_STATE.STATE_STOPPED; },
     start: async () => {
       trace.push('start');
       if (startGate) await startGate.promise;
@@ -54,7 +58,10 @@ function harness(bluetooth = true) {
       AudioState: AUDIO_STATE,
       AudioLatencyType: { LATENCY_TYPE_ALL: 1, LATENCY_TYPE_HARDWARE: 2, LATENCY_TYPE_SOFTWARE: 3 },
       AudioDataCallbackResult: { VALID: 0 },
-      getAudioManager: () => ({ getAudioSceneSync: () => 0 })
+      getAudioManager: () => ({ getAudioSceneSync: () => 0 }),
+      AudioSamplingRate: {}, AudioChannel: {}, AudioSampleFormat: {}, AudioEncodingType: {},
+      StreamUsage: {}, InterruptHint: {},
+      createAudioRenderer: async () => { trace.push('create'); return renderer; }
     } },
     '@kit.BasicServicesKit': { systemDateTime: {
       TimeType: { STARTUP: 0, ACTIVE: 1 }, getUptime: () => now * 1000000

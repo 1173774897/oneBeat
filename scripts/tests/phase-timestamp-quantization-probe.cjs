@@ -99,7 +99,10 @@ async function run(model, variant, seed) {
   const h = fixture({ compensationMs: 45, queueMs: 100, moduleMocks: {
     '@kit.BasicServicesKit': { systemDateTime },
     // Production MonotonicClock returns integer STARTUP milliseconds.
-    '../common/MonotonicClock': { MonotonicClock: { nowMs: () => Math.floor(clock()) } }
+    '../common/MonotonicClock': { MonotonicClock: { nowMs: () => Math.floor(clock()) } },
+    // Model a speaker/wired HAL; Bluetooth keeps the legacy map by design.
+    './AudioOutputMonitor': { AudioOutputMonitor: {
+      isBluetoothA2dpActive: () => false, estimateBluetoothLinkLatencyMs: () => 240 } }
   } });
   clock = () => h.now;
   const e = h.engine;
@@ -114,6 +117,9 @@ async function run(model, variant, seed) {
   // Cold production map: offset frozen at the first read, no previous raw frame.
   e.audioTimestampClockOffsetMs = undefined;
   e.lastAudioRawFrame = -1;
+  // 'production' is the legacy single-read map (envelope-off rollback);
+  // 'engine-envelope' is the default-on estimator implemented in MetronomeEngine.
+  if (variant !== 'engine-envelope') e.playbackPositionEnvelopeEnabled = false;
   if (variant.startsWith('envelope')) e.readRenderedStreamFrames = envelopeFrameMap(e, systemDateTime);
   if (variant === 'envelope+2ms-deadband') e.readPhaseErrorFrames = deadband(e, Math.round(2 * RATE / 1000));
   // Reference only: no steering at all, so any in-run error is not feedback-made.
@@ -133,7 +139,13 @@ async function run(model, variant, seed) {
     // period varies; non-integer jitter also exercises integer-ms reads.
     const step = beatMs + (random() - 0.5) * 18.6;
     elapsed += step;
-    h.advanceKeepAlive(step);
+    // Feed PCM at the device writeData cadence (~93ms for 4096 frames, jittered)
+    // so callback-side envelope sampling sees realistic read phases.
+    for (let left = step; left > 0;) {
+      const chunk = Math.min(left, 88 + random() * 10);
+      h.advanceKeepAlive(chunk);
+      left -= chunk;
+    }
     e.setOffsetMs(0, 0, h.now + 15000);
     const before = e.phaseCorrectionFrames + e.phaseCorrectionSubmittedFrames;
     e.checkAudioProgress(Math.floor(h.now));
@@ -161,7 +173,8 @@ async function run(model, variant, seed) {
   const results = {};
   for (const model of ['stale-position', 'consistent-pair']) {
     results[model] = {};
-    for (const variant of ['feedback-off', 'production', 'median-residual', 'envelope', 'envelope+2ms-deadband']) {
+    for (const variant of ['feedback-off', 'production', 'median-residual', 'envelope', 'envelope+2ms-deadband',
+      'engine-envelope']) {
       const runs = [];
       for (let i = 0; i < RUNS; i++) runs.push(await run(model, variant, 1000 + i));
       const means = runs.map(r => r.actual.mean);
@@ -199,5 +212,7 @@ async function run(model, variant, seed) {
   const stale = results['stale-position'];
   assert.ok(stale.envelope.actualWithinRunSdMs < stale.production.actualWithinRunSdMs,
     'Probe expectation: the envelope estimator should reduce in-run audible error');
+  assert.ok(stale['engine-envelope'].actualWithinRunSdMs < stale.production.actualWithinRunSdMs,
+    'The engine implementation should reproduce the candidate improvement');
   console.log('PASS phase timestamp quantization probe (research model, not acoustic certification)');
 })().catch(error => { console.error(error); process.exitCode = 1; });

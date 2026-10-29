@@ -10,6 +10,12 @@
 - `metronome-shared-clock.cjs`：十分钟 100 ppm 逻辑时钟轨迹、1 ms/s 连续吸收、过期冻结、共享计时器与试听/校准隔离。
 - `metronome-phase-feedback.cjs`：真实 PCM 插/丢帧、已提交/已可听账本、首次硬件采样、尾音/过零点保护、恢复原点、按时间分配的有界修正额度、旧 transport/过期/回退时间戳隔离。
 - `metronome-phase-drift.cjs`：40/60/120/240 BPM × 100/500/±1000 ppm 共 16 组十分钟实际 PCM 路径与理想硬件时钟；同时检查听到的内容偏差和已扣队列的控制残差。
+- `playback-position-envelope.cjs`：默认开启的播放位置上包络——帧位置滞后时的估计、每次物理启动一次重算基准、倒退清窗、停滞时限、开关归属与关闭后逐值回到旧映射、每回调一次读数；蓝牙同样使用包络，切换路由清窗，计数器停走后（落后 >50ms）清窗。
+- `visual-pause-instant.cjs`：计时器迟到时，画面仍在共享暂停时刻停下。
+- `phase-resync.cjs`：大偏差一次性重新对齐（外放和蓝牙均适用；含冷却、噪声不触发、关闭包络时不触发），包络重算平移超过门槛后立即重新对齐，以及切换路由后等计数器新鲜且在走再对齐。
+- 包络测试另含：新建 renderer 首次启动直接用计数器原点（`origin-on/off` 调试切换）；重启后 45ms 内的首次读数作为冻结原点；重新校准只在启动 1 秒内生效。
+- `frame-map-broken-restart.cjs` 另含：冷启动目标被夹住超过 15ms 时改到共享网格上之后的拍重新对齐。
+- `frame-map-broken-restart.cjs`：播放位置映射超过已写入数据（欠载期间计数器空转）时判定基准已坏，下次开始播放前物理重启音频。
 - `phase-timestamp-quantization-probe.cjs`（研究探针，不在门禁内）：硬件帧位置按 HAL 周期跳变时，比较生产映射、残差中值、上包络和死区候选；结论见 [2026-10-28 再评审](../../docs/design/team-sync-optimization-review-2026-10-28.md)，设 `PROBE_OUT` 写入 `phase-timestamp-quantization-probe-results.json`。
 
 这四组测试已加入统一门禁。时钟质量检查、共享时间轴与 PCM 反馈现均默认开启；`phaseCorrectionEnabled=true`，独立的 `EXPERIMENTAL_EXACT_PLAYBACK_FRAME_MAP=false` 保持关闭。调试包仅在已有会话 `idle/paused` 且输出停妥时接受 `phase-off/phase-on`，用于对照与临时回退；每端分别设置，不允许播放中切换，正常对照后用 `phase-on` 恢复默认行为。

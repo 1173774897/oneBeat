@@ -35,6 +35,16 @@ function harness() {
       if (this.controller.state !== 'paused' && this.controller.state !== 'idle') return false;
       events.push(['phase-mode', enabled]);
       return true;
+    },
+    configurePlaybackEnvelopeExperiment(enabled) {
+      if (this.controller.state !== 'paused' && this.controller.state !== 'idle') return false;
+      events.push(['envelope-mode', enabled]);
+      return true;
+    },
+    configureFreshOriginExperiment(enabled) {
+      if (this.controller.state !== 'paused' && this.controller.state !== 'idle') return false;
+      events.push(['origin-mode', enabled]);
+      return true;
     }, metronome: {
     readMicExperimentPlaybackSnapshot(details) {
       events.push(['snapshot', details]);
@@ -122,6 +132,27 @@ function harness() {
   await phase.command('phase-on');
   assert.equal(phase.events.filter(event => event[0] === 'phase-mode').length, 2,
     'Recording ownership prevents experiment mode changes');
+
+  const envelope = harness();
+  await envelope.command('envelope-off');
+  assert.ok(!envelope.events.some(event => event[0] === 'envelope-mode'), 'Playing must reject estimator changes');
+  envelope.session.controller.state = 'paused';
+  await envelope.command('envelope-off');
+  await envelope.command('envelope-on');
+  assert.deepEqual(envelope.events.filter(event => event[0] === 'envelope-mode'),
+    [['envelope-mode', false], ['envelope-mode', true]]);
+  assert.ok(!envelope.events.some(event => event[0] === 'run'), 'Estimator mode never opens a microphone');
+
+  const origin = harness();
+  await origin.command('origin-off');
+  assert.ok(!origin.events.some(event => event[0] === 'origin-mode'), 'Playing must reject origin changes');
+  origin.session.controller.state = 'paused';
+  await origin.command('origin-off');
+  await origin.command('origin-on');
+  assert.deepEqual(origin.events.filter(event => event[0] === 'origin-mode'),
+    [['origin-mode', false], ['origin-mode', true]]);
+  assert.ok(!origin.events.some(event => event[0] === 'run'), 'Origin mode never opens a microphone');
+
 
   const successful = harness();
   const before = JSON.stringify(successful.output);

@@ -180,6 +180,9 @@ export class AppSession {
         this.handleTransportFromStorage();
       }
       const playing = this.controller.state === 'playing' || this.controller.state === 'countdown';
+      if (AppSession.instance === this && this.shutdownOperation === undefined) {
+        void SessionBackgroundKeeper.updateMediaTitle(this.getMediaCardTitle());
+      }
       void SessionBackgroundKeeper.updatePlaybackState(playing);
       if (!this.latencyCalibrationActive && !this.drumPreviewActive && !this.keepRendererAliveForSession &&
         !this.controller.lobbyDeparted && this.controller.state === 'idle') {
@@ -206,6 +209,19 @@ export class AppSession {
       AppStorage.setOrCreate('beatStartedAtMs', scheduledAtMonoMs);
       AppStorage.setOrCreate('beatEpoch', (AppStorage.get<number>('beatEpoch') ?? 0) + 1);
     });
+  }
+
+  private getMediaCardTitle(): string {
+    if (this.controller.soloTeam) {
+      return '单人练习';
+    }
+    // A member's displayName is its own nickname; the leader is identified by ID,
+    // since roster order can change independently of team ownership.
+    const leaderName = (this.controller.isLeader ? this.controller.displayName :
+      this.controller.getMembers().find(member => member.id === 'leader')?.displayName)?.trim() || '队长';
+    const status = this.controller.state === 'paused' ? '已暂停' :
+      (this.controller.state === 'playing' || this.controller.state === 'countdown' ? '行进中' : '');
+    return `多人练习 - ${leaderName}的队伍${status}`;
   }
 
   static get(): AppSession | undefined {
@@ -492,6 +508,24 @@ export class AppSession {
       return false;
     }
     return this.metronome.setPhaseCorrectionEnabled(enabled);
+  }
+
+  /** Debug-only A/B of the playback-position estimator; same ownership rules as phase mode. */
+  configurePlaybackEnvelopeExperiment(enabled: boolean): boolean {
+    if (this.shutdownOperation !== undefined || this.latencyCalibrationActive || this.drumPreviewActive ||
+      (this.controller.state !== 'idle' && this.controller.state !== 'paused')) {
+      return false;
+    }
+    return this.metronome.setPlaybackPositionEnvelopeEnabled(enabled);
+  }
+
+  /** Debug-only A/B of the fresh-renderer frame origin; same ownership rules as phase mode. */
+  configureFreshOriginExperiment(enabled: boolean): boolean {
+    if (this.shutdownOperation !== undefined || this.latencyCalibrationActive || this.drumPreviewActive ||
+      (this.controller.state !== 'idle' && this.controller.state !== 'paused')) {
+      return false;
+    }
+    return this.metronome.setFreshOriginBaseEnabled(enabled);
   }
 
   private async prepareCurrentAudioConfiguration(): Promise<boolean> {

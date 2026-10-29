@@ -96,6 +96,9 @@ function fixture(version, route, micExact) {
   vm.runInNewContext(compiled[version], context);
   const { MetronomeEngine } = context.exports;
   const engine = new MetronomeEngine();
+  // The device-verified baseline predates the playback-position envelope; compare
+  // its legacy map (the envelope-off rollback) for exact parity.
+  if (version === 'current') engine.playbackPositionEnvelopeEnabled = false;
   engine.renderer = renderer;
   engine.rendererStarted = true;
   engine.rendererStartedAtLocalMs = rendererStartedAt;

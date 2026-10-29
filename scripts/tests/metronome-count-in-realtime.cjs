@@ -4,7 +4,9 @@ const assert = require('node:assert/strict');
 const { fixture, diagnostic, RATE } = require('./metronome-start-timing.cjs');
 
 function harness(options = {}) {
-  const h = fixture({ queueMs: 0, ...options });
+  // The queue must outlast the injected 120 ms render; with none, the fixture's
+  // wall-clock counter would model an underflow, which correctly breaks the map.
+  const h = fixture({ queueMs: 150, ...options });
   const e = h.engine;
   let inCallback = false;
   const work = [];

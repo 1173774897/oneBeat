@@ -108,6 +108,9 @@ function fixture() {
   };
   vm.runInNewContext(compiled.outputText, context);
   const engine = new context.exports.MetronomeEngine();
+  // These assertions characterize the legacy single-read map and its diagnostics;
+  // the default-on envelope estimator is covered by playback-position-envelope.cjs.
+  engine.playbackPositionEnvelopeEnabled = false;
   engine.renderer = renderer;
   engine.rendererStarted = true;
   engine.rendererEpoch = 7;
@@ -290,10 +293,15 @@ function readLog(h, stage = 'test', audible = h.engine.transportStartLocalMs) {
   resetCounter.engine.readRenderedStreamFrames(resetCounter.renderer, resetCounter.clock.now);
   assert.equal(readLog(resetCounter, 'after-counter-reset').m, 'unprovenms',
     'A later forward read does not prove the zero lost by a hardware counter reset');
-  const initialized = fixture();
-  initialized.engine.audioTimestampBaseReady = false;
-  initialized.engine.readRenderedStreamFrames(initialized.renderer, initialized.clock.now);
-  assert.equal(readLog(initialized, 'base-initialization').baseUpdate, 'elapsed-time-initialization');
+  // A new renderer's first start shares framePos zero with the written frames,
+  // so its base is that origin; a restarted renderer keeps the elapsed estimate.
+  for (const [startCount, expected] of [[1, 'fresh-origin'], [2, 'elapsed-time-initialization']]) {
+    const initialized = fixture();
+    initialized.engine.rendererPhysicalStartCount = startCount;
+    initialized.engine.audioTimestampBaseReady = false;
+    initialized.engine.readRenderedStreamFrames(initialized.renderer, initialized.clock.now);
+    assert.equal(readLog(initialized, `base-initialization-${startCount}`).baseUpdate, expected);
+  }
 
   const cold = fixture();
   cold.engine.renderer = undefined;

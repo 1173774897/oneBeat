@@ -854,6 +854,7 @@ function backgroundHarness({ avFailures = 0 } = {}) {
   const trace = [];
   let remainingFailures = avFailures, createCount = 0, updateFailures = 0;
   const keeper = load('session/SessionBackgroundKeeper.ets', {
+    '@kit.ImageKit': { image: {} },
     '@kit.AbilityKit': { wantAgent: { getWantAgent: async () => 'agent',
       OperationType: { START_ABILITY: 1 }, WantAgentFlags: { UPDATE_PRESENT_FLAG: 1 } } },
     '@kit.BackgroundTasksKit': { backgroundTaskManager: {

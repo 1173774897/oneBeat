@@ -1,6 +1,6 @@
 {
   "date": "2026-10-28",
-  "engineSha256": "2903d6960cca12dcc2fa1b76f704b2041e7e86a63f3ada3d26421b6825405e14",
+  "engineSha256": "827beeb0ec657d45c94e334bcb2e606921d90768df5c08d22c29230601848d04",
   "model": {
     "PERIOD_MS": 20,
     "BPM": 120,
@@ -14,136 +14,162 @@
   "results": {
     "stale-position": {
       "feedback-off": {
-        "measuredSdMs": 5.820668583929635,
-        "measuredChangeP90Ms": 15.011337868480727,
+        "measuredSdMs": 5.7473862913843705,
+        "measuredChangeP90Ms": 14.013605442176871,
         "correctionsPerCheck": 0,
         "actualMeanRangeMs": [
-          7.41535808767949,
-          7.506009070294584
+          7.415273053666089,
+          7.505730347694675
         ],
-        "actualWithinRunSdMs": 0.006538517539851425,
+        "actualWithinRunSdMs": 0.006560457316605823,
         "actualWorstAbsMs": 7.517006802721088,
         "steadyWorstAbsMs": 7.517006802721088,
-        "steadyWithinRunSdMs": 0.006543111964943266
+        "steadyWithinRunSdMs": 0.0065750382715148254
       },
       "production": {
-        "measuredSdMs": 5.363364271691643,
-        "measuredChangeP90Ms": 14.013605442176871,
-        "correctionsPerCheck": 0.898560776833709,
+        "measuredSdMs": 5.306620789744948,
+        "measuredChangeP90Ms": 13.038548752834467,
+        "correctionsPerCheck": 0.9002255769564463,
         "actualMeanRangeMs": [
-          8.747675736960344,
-          10.367928004535125
+          8.731330309901873,
+          10.417890211640152
         ],
-        "actualWithinRunSdMs": 2.1647197807681287,
-        "actualWorstAbsMs": 16.87074829931973,
-        "steadyWorstAbsMs": 16.87074829931973,
-        "steadyWithinRunSdMs": 2.151986986593688
+        "actualWithinRunSdMs": 2.12820645689593,
+        "actualWorstAbsMs": 15.945578231296741,
+        "steadyWorstAbsMs": 15.945578231296741,
+        "steadyWithinRunSdMs": 2.141660890820195
       },
       "median-residual": {
-        "measuredSdMs": 4.726033398525873,
-        "measuredChangeP90Ms": 9.002267573696145,
-        "correctionsPerCheck": 0.8324952314895093,
+        "measuredSdMs": 4.711210272235163,
+        "measuredChangeP90Ms": 8.979591836734693,
+        "correctionsPerCheck": 0.8216206836716987,
         "actualMeanRangeMs": [
-          8.99162887377063,
-          10.285067082388496
+          8.622581254724246,
+          10.191463529856323
         ],
-        "actualWithinRunSdMs": 5.422375261367279,
-        "actualWorstAbsMs": 31.206349206332312,
-        "steadyWorstAbsMs": 31.206349206332312,
-        "steadyWithinRunSdMs": 5.428620960868016
+        "actualWithinRunSdMs": 5.474860423836656,
+        "actualWorstAbsMs": 28.977324263046995,
+        "steadyWorstAbsMs": 28.977324263046995,
+        "steadyWithinRunSdMs": 5.486796516603992
       },
       "envelope": {
-        "measuredSdMs": 1.3976577630820122,
-        "measuredChangeP90Ms": 1.950113378684807,
-        "correctionsPerCheck": 0.21588347494364488,
+        "measuredSdMs": 1.3540129940733072,
+        "measuredChangeP90Ms": 1.7913832199546484,
+        "correctionsPerCheck": 0.20371334374457747,
         "actualMeanRangeMs": [
-          1.737469038455573,
-          2.622300546866282
+          1.7446554933085257,
+          2.7077546222833733
         ],
-        "actualWithinRunSdMs": 1.5174539804915497,
-        "actualWorstAbsMs": 12.454624363282472,
-        "steadyWorstAbsMs": 12.454624363282472,
-        "steadyWithinRunSdMs": 1.4430322169918146
+        "actualWithinRunSdMs": 1.4308639616026866,
+        "actualWorstAbsMs": 10.501936101808704,
+        "steadyWorstAbsMs": 10.501936101808704,
+        "steadyWithinRunSdMs": 1.3502256917631303
       },
       "envelope+2ms-deadband": {
-        "measuredSdMs": 1.1466239830161205,
-        "measuredChangeP90Ms": 2.5170068027210886,
-        "correctionsPerCheck": 0.1082018380440437,
+        "measuredSdMs": 1.100086924805251,
+        "measuredChangeP90Ms": 2.4263038548752833,
+        "correctionsPerCheck": 0.10393892070102377,
         "actualMeanRangeMs": [
-          1.6869318450612376,
-          2.5071869185988414
+          1.6350088568761743,
+          2.5678344823632244
         ],
-        "actualWithinRunSdMs": 1.6981280091776159,
-        "actualWorstAbsMs": 13.15757220908746,
-        "steadyWorstAbsMs": 13.15757220908746,
-        "steadyWithinRunSdMs": 1.6388609869301745
+        "actualWithinRunSdMs": 1.6191603438445916,
+        "actualWorstAbsMs": 10.051405084849485,
+        "steadyWorstAbsMs": 10.051405084849485,
+        "steadyWithinRunSdMs": 1.554878755381311
+      },
+      "engine-envelope": {
+        "measuredSdMs": 0.7815946645666401,
+        "measuredChangeP90Ms": 1.3151927437641724,
+        "correctionsPerCheck": 0.23807044941870553,
+        "actualMeanRangeMs": [
+          1.1216918427381606,
+          1.3876994268794058
+        ],
+        "actualWithinRunSdMs": 0.7995501138443312,
+        "actualWorstAbsMs": 7.486866865049184,
+        "steadyWorstAbsMs": 4.269190384159519,
+        "steadyWithinRunSdMs": 0.6751010115757173
       }
     },
     "consistent-pair": {
       "feedback-off": {
-        "measuredSdMs": 0.24693775693200212,
+        "measuredSdMs": 0.27273867582211375,
         "measuredChangeP90Ms": 0.9977324263038548,
         "correctionsPerCheck": 0,
         "actualMeanRangeMs": [
-          7.41484450923249,
-          7.505571851574719
+          7.414738518187207,
+          7.505517762660995
         ],
-        "actualWithinRunSdMs": 0.0005612221734832718,
+        "actualWithinRunSdMs": 0.0006198606253056406,
         "actualWorstAbsMs": 7.505668934240362,
         "steadyWorstAbsMs": 7.505668934240362,
-        "steadyWithinRunSdMs": 0.0005548618192316087
+        "steadyWithinRunSdMs": 0.0006176551104601361
       },
       "production": {
-        "measuredSdMs": 0.24693775693200212,
+        "measuredSdMs": 0.27273867582211375,
         "measuredChangeP90Ms": 0.9977324263038548,
         "correctionsPerCheck": 0,
         "actualMeanRangeMs": [
-          7.41484450923249,
-          7.505571851574719
+          7.414738518187207,
+          7.505517762660995
         ],
-        "actualWithinRunSdMs": 0.0005612221734832718,
+        "actualWithinRunSdMs": 0.0006198606253056406,
         "actualWorstAbsMs": 7.505668934240362,
         "steadyWorstAbsMs": 7.505668934240362,
-        "steadyWithinRunSdMs": 0.0005548618192316087
+        "steadyWithinRunSdMs": 0.0006176551104601361
       },
       "median-residual": {
-        "measuredSdMs": 0.11683790759829214,
+        "measuredSdMs": 0.1421095503967553,
         "measuredChangeP90Ms": 0,
         "correctionsPerCheck": 0,
         "actualMeanRangeMs": [
-          7.3687251347649205,
-          7.468957817581916
+          7.352184761052167,
+          7.450570179763097
         ],
-        "actualWithinRunSdMs": 0.24539097398671794,
+        "actualWithinRunSdMs": 0.2615128315506548,
         "actualWorstAbsMs": 8.503401360544217,
         "steadyWorstAbsMs": 8.503401360544217,
-        "steadyWithinRunSdMs": 0.24337853092322048
+        "steadyWithinRunSdMs": 0.262714008681792
       },
       "envelope": {
         "measuredSdMs": 4.394632805807911e-17,
         "measuredChangeP90Ms": 0,
         "correctionsPerCheck": 0,
         "actualMeanRangeMs": [
-          -0.0290967062159289,
-          0.010235945166266712
+          -0.029096706215457367,
+          0.010235945165798852
         ],
-        "actualWithinRunSdMs": 3.1148512928977457e-11,
-        "actualWorstAbsMs": 0.029096706282524837,
-        "steadyWorstAbsMs": 0.029096706282524837,
-        "steadyWithinRunSdMs": 3.144385590886035e-11
+        "actualWithinRunSdMs": 3.307828864723347e-11,
+        "actualWorstAbsMs": 0.02909670626140641,
+        "steadyWorstAbsMs": 0.02909670626140641,
+        "steadyWithinRunSdMs": 3.34181116034806e-11
       },
       "envelope+2ms-deadband": {
         "measuredSdMs": 0,
         "measuredChangeP90Ms": 0,
         "correctionsPerCheck": 0,
         "actualMeanRangeMs": [
-          -0.006420969254477661,
-          0.010235945166266712
+          -0.006420969254006073,
+          0.010235945165798852
         ],
-        "actualWithinRunSdMs": 3.11485130586642e-11,
+        "actualWithinRunSdMs": 3.307828880203933e-11,
         "actualWorstAbsMs": 0.010235945244326073,
         "steadyWorstAbsMs": 0.010235945244326073,
-        "steadyWithinRunSdMs": 3.144385604535998e-11
+        "steadyWithinRunSdMs": 3.341811176502981e-11
+      },
+      "engine-envelope": {
+        "measuredSdMs": 3.758567531283082e-17,
+        "measuredChangeP90Ms": 0,
+        "correctionsPerCheck": 0,
+        "actualMeanRangeMs": [
+          -0.02909670621363719,
+          0.010235945169878633
+        ],
+        "actualWithinRunSdMs": 3.48386438773155e-11,
+        "actualWorstAbsMs": 0.029096706282524837,
+        "steadyWorstAbsMs": 0.029096706282524837,
+        "steadyWithinRunSdMs": 3.5244022498448854e-11
       }
     }
   }

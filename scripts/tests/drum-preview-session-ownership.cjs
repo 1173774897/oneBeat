@@ -105,6 +105,7 @@ function harness({ sampleBankClass, engineOptions = {}, drumAccess = () => true 
     '../common/MeterModel': { defaultBeatPointStates: count => Array(count).fill('normal') },
     '../session/SessionBackgroundKeeper': { SessionBackgroundKeeper: {
       async ensurePlaybackReady() {},
+      async updateMediaTitle() {},
       setControlHandler() {}, async updatePlaybackState(playing) { backgroundUpdates.push(playing); }, async stop() {}
     } },
     '@kit.ArkUI': { promptAction: { showToast() {} }, router: {} }

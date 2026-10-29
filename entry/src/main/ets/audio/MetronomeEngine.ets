@@ -80,6 +80,95 @@ const AUDIO_PHASE_CORRECTION_CAPACITY: number = 128;
 // identify silence: subdivisions and sustained cymbal tails can occur anywhere.
 const AUDIO_PHASE_QUIET_SAMPLE_LIMIT: number = 4;
 const AUDIO_PHASE_QUIET_GUARD_FRAMES: number = 16;
+// Slewing fixes at most ~1ms per beat and only in quiet PCM, so a large real
+// slip (on device: render underflows during rapid BPM changes left 100ms+ that
+// took minutes) is instead re-phased onto the shared grid at once, as
+// shairport-sync resyncs beyond 50ms. Only envelope routes (speaker/wired,
+// ~1ms measurement) re-phase, at 15ms+ confirmed by three consistent
+// same-sign reads. Bluetooth is an envelope route too since 2026-10-29.
+const AUDIO_PHASE_RESYNC_ENVELOPE_THRESHOLD_MS: number = 15;
+const AUDIO_PHASE_RESYNC_CONFIRMATIONS: number = 3;
+const AUDIO_PHASE_RESYNC_CONSISTENCY_MS: number = 10;
+const AUDIO_PHASE_RESYNC_COOLDOWN_MS: number = 5000;
+// Per-read lag only makes the mapped position fall short of the truth, so a map
+// that claims more played than was ever written is broken, not noisy. Device
+// logs: healthy streams reached +7ms (near-empty queue); every broken stream
+// had reads of 29–377ms, so 20ms keeps a margin on both sides.
+const FRAME_MAP_BROKEN_EXCESS_MS: number = 20;
+// Startup reads before the first callbacks settle are excluded (same window as
+// the envelope warm-up).
+const FRAME_MAP_BROKEN_GRACE_MS: number = 1000;
+// A moving counter's next read differs from the first only by read lag (one HAL
+// period, ~20ms); an idle first read is off by the counter's start delay.
+const IDLE_COUNTER_REANCHOR_MIN_MS: number = 25;
+// Device 2026-10-29 (7 restarts): after stop()/start() the counter holds the
+// value it stopped at until 27–58ms, while the first read lands at 16–40ms. A
+// read inside this bound is that frozen origin; later reads may have moved.
+const RESTART_ORIGIN_MAX_FIRST_READ_MS: number = 45;
+// A cold start whose target lies inside already-written audio plays late by the
+// whole clamp for the rest of the segment (device: a Bluetooth restart 158ms
+// before its beat with 306ms compensation started 137ms late and never
+// re-phased). Above this, move to a later reachable beat of the shared grid.
+const START_CLAMP_REPHASE_MS: number = 15;
+// A new Bluetooth renderer's counter stays at its origin for hundreds of ms
+// after start(). A target computed then assumes output begins immediately, so
+// the whole stream plays late by that start delay; device 2026-10-29 a
+// time-card measurement taken that way saved ~310ms where a running stream
+// gave 64ms, and later playback was early by the difference. Cold starts wait
+// for the counter to move, until this lead before the target's hardware time.
+const COLD_START_COUNTER_WAIT_LEAD_MS: number = 150;
+const COLD_START_COUNTER_POLL_MS: number = 10;
+// Bounded by polls, not only by the clock, so a stalled clock cannot hold the
+// renderer queue (device start delays seen: up to ~550ms).
+const COLD_START_COUNTER_MAX_POLLS: number = 80;
+// Only a startup read can reveal a late-starting counter. Later reads differ by
+// accumulated read lag, not start delay (device: a read 20s after start moved a
+// Bluetooth base by 26ms right after a time-card measurement).
+const IDLE_COUNTER_REANCHOR_WINDOW_MS: number = 1000;
+// On device framePos advances in HAL-period steps (~20ms) while the paired
+// timestamp is the query instant, so one read can lag the true position by up to
+// a period and only ever lags. The least-lagged recent read (upper envelope of
+// framePos - timestamp*SR) estimates the position; see
+// docs/design/team-sync-optimization-review-2026-10-28.md.
+const PLAYBACK_ENVELOPE_CAPACITY: number = 16;
+// Bounds how long a stalled counter can be extrapolated through the envelope
+// (the submitted-frame clamp and stall watchdog still apply); 2s keeps ~10
+// distinct periods even with 186ms Bluetooth callbacks, and 50ppm crystal drift
+// over it is ~0.1ms.
+const PLAYBACK_ENVELOPE_MAX_AGE_MS: number = 2000;
+// The envelope assumes the counter keeps pace with the wall clock. A stall
+// (device 2026-10-29: ~590ms when switching speaker -> Bluetooth) leaves the
+// counter permanently behind; the window maximum then overstates playback until
+// it ages out (EnvelopeDiag max-jump -591/-730ms), and a rephase in that time
+// put the leader ~377ms off for about two bars. A read this far below the window
+// maximum restarts the window; ordinary read lag spreads stay under ~30ms.
+const PLAYBACK_ENVELOPE_STALL_DROP_MS: number = 50;
+// A timestamp this old means the counter is not advancing; it proves nothing.
+const PLAYBACK_ENVELOPE_MAX_SAMPLE_AGE_MS: number = 60;
+// Reads needed before the envelope can replace the first, possibly lagged,
+// sample in this physical start's base frame (one rebase per physical start).
+const PLAYBACK_ENVELOPE_REBASE_MIN_SAMPLES: number = 8;
+// Bluetooth A2DP violates the one-sided-lag assumption: framePos jumps when a
+// block is handed to the BT stack and can run ahead of playback. On device the
+// max then hit the submitted-frame clamp at every BPM restart and started the
+// leader 19-67ms early (2026-10-28). Wireless routes therefore keep the legacy
+// single-read map; route lookups are cached for this long.
+const PLAYBACK_ENVELOPE_ROUTE_CHECK_MS: number = 500;
+// Right after a physical start the HAL counter is unsettled (prefill bursts):
+// on device reads spread 81ms and one ahead-of-truth read dropped the estimate
+// by 69ms when it aged out. Reads this early stay on the legacy map, which the
+// cold-start lock also uses.
+const PLAYBACK_ENVELOPE_WARMUP_MS: number = 1000;
+// A route rephase waits this long for the envelope to fill (and rebase) on the
+// new route before choosing its target, so the map cannot shift underneath it.
+const ROUTE_REPHASE_ENVELOPE_WAIT_MS: number = 1500;
+// A route switch can stall the counter: device 2026-10-29 12:55:40 a speaker ->
+// Bluetooth rephase read a timestamp 566ms old; the legacy map extrapolated up
+// to 250ms past it, overstated playback, and the leader played ~100ms late for
+// the rest of the segment. Rephase targets wait for a fresh, moving counter.
+const ROUTE_REPHASE_COUNTER_WAIT_MS: number = 1500;
+const ROUTE_REPHASE_FRESH_AGE_MS: number = 60;
+const ROUTE_REPHASE_COUNTER_POLL_MS: number = 20;
 
 function applyDitherFloorToRange(samples: Int16Array, start: number, end: number): void {
   for (let i = start; i < end; i++) {
@@ -387,6 +476,7 @@ export class MetronomeEngine {
   private startTimingSequence: number = 0;
   private startTimingRequest: StartTimingRequest | undefined = undefined;
   private startTargetEstimate: StartTargetEstimate | undefined = undefined;
+  private startClampRephaseToken: number = -1;
   private startTimingTransition: StartTimingTransition | undefined = undefined;
   private startWriteBufferContext: StartWriteBufferContext | undefined = undefined;
   private previousWriteCallbackEntryMonoMs: number | undefined = undefined;
@@ -495,6 +585,41 @@ export class MetronomeEngine {
   /** 播放中待执行的相位校正帧数（正值=插帧延迟，负值=丢帧追赶）。 */
   private phaseCorrectionFrames: number = 0;
   private phaseCorrectionEnabled: boolean = true;
+  // Debug-switchable (envelope-on/off) only while stopped; disabling restores
+  // the legacy single-read extrapolation for A/B.
+  private playbackPositionEnvelopeEnabled: boolean = true;
+  // Debug-switchable (origin-on/off) while stopped; takes effect at the next
+  // fresh renderer (rejoin). Off restores the elapsed-time base for ear A/B.
+  private freshOriginBaseEnabled: boolean = true;
+  private envelopeOffsets: Float64Array = new Float64Array(PLAYBACK_ENVELOPE_CAPACITY);
+  private envelopeSampleMonoMs: Float64Array = new Float64Array(PLAYBACK_ENVELOPE_CAPACITY);
+  private envelopeHead: number = 0;
+  private envelopeCount: number = 0;
+  private envelopeRendererEpoch: number = -1;
+  private envelopePhysicalStartCount: number = -1;
+  private envelopeLastRawFrame: number = -1;
+  // Base frame was set from one elapsed-time read in this physical start and
+  // may still include that read's lag until the envelope matures.
+  private envelopeRebasePending: boolean = false;
+  private envelopeRouteCheckedAtMs: number = -1;
+  private phaseResyncStreak: number = 0;
+  private phaseResyncLastFrames: number = 0;
+  private phaseResyncAtMs: number = -1;
+  // An envelope rebase that moved the base past the resync threshold proves the
+  // already-scheduled content is off-grid; it needs no further confirmation.
+  private phaseResyncAfterRebase: boolean = false;
+  // Whether the latest measurePhaseErrorFrames() had a fresh reading; an
+  // unavailable reading carries no evidence and must not reset the streak.
+  private lastPhaseErrorAvailable: boolean = false;
+  private envelopeRouteWireless: boolean = false;
+  // Underflow count when the base frame was set. The elapsed-time rebase formula
+  // assumes every elapsed frame played, which an underflow breaks.
+  private envelopeUnderflowsAtBase: number = -1;
+  // Diagnostics only: a window maximum that jumps reveals ahead-of-truth reads
+  // (two-sided error), which the upper envelope would otherwise latch.
+  private envelopeLastMaxOffset: number | undefined = undefined;
+  private envelopeLastSample: CalibrationClockSample | undefined = undefined;
+  private envelopeDiagSummaryAtMs: number = -1;
   // Corrections belong to submitted stream coordinates. Their acoustic effect
   // starts only after the hardware head and output latency cross that point.
   private phaseCorrectionStarts: Float64Array = new Float64Array(AUDIO_PHASE_CORRECTION_CAPACITY);
@@ -529,6 +654,34 @@ export class MetronomeEngine {
   private audioTimelineOutputLatencyMs: number = 0;
   private audioTimestampBaseFrame: number = 0;
   private audioTimestampBaseReady: boolean = false;
+  // The first read of a physical start only bounds the start lag: the counter
+  // may not be moving yet (framePos 0, or a value frozen from the previous
+  // stop) and begin tens of ms later (device 2026-10-29: 70–98ms on every cold
+  // start). Re-anchor on the first read that has moved past the first value.
+  private audioTimestampBaseFromIdleCounter: boolean = false;
+  private audioTimestampBaseInitRawFrame: number = -1;
+  // A new renderer's first physical start counts framePos from the same zero as
+  // audioSubmittedFrames, so played = framePos exactly. The elapsed-time
+  // formula instead assumes output began at start(); device 2026-10-29 the
+  // counter began ~124ms later, which put speaker members ~80ms behind a
+  // time-card-calibrated Bluetooth leader. A restart's early first read is its
+  // frozen origin likewise (see RESTART_ORIGIN_MAX_FIRST_READ_MS). An exact
+  // origin is never re-anchored or envelope-rebased.
+  private audioTimestampBaseExactOrigin: boolean = false;
+  // Counter value read just before the last stop (reads after stop() throw on
+  // device). Diagnostics only, to verify whether a restarted stream resumes
+  // counting from it; with the startup trace it decides a restart origin.
+  private framePosAtLastStop: number = -1;
+  private framePosAtLastStopMonoMs: number = -1;
+  private restartOriginTrace: string[] = [];
+  private restartOriginTraceLogged: boolean = false;
+  // Device 2026-10-29: a route switch while paused underflowed for ~300ms; the
+  // counter kept running over that silence, so raw - base exceeded the written
+  // frames by 336ms. The clamp then pinned the playhead to the written frames
+  // (a sawtooth one write wide) and hid ~one buffer of real error from phase
+  // feedback. The elapsed-time base cannot be repaired in place because the
+  // silent span is unobservable; the next start restarts the stream instead.
+  private audioTimestampBaseBroken: boolean = false;
   private audioTimestampClockOffsetMs: number | undefined = undefined;
   private rendererStartedAtLocalMs: number = 0;
   private lastRenderedStreamFrame: number = 0;
@@ -592,6 +745,8 @@ export class MetronomeEngine {
     if (bufferContext?.applied) {
       this.logStartWriteCompletion(bufferContext, MonotonicClock.nowMs());
     }
+    this.samplePlaybackEnvelope();
+    this.traceRestartOrigin();
     return audio.AudioDataCallbackResult.VALID;
   }
 
@@ -1418,7 +1573,12 @@ export class MetronomeEngine {
    * 该值在无线路由（尤其蓝牙 A2DP）上不可靠且设备间差异大，若用它驱动画面会导致多机画面互偏。
    */
   getVisualSnapshot(): TransportVisualSnapshot {
-    if (!this.running || this.transportStartLocalMs <= 0) {
+    const now = MonotonicClock.nowMs();
+    // Audio switches to silence on the hardware frame for the shared pause
+    // instant; the running=false timer can fire tens of ms late. Stop visuals
+    // at that same instant so walkers never step past the last audible beat.
+    const pauseReached = this.scheduledPauseAtLocalMs !== undefined && now >= this.scheduledPauseAtLocalMs;
+    if (!this.running || this.transportStartLocalMs <= 0 || pauseReached) {
       return {
         revision: this.transportRevision,
         running: false,
@@ -1432,7 +1592,6 @@ export class MetronomeEngine {
       };
     }
 
-    const now = MonotonicClock.nowMs();
     // 视觉时间轴与音频硬件播放头解耦：统一走 ClockSync 对齐后的墙钟逻辑时间轴，
     // 保证各机画面一致。音频侧的对齐（相位校正）仍使用 readAudioPlayheadMs，不受影响。
     const playheadMs = this.transportElapsedAt(now);
@@ -1486,6 +1645,33 @@ export class MetronomeEngine {
         this.rendererInitialization = undefined;
       }
     }
+  }
+
+  /**
+   * Release the current renderer and create a new one. A restarted stream
+   * (stop/start) resumes its counter from where it froze, and on device
+   * 2026-10-29 that origin was off by ~20ms on speaker and varied by >100ms
+   * between Bluetooth restarts (time-card results 288 vs 419 that each only
+   * matched their own stream). Only a new renderer's counter provably starts
+   * at the first written frame, so every production restart goes through here.
+   */
+  private async replaceRendererNow(renderer: audio.AudioRenderer): Promise<audio.AudioRenderer> {
+    if (renderer.state === audio.AudioState.STATE_RUNNING ||
+      renderer.state === audio.AudioState.STATE_PAUSED) {
+      this.rendererStarted = false;
+      await renderer.stop();
+    }
+    const oldWriteDataCallback = this.rendererWriteDataCallback;
+    this.renderer = undefined;
+    this.rendererWriteDataCallback = undefined;
+    this.rendererEpoch++;
+    if (oldWriteDataCallback !== undefined) {
+      renderer.off('writeData', oldWriteDataCallback);
+    }
+    renderer.off('stateChange');
+    renderer.off('audioInterrupt');
+    await renderer.release();
+    return await this.createRenderer();
   }
 
   private async createRenderer(): Promise<audio.AudioRenderer> {
@@ -1716,29 +1902,22 @@ export class MetronomeEngine {
         `lastWriteAge=${now - this.lastWriteProgressMs}ms`);
       if (rebuildForMic) {
         try {
-          if (renderer.state === audio.AudioState.STATE_RUNNING ||
-            renderer.state === audio.AudioState.STATE_PAUSED) {
-            this.rendererStarted = false;
-            await renderer.stop();
-          }
           // Route changes can leave the old stream exposing a frozen timestamp.
           // A new renderer gives framePos and audioSubmittedFrames one provable
           // origin; merely rebasing the old counter from elapsed wall time does not.
-          const oldWriteDataCallback = this.rendererWriteDataCallback;
-          this.renderer = undefined;
-          this.rendererWriteDataCallback = undefined;
-          this.rendererEpoch++;
-          if (oldWriteDataCallback !== undefined) {
-            renderer.off('writeData', oldWriteDataCallback);
-          }
-          renderer.off('stateChange');
-          renderer.off('audioInterrupt');
-          await renderer.release();
-          renderer = await this.createRenderer();
+          renderer = await this.replaceRendererNow(renderer);
         } catch (err) {
           // Continuing after a failed rebuild would forget the old queue only
           // in local bookkeeping and could save that queue as physical latency.
           throw new Error(`切换输出设备后重建音频时钟失败：${(err as Error).message}`);
+        }
+      } else if (!requireExactCalibrationClock && this.rendererPhysicalStartCount > 0) {
+        try {
+          console.info(`[ProductionClockDiag] stage=renderer-rebuild reason=silent-restart ` +
+            `physicalStartCount=${this.rendererPhysicalStartCount}`);
+          renderer = await this.replaceRendererNow(renderer);
+        } catch (err) {
+          throw new Error(`重建播放音频失败：${(err as Error).message}`);
         }
       } else {
         if (renderer.state === audio.AudioState.STATE_RUNNING ||
@@ -1837,22 +2016,7 @@ export class MetronomeEngine {
         return;
       }
       try {
-        if (renderer.state === audio.AudioState.STATE_RUNNING ||
-          renderer.state === audio.AudioState.STATE_PAUSED) {
-          this.rendererStarted = false;
-          await renderer.stop();
-        }
-        const oldWriteDataCallback = this.rendererWriteDataCallback;
-        this.renderer = undefined;
-        this.rendererWriteDataCallback = undefined;
-        this.rendererEpoch++;
-        if (oldWriteDataCallback !== undefined) {
-          renderer.off('writeData', oldWriteDataCallback);
-        }
-        renderer.off('stateChange');
-        renderer.off('audioInterrupt');
-        await renderer.release();
-        renderer = await this.createRenderer();
+        renderer = await this.replaceRendererNow(renderer);
       } catch (err) {
         throw new Error(`输入侧探针间重建音频时钟失败：${(err as Error).message}`);
       }
@@ -2077,6 +2241,32 @@ export class MetronomeEngine {
     this.cancelTimers();
   }
 
+  /** Controlled A/B only: switch the playback-position estimator while stopped. */
+  setPlaybackPositionEnvelopeEnabled(enabled: boolean): boolean {
+    if (this.running || this.audioStreaming) {
+      return false;
+    }
+    this.playbackPositionEnvelopeEnabled = enabled;
+    this.resetPlaybackEnvelope();
+    // A warm renderer's base came from one legacy read; let the envelope replace
+    // it once while stopped so an A/B switch matches a fresh physical start.
+    this.envelopeRebasePending = enabled && this.audioTimestampBaseReady && !this.audioTimestampBaseExactOrigin;
+    return true;
+  }
+
+  /** Debug A/B of the fresh-renderer origin; applies from the next new renderer. */
+  setFreshOriginBaseEnabled(enabled: boolean): boolean {
+    if (this.running || this.audioStreaming) {
+      return false;
+    }
+    this.freshOriginBaseEnabled = enabled;
+    return true;
+  }
+
+  isPlaybackPositionEnvelopeEnabled(): boolean {
+    return this.playbackPositionEnvelopeEnabled;
+  }
+
   /** Controlled A/B only: change this while stopped, then start a new transport. */
   setPhaseCorrectionEnabled(enabled: boolean): boolean {
     if (this.running || this.audioStreaming) {
@@ -2117,18 +2307,34 @@ export class MetronomeEngine {
       if (this.startTimingRequest?.token === token) {
         this.startTimingRequest.operationStartedAtMs = now;
       }
-      const rendererHealthy = this.rendererStarted &&
+      const rendererRunning = this.rendererStarted &&
         renderer.state === audio.AudioState.STATE_RUNNING &&
         now - this.lastWriteProgressMs < AUDIO_CALLBACK_STALL_MS;
-      if (rendererHealthy) {
+      let outputCompensationMs = 0;
+      let hardwareStartAt = 0;
+      let targetFrame = 0;
+      let btActive = false;
+      let platformLatency = -1;
+      if (rendererRunning) {
         if (outputCompensationOverrideMs === undefined) {
           this.refreshOutputLatency();
         }
-        const outputCompensationMs = outputCompensationOverrideMs ?? this.outputLatencyMs;
-        const hardwareStartAt = localAudibleStart - outputCompensationMs;
-        const btActive = AudioOutputMonitor.isBluetoothA2dpActive();
-        const platformLatency = MetronomeEngine.readOutputLatencyMs(renderer);
-        const targetFrame = this.estimateTargetStreamFrame(hardwareStartAt);
+        outputCompensationMs = outputCompensationOverrideMs ?? this.outputLatencyMs;
+        hardwareStartAt = localAudibleStart - outputCompensationMs;
+        btActive = AudioOutputMonitor.isBluetoothA2dpActive();
+        platformLatency = MetronomeEngine.readOutputLatencyMs(renderer);
+        // This start's own map read also checks the map: paused streams get no
+        // beat-time reads, so a break during the pause first shows up here.
+        targetFrame = this.estimateTargetStreamFrame(hardwareStartAt);
+        this.noteUnderflowSinceBase(renderer);
+      }
+      // A broken map would place this start up to one buffer off and stay
+      // invisible to phase feedback, so pay one physical restart instead.
+      const rendererHealthy = rendererRunning && !this.audioTimestampBaseBroken;
+      if (rendererRunning && !rendererHealthy) {
+        console.warn(`[ProductionClockDiag] stage=frame-map state=base-broken-restart beat=${beatIndex}`);
+      }
+      if (rendererHealthy) {
         const renderedFrames = this.readRenderedStreamFrames(renderer, now);
         // 帧映射诊断：targetFrame 应落在「now + (audible−compensation−now)」处；
         // 若 rendered 与 queueDepth 异常大（未上报的硬件缓冲），会直接暴露早出声量级。
@@ -2162,15 +2368,36 @@ export class MetronomeEngine {
         }
         return;
       }
-      if (renderer.state === audio.AudioState.STATE_RUNNING ||
+      if (this.rendererPhysicalStartCount > 0) {
+        // A used stream (stalled, stopped, or with a broken map) is replaced, not
+        // restarted, so the new start has a provable counter origin.
+        console.info(`[ProductionClockDiag] stage=renderer-rebuild reason=start ` +
+          `physicalStartCount=${this.rendererPhysicalStartCount} baseBroken=${this.audioTimestampBaseBroken}`);
+        try {
+          await this.replaceRendererNow(renderer);
+        } catch (err) {
+          // Same outcome as a failed native start: no stream, transport state kept.
+          this.audioStreaming = false;
+          this.pendingAudioTransition = undefined;
+          console.warn(`MetronomeEngine renderer rebuild failed: ${(err as Error).message}`);
+          return;
+        }
+      } else if (renderer.state === audio.AudioState.STATE_RUNNING ||
         renderer.state === audio.AudioState.STATE_PAUSED) {
-        // A RUNNING state without write callbacks is not a usable keep-alive
-        // stream. Rebuilding it here is recovery, rather than a normal transport switch.
         await this.haltRendererNow();
       }
       await this.startAudioStreamNow(localAudibleStart, beatIndex, countInBeats, token,
         outputCompensationOverrideMs);
     });
+    // Outside the renderer queue: the re-phase serializes its own renderer work.
+    if (this.startClampRephaseToken === token) {
+      this.startClampRephaseToken = -1;
+      if (token === this.runToken && this.running) {
+        void this.rescheduleForOutputRouteChange().catch((err: Error) => {
+          console.warn(`MetronomeEngine clamped start re-phase failed: ${err.message}`);
+        });
+      }
+    }
   }
 
   private async startAudioStreamNow(localAudibleStart: number, beatIndex: number,
@@ -2238,8 +2465,14 @@ export class MetronomeEngine {
       if (token !== this.runToken || !this.running) {
         return;
       }
+      await this.waitForMovingCounter(renderer, localAudibleStart, token,
+        outputCompensationOverrideMs ?? this.outputLatencyMs);
+      if (token !== this.runToken || !this.running) {
+        return;
+      }
       await this.settleOutputLatency(renderer, localAudibleStart, beatIndex, countInBeats, token,
         outputCompensationOverrideMs);
+      this.noteClampedColdStart(token);
       this.primeAudioTimestamp(renderer);
       try {
         this.lastUnderflowCount = renderer.getUnderflowCountSync();
@@ -2272,12 +2505,31 @@ export class MetronomeEngine {
       renderer.state !== audio.AudioState.STATE_PAUSED)) {
       return;
     }
+    let preStopFramePos = -1;
+    try {
+      preStopFramePos = renderer.getAudioTimestampInfoSync().framePos;
+    } catch (_e) {
+      preStopFramePos = -1;
+    }
+    const preStopMonoMs = MonotonicClock.nowMs();
+    const submittedAtStop = this.audioSubmittedFrames;
     this.rendererStarted = false;
     try {
       await renderer.stop();
     } catch (_e) {
       // A concurrent stop or release may already have changed the renderer state.
     }
+    this.framePosAtLastStop = preStopFramePos;
+    this.framePosAtLastStopMonoMs = preStopMonoMs;
+    let postStop = 'unavailable';
+    try {
+      postStop = `${renderer.getAudioTimestampInfoSync().framePos}`;
+    } catch (e) {
+      postStop = `error:${(e as Error).message}`;
+    }
+    console.info(`[RestartOriginDiag] stage=stop physicalStartCount=${this.rendererPhysicalStartCount} ` +
+      `preStopFramePos=${preStopFramePos} submittedFrames=${submittedAtStop} ` +
+      `stopMs=${(MonotonicClock.nowMs() - preStopMonoMs).toFixed(1)} postStopFramePos=${postStop}`);
   }
 
   private emitBeatAndScheduleNext(token: number): void {
@@ -2969,6 +3221,57 @@ export class MetronomeEngine {
     this.logStartTimingTarget('cold-settle', transition, localAudibleStart, outputCompensationMs);
   }
 
+  private async waitForMovingCounter(renderer: audio.AudioRenderer, localAudibleStart: number,
+    token: number, outputCompensationMs: number): Promise<void> {
+    if (!this.audioTimestampBaseReady) {
+      return;
+    }
+    const initial = this.audioTimestampBaseInitRawFrame;
+    const startedAt = MonotonicClock.nowMs();
+    const deadline = localAudibleStart - outputCompensationMs - COLD_START_COUNTER_WAIT_LEAD_MS;
+    let framePos = initial;
+    let held = false;
+    for (let poll = 0; poll <= COLD_START_COUNTER_MAX_POLLS && token === this.runToken && this.running; poll++) {
+      try {
+        framePos = renderer.getAudioTimestampInfoSync().framePos;
+      } catch (_e) {
+        framePos = initial;
+      }
+      if (framePos > initial || MonotonicClock.nowMs() >= deadline || poll === COLD_START_COUNTER_MAX_POLLS) {
+        break;
+      }
+      // Bluetooth accepts writes while its counter is still frozen, so the
+      // provisional target can be written before it is validated (device
+      // 2026-10-29: applied after ~260ms, one off-beat click, then a re-phase
+      // 4 beats later). Hold it in silence; settle installs the real target.
+      const pending = this.pendingAudioTransition;
+      if (!held && pending !== undefined && pending.kind === 'play' && pending.token === token &&
+        this.audioTimelineToken !== token) {
+        pending.targetFrame = Number.MAX_SAFE_INTEGER;
+        held = true;
+      }
+      await MetronomeEngine.delay(COLD_START_COUNTER_POLL_MS);
+    }
+    console.info(`[StartTimingDiag] stage=counter-wait token=${token} moved=${framePos > initial} held=${held} ` +
+      `waitedMs=${(MonotonicClock.nowMs() - startedAt).toFixed(1)} ` +
+      `sinceStartMs=${(MonotonicClock.nowMs() - this.rendererStartedAtLocalMs).toFixed(1)} framePos=${framePos}`);
+  }
+
+  private noteClampedColdStart(token: number): void {
+    const transition = this.pendingAudioTransition;
+    const estimate = this.startTargetEstimate;
+    if (token !== this.runToken || !this.running || transition === undefined || transition.kind !== 'play' ||
+      transition.token !== token || estimate === undefined || estimate.token !== token) {
+      return;
+    }
+    const clampMs = (transition.targetFrame - estimate.requestedFrame) * 1000 / SAMPLE_RATE;
+    if (clampMs > START_CLAMP_REPHASE_MS) {
+      this.startClampRephaseToken = token;
+      console.warn(`[StartTimingDiag] stage=clamp-rephase token=${token} beat=${transition.beatIndex} ` +
+        `clampMs=${clampMs.toFixed(1)}`);
+    }
+  }
+
   private scheduleRunningTransition(transition: PendingAudioTransition): void {
     if (transition.token !== this.runToken) {
       return;
@@ -3395,6 +3698,8 @@ export class MetronomeEngine {
     const preserveActiveSequence = this.audioSequenceTransportRevision === this.transportRevision &&
       this.activeSequence.length > 0;
     const pendingPauseAt = this.scheduledPauseAtLocalMs;
+    // The route just changed; do not trust the cached wireless/speaker answer.
+    this.envelopeRouteCheckedAtMs = -1;
     const token = this.beginTransport(true);
     this.audioStreaming = false;
     this.phaseCorrectionFrames = 0;
@@ -3518,7 +3823,59 @@ export class MetronomeEngine {
       }
       await MetronomeEngine.delay(20);
     }
+    // A route switch restarts the envelope with an empty window. Target the
+    // shared grid only after it has filled (and any rebase has run), so the map
+    // does not move after the rephase and leave an error for slow feedback.
+    const envelopeWaitUntil = MonotonicClock.nowMs() + ROUTE_REPHASE_ENVELOPE_WAIT_MS;
+    while (this.playbackEnvelopeActive() &&
+      (this.envelopeRebasePending || this.envelopeCount < PLAYBACK_ENVELOPE_REBASE_MIN_SAMPLES)) {
+      if (!current()) {
+        return false;
+      }
+      if (MonotonicClock.nowMs() >= Math.min(applyDeadline, envelopeWaitUntil)) {
+        console.info(`[EnvelopeDiag] stage=route-rephase-unsettled samples=${this.envelopeCount} ` +
+          `rebasePending=${this.envelopeRebasePending}`);
+        break;
+      }
+      await MetronomeEngine.delay(20);
+    }
+    if (!await this.waitForFreshMovingCounter(current, applyDeadline)) {
+      return false;
+    }
     return current();
+  }
+
+  private async waitForFreshMovingCounter(current: () => boolean, applyDeadline: number): Promise<boolean> {
+    const startedAt = MonotonicClock.nowMs();
+    const waitUntil = Math.min(applyDeadline, startedAt + ROUTE_REPHASE_COUNTER_WAIT_MS);
+    const maxPolls = Math.ceil(ROUTE_REPHASE_COUNTER_WAIT_MS / ROUTE_REPHASE_COUNTER_POLL_MS);
+    let previousRaw = -1;
+    for (let poll = 0; poll <= maxPolls; poll++) {
+      if (!current()) {
+        return false;
+      }
+      const renderer = this.renderer;
+      const now = MonotonicClock.nowMs();
+      const read = renderer === undefined ? undefined : this.readRenderedStreamFrames(renderer, now);
+      const fresh = read !== undefined && this.lastAudioTimestampAgeMs >= -50 &&
+        this.lastAudioTimestampAgeMs <= ROUTE_REPHASE_FRESH_AGE_MS;
+      if (fresh && previousRaw >= 0 && this.lastAudioRawFrame > previousRaw) {
+        if (poll > 1) {
+          console.info(`[RouteRephaseDiag] stage=counter-ready waitedMs=${(now - startedAt).toFixed(1)} ` +
+            `ageMs=${this.lastAudioTimestampAgeMs.toFixed(1)}`);
+        }
+        return true;
+      }
+      previousRaw = read === undefined ? -1 : this.lastAudioRawFrame;
+      if (now >= waitUntil || poll === maxPolls) {
+        // Proceed rather than abandon the route; the log marks a possibly stale target.
+        console.warn(`[RouteRephaseDiag] stage=counter-unsettled waitedMs=${(now - startedAt).toFixed(1)} ` +
+          `ageMs=${this.lastAudioTimestampAgeMs.toFixed(1)}`);
+        return true;
+      }
+      await MetronomeEngine.delay(ROUTE_REPHASE_COUNTER_POLL_MS);
+    }
+    return true;
   }
 
   private async installOutputRouteTransition(token: number, oldCompensationMs: number,
@@ -3669,12 +4026,18 @@ export class MetronomeEngine {
 
   private resetAudioTimestampState(): void {
     this.productionClockSample = undefined;
+    this.resetPlaybackEnvelope();
+    this.envelopeRebasePending = false;
     this.audioClockContinuityLost = false;
     this.audioTimelineToken = -1;
     this.audioTimelineLeadFrames = 0;
     this.audioTimelineOutputLatencyMs = 0;
     this.audioTimestampBaseFrame = 0;
     this.audioTimestampBaseReady = false;
+    this.audioTimestampBaseBroken = false;
+    this.audioTimestampBaseExactOrigin = false;
+    this.restartOriginTrace = [];
+    this.restartOriginTraceLogged = false;
     this.audioTimestampClockOffsetMs = undefined;
     this.rendererStartedAtLocalMs = 0;
     this.lastRenderedStreamFrame = 0;
@@ -3970,6 +4333,8 @@ export class MetronomeEngine {
   }
 
   private resetPhaseCorrectionState(): void {
+    this.phaseResyncStreak = 0;
+    this.phaseResyncAfterRebase = false;
     this.phaseCorrectionFrames = 0;
     this.phaseCorrectionHead = 0;
     this.phaseCorrectionCount = 0;
@@ -4074,6 +4439,286 @@ export class MetronomeEngine {
   }
 
   /** Map the renderer's persistent frame counter into this stream's submitted-frame coordinate. */
+  private resetPlaybackEnvelope(): void {
+    this.envelopeLastMaxOffset = undefined;
+    this.envelopeLastSample = undefined;
+    this.envelopeHead = 0;
+    this.envelopeCount = 0;
+    this.envelopeRendererEpoch = -1;
+    this.envelopePhysicalStartCount = -1;
+    this.envelopeLastRawFrame = -1;
+  }
+
+  /** Records one native read; a new renderer/start or raw counter regression restarts the window. */
+  private recordPlaybackEnvelopeSample(sample: CalibrationClockSample): void {
+    if (this.rendererStartedAtLocalMs > 0 &&
+      sample.queryMonoMs - this.rendererStartedAtLocalMs < PLAYBACK_ENVELOPE_WARMUP_MS) {
+      return;
+    }
+    if (this.envelopeRendererEpoch !== this.rendererEpoch ||
+      this.envelopePhysicalStartCount !== this.rendererPhysicalStartCount ||
+      (this.envelopeLastRawFrame >= 0 && sample.framePos < this.envelopeLastRawFrame)) {
+      this.resetPlaybackEnvelope();
+      this.envelopeRendererEpoch = this.rendererEpoch;
+      this.envelopePhysicalStartCount = this.rendererPhysicalStartCount;
+    }
+    if (sample.queryMonoMs - sample.timestampMonoMs > PLAYBACK_ENVELOPE_MAX_SAMPLE_AGE_MS) {
+      return;
+    }
+    const offset = sample.framePos - sample.timestampMonoMs * SAMPLE_RATE / 1000;
+    if (this.envelopeCount > 0 && sample.framePos !== this.envelopeLastRawFrame) {
+      let maxOffset = Number.NEGATIVE_INFINITY;
+      for (let i = 0; i < this.envelopeCount; i++) {
+        const k = (this.envelopeHead + i) % PLAYBACK_ENVELOPE_CAPACITY;
+        if (sample.timestampMonoMs - this.envelopeSampleMonoMs[k] <= PLAYBACK_ENVELOPE_MAX_AGE_MS) {
+          maxOffset = Math.max(maxOffset, this.envelopeOffsets[k]);
+        }
+      }
+      const dropMs = (maxOffset - offset) * 1000 / SAMPLE_RATE;
+      if (dropMs > PLAYBACK_ENVELOPE_STALL_DROP_MS) {
+        console.info(`[EnvelopeDiag] stage=stall-reset dropMs=${dropMs.toFixed(1)} samples=${this.envelopeCount}`);
+        this.resetPlaybackEnvelope();
+        this.envelopeRendererEpoch = this.rendererEpoch;
+        this.envelopePhysicalStartCount = this.rendererPhysicalStartCount;
+      }
+    }
+    if (this.envelopeCount > 0 && sample.framePos === this.envelopeLastRawFrame) {
+      // Same HAL period as the previous read: keep the less-lagged one in place so
+      // repeated reads cannot crowd distinct period phases out of the window.
+      const last = (this.envelopeHead + this.envelopeCount - 1) % PLAYBACK_ENVELOPE_CAPACITY;
+      // Age follows the kept read, so a counter that stops advancing still
+      // leaves the window after PLAYBACK_ENVELOPE_MAX_AGE_MS.
+      if (offset > this.envelopeOffsets[last]) {
+        this.envelopeOffsets[last] = offset;
+        this.envelopeSampleMonoMs[last] = sample.timestampMonoMs;
+      }
+      this.envelopeLastSample = sample;
+      return;
+    }
+    this.envelopeLastRawFrame = sample.framePos;
+    this.envelopeLastSample = sample;
+    const index = (this.envelopeHead + this.envelopeCount) % PLAYBACK_ENVELOPE_CAPACITY;
+    if (this.envelopeCount === PLAYBACK_ENVELOPE_CAPACITY) {
+      this.envelopeHead = (this.envelopeHead + 1) % PLAYBACK_ENVELOPE_CAPACITY;
+    } else {
+      this.envelopeCount++;
+    }
+    this.envelopeOffsets[index] = offset;
+    this.envelopeSampleMonoMs[index] = sample.timestampMonoMs;
+  }
+
+  /** Raw-counter frame at nowMs from the least-lagged recent read, or undefined. */
+  private playbackEnvelopeRawFrameAt(nowMs: number): number | undefined {
+    let best = Number.NEGATIVE_INFINITY;
+    for (let i = 0; i < this.envelopeCount; i++) {
+      const index = (this.envelopeHead + i) % PLAYBACK_ENVELOPE_CAPACITY;
+      if (nowMs - this.envelopeSampleMonoMs[index] <= PLAYBACK_ENVELOPE_MAX_AGE_MS &&
+        this.envelopeOffsets[index] > best) {
+        best = this.envelopeOffsets[index];
+      }
+    }
+    return Number.isFinite(best) ? best + nowMs * SAMPLE_RATE / 1000 : undefined;
+  }
+
+  /**
+   * Rate-limited EnvelopeDiag: logs a window-maximum jump above 2ms and a
+   * spread summary every 5s while streaming. Reads only cached envelope state.
+   */
+  private logPlaybackEnvelopeDiagnostics(nowMs: number, envelopeRawFrame: number): void {
+    const maxOffset = envelopeRawFrame - nowMs * SAMPLE_RATE / 1000;
+    let minOffset = Number.POSITIVE_INFINITY;
+    let valid = 0;
+    for (let i = 0; i < this.envelopeCount; i++) {
+      const index = (this.envelopeHead + i) % PLAYBACK_ENVELOPE_CAPACITY;
+      if (nowMs - this.envelopeSampleMonoMs[index] <= PLAYBACK_ENVELOPE_MAX_AGE_MS) {
+        minOffset = Math.min(minOffset, this.envelopeOffsets[index]);
+        valid++;
+      }
+    }
+    const toMs = (frames: number): string => (frames * 1000 / SAMPLE_RATE).toFixed(2);
+    const previous = this.envelopeLastMaxOffset;
+    this.envelopeLastMaxOffset = maxOffset;
+    const shift = previous === undefined ? 0 : maxOffset - previous;
+    const jump = Math.abs(shift) > 2 * SAMPLE_RATE / 1000;
+    const summaryDue = this.audioStreaming &&
+      (this.envelopeDiagSummaryAtMs < 0 || nowMs - this.envelopeDiagSummaryAtMs >= 5000);
+    if (!jump && !summaryDue) {
+      return;
+    }
+    if (summaryDue) {
+      this.envelopeDiagSummaryAtMs = nowMs;
+    }
+    const last = this.envelopeLastSample;
+    const lastOffset = last === undefined ? undefined :
+      last.framePos - last.timestampMonoMs * SAMPLE_RATE / 1000;
+    console.info(`[EnvelopeDiag] stage=${jump ? 'max-jump' : 'summary'} shiftMs=${toMs(shift)} ` +
+      `spreadMs=${toMs(maxOffset - minOffset)} samples=${valid} ` +
+      `lastLagMs=${lastOffset === undefined ? 'NA' : toMs(maxOffset - lastOffset)} ` +
+      `lastAgeMs=${last === undefined ? 'NA' : (last.queryMonoMs - last.timestampMonoMs).toFixed(2)} ` +
+      `lastRawFrame=${last?.framePos ?? -1} outputLatencyMs=${this.outputLatencyMs}`);
+  }
+
+  private playbackEnvelopeActive(): boolean {
+    if (!this.playbackPositionEnvelopeEnabled || (EXPERIMENTAL_EXACT_PLAYBACK_FRAME_MAP &&
+      this.calibrationFrameOriginExact && !this.calibrationRouteResetPending &&
+      !this.micCalibrationRendererRebuildPending)) {
+      return false;
+    }
+    const nowMs = MonotonicClock.nowMs();
+    const previousWireless = this.envelopeRouteWireless;
+    if (this.envelopeRouteCheckedAtMs < 0 || nowMs - this.envelopeRouteCheckedAtMs >= PLAYBACK_ENVELOPE_ROUTE_CHECK_MS) {
+      this.envelopeRouteCheckedAtMs = nowMs;
+      this.envelopeRouteWireless = AudioOutputMonitor.isBluetoothA2dpActive();
+    }
+    // Every route uses the envelope. Bluetooth was excluded on 2026-10-28 for a
+    // counter "jumping ahead" and a ~60ms sawtooth; both were the clamped broken
+    // map, and 2026-10-29 traces and a listening trial showed it behaves like
+    // the speaker once stalls restart the window.
+    if (previousWireless !== this.envelopeRouteWireless) {
+      // Samples from another route cannot describe this one; an elapsed-time
+      // base may be replaced once, as at a fresh start.
+      this.resetPlaybackEnvelope();
+      this.envelopeRebasePending = this.audioTimestampBaseReady && !this.audioTimestampBaseExactOrigin;
+      console.info(`[EnvelopeDiag] stage=route active=true wireless=${this.envelopeRouteWireless}`);
+    }
+    return true;
+  }
+
+  /**
+   * Debug builds only: framePos per callback for the first 1.5s of every
+   * physical start, logged once, to see when its counter starts moving (and,
+   * after a stop, where it resumes). No production decision depends on it.
+   */
+  private traceRestartOrigin(): void {
+    const renderer = this.renderer;
+    if (!DEBUG || renderer === undefined || !this.rendererStarted || this.restartOriginTraceLogged) {
+      return;
+    }
+    const nowMs = MonotonicClock.nowMs();
+    const elapsedMs = nowMs - this.rendererStartedAtLocalMs;
+    if (elapsedMs <= 1500 && this.restartOriginTrace.length < 24) {
+      try {
+        const info = renderer.getAudioTimestampInfoSync();
+        this.restartOriginTrace.push(`${elapsedMs.toFixed(0)}:${info.framePos}:${this.audioSubmittedFrames}`);
+      } catch (_e) {
+        this.restartOriginTrace.push(`${elapsedMs.toFixed(0)}:error`);
+      }
+      return;
+    }
+    this.restartOriginTraceLogged = true;
+    console.info(`[RestartOriginDiag] stage=startup physicalStartCount=${this.rendererPhysicalStartCount} ` +
+      `preStopFramePos=${this.framePosAtLastStop} ` +
+      `sinceStopMs=${this.framePosAtLastStopMonoMs < 0 ? -1 : (this.rendererStartedAtLocalMs - this.framePosAtLastStopMonoMs).toFixed(1)} ` +
+      `trace=${this.restartOriginTrace.join(',')}`);
+  }
+
+  /** Extra envelope reads between beats so the window fills within ~1s of a start. */
+  private samplePlaybackEnvelope(): void {
+    const renderer = this.renderer;
+    if (renderer === undefined || !this.rendererStarted || !this.playbackEnvelopeActive()) {
+      return;
+    }
+    const sample = this.readDrumPreviewNativeSample(renderer);
+    if (sample !== undefined) {
+      this.recordPlaybackEnvelopeSample(sample);
+      // Callback reads can complete the rebase even when no beat check runs,
+      // e.g. while a route rephase is waiting for the new route's window.
+      if (this.audioTimestampBaseReady) {
+        this.maybeRebaseFromPlaybackEnvelope(renderer, MonotonicClock.nowMs());
+      }
+    }
+  }
+
+  private readRendererUnderflowCount(renderer: audio.AudioRenderer): number {
+    try {
+      return renderer.getUnderflowCountSync();
+    } catch (_e) {
+      return -1;
+    }
+  }
+
+  /**
+   * Applies the pending one-shot rebase once the window has enough distinct
+   * periods. Skips it (keeping the current base, which stays valid because the
+   * raw counter is continuous) when an underflow has happened since the base
+   * was set or the count is unavailable. Returns true when the base changed.
+   */
+  private maybeRebaseFromPlaybackEnvelope(renderer: audio.AudioRenderer, nowMs: number): boolean {
+    if (!this.envelopeRebasePending || this.envelopeCount < PLAYBACK_ENVELOPE_REBASE_MIN_SAMPLES) {
+      return false;
+    }
+    this.envelopeRebasePending = false;
+    const underflows = this.readRendererUnderflowCount(renderer);
+    if (underflows < 0 || this.envelopeUnderflowsAtBase < 0 || underflows !== this.envelopeUnderflowsAtBase) {
+      console.info(`[EnvelopeDiag] stage=rebase-skipped reason=underflow-or-unknown ` +
+        `underflowsAtBase=${this.envelopeUnderflowsAtBase} underflows=${underflows}`);
+      return false;
+    }
+    const envelopeRawFrame = this.playbackEnvelopeRawFrameAt(nowMs);
+    if (envelopeRawFrame === undefined) {
+      return false;
+    }
+    const before = this.audioTimestampBaseFrame;
+    this.rebaseFromPlaybackEnvelope(envelopeRawFrame, nowMs);
+    if (Math.abs(before - this.audioTimestampBaseFrame) >=
+      AUDIO_PHASE_RESYNC_ENVELOPE_THRESHOLD_MS * SAMPLE_RATE / 1000) {
+      this.phaseResyncAfterRebase = true;
+    }
+    return this.audioTimestampBaseFrame !== before;
+  }
+
+  /**
+   * Same elapsed-time base formula as the first read of this physical start, but
+   * with a least-lagged raw position, so the first read's random lag (0..one HAL
+   * period) is not baked into the map for the whole stream. Runs once per start.
+   */
+  private rebaseFromPlaybackEnvelope(envelopeRawFrame: number, nowMs: number): void {
+    const elapsedFrames = (nowMs - this.rendererStartedAtLocalMs) * SAMPLE_RATE / 1000;
+    // An underflowed start cannot prove how much played; keep the legacy base.
+    if (!(elapsedFrames > 0) || elapsedFrames >= this.audioSubmittedFrames) {
+      return;
+    }
+    const previousBaseFrame = this.audioTimestampBaseFrame;
+    this.audioTimestampBaseFrame = envelopeRawFrame - elapsedFrames;
+    console.info(`[ProductionClockDiag] stage=frame-map state=base-update reason=envelope-rebase ` +
+      `rendererEpoch=${this.rendererEpoch} physicalStartCount=${this.rendererPhysicalStartCount} ` +
+      `previousBaseFrame=${previousBaseFrame.toFixed(1)} baseFrame=${this.audioTimestampBaseFrame.toFixed(1)} ` +
+      `deltaMs=${((previousBaseFrame - this.audioTimestampBaseFrame) * 1000 / SAMPLE_RATE).toFixed(2)} ` +
+      `samples=${this.envelopeCount}`);
+  }
+
+  /**
+   * Any underflow after the base was set means the counter ran over silence the
+   * map counts as content. On Bluetooth the ~270ms queue hides that from the
+   * excess check (device 2026-10-29: 12 underflows after a reconnect left a map
+   * that made a time-card measurement read 151ms instead of ~309ms).
+   */
+  private noteUnderflowSinceBase(renderer: audio.AudioRenderer): void {
+    if (this.audioTimestampBaseBroken || !this.audioTimestampBaseReady || this.envelopeUnderflowsAtBase < 0) {
+      return;
+    }
+    const underflows = this.readRendererUnderflowCount(renderer);
+    if (underflows < 0 || underflows === this.envelopeUnderflowsAtBase) {
+      return;
+    }
+    this.audioTimestampBaseBroken = true;
+    console.warn(`[ProductionClockDiag] stage=frame-map state=base-broken reason=underflow ` +
+      `rendererEpoch=${this.rendererEpoch} physicalStartCount=${this.rendererPhysicalStartCount} ` +
+      `underflowsAtBase=${this.envelopeUnderflowsAtBase} underflows=${underflows}`);
+  }
+
+  private noteFrameMapExcess(excessFrames: number, nowMs: number): void {
+    if (this.audioTimestampBaseBroken || nowMs - this.rendererStartedAtLocalMs < FRAME_MAP_BROKEN_GRACE_MS ||
+      excessFrames <= FRAME_MAP_BROKEN_EXCESS_MS * SAMPLE_RATE / 1000) {
+      return;
+    }
+    this.audioTimestampBaseBroken = true;
+    console.warn(`[ProductionClockDiag] stage=frame-map state=base-broken reason=excess ` +
+      `rendererEpoch=${this.rendererEpoch} physicalStartCount=${this.rendererPhysicalStartCount} ` +
+      `excessMs=${(excessFrames * 1000 / SAMPLE_RATE).toFixed(1)} submittedFrames=${this.audioSubmittedFrames} ` +
+      `underflowsAtBase=${this.envelopeUnderflowsAtBase} streaming=${this.audioStreaming}`);
+  }
+
   private readRenderedStreamFrames(renderer: audio.AudioRenderer, nowMs: number): number | undefined {
     this.productionClockSample = undefined;
     if (EXPERIMENTAL_EXACT_PLAYBACK_FRAME_MAP && this.calibrationFrameOriginExact &&
@@ -4122,11 +4767,24 @@ export class MetronomeEngine {
     }
     this.lastAudioFrameMapExact = false;
     try {
-      const info = renderer.getAudioTimestampInfoSync();
-      if (info.timestamp <= 0) {
-        return undefined;
+      // The envelope needs the ACTIVE-domain timestamp converted with a bracketed
+      // read; the legacy path keeps its single direct query for A/B parity. If the
+      // bracketed read is unavailable this read falls back to the legacy query, so
+      // the estimator can never take away an otherwise working playback clock.
+      const envelopeSample = this.playbackEnvelopeActive() ? this.readDrumPreviewNativeSample(renderer) : undefined;
+      let framePos: number;
+      let rawTimestampMs: number;
+      if (envelopeSample !== undefined) {
+        framePos = envelopeSample.framePos;
+        rawTimestampMs = envelopeSample.rawTimestampMs;
+      } else {
+        const info = renderer.getAudioTimestampInfoSync();
+        if (info.timestamp <= 0) {
+          return undefined;
+        }
+        framePos = info.framePos;
+        rawTimestampMs = info.timestamp / 1000000;
       }
-      const rawTimestampMs = info.timestamp / 1000000;
       if (this.audioTimestampClockOffsetMs === undefined) {
         this.audioTimestampClockOffsetMs = rawTimestampMs - nowMs;
       }
@@ -4138,46 +4796,102 @@ export class MetronomeEngine {
       }
       const previousRawFrame = this.lastAudioRawFrame;
       let baseUpdateReason = 'retained';
+      if (this.audioTimestampBaseFromIdleCounter &&
+        nowMs - this.rendererStartedAtLocalMs > IDLE_COUNTER_REANCHOR_WINDOW_MS) {
+        this.audioTimestampBaseFromIdleCounter = false;
+      }
       if (!this.audioTimestampBaseReady) {
         // framePos can survive stop/flush on some devices. Anchor it to the
         // amount that could actually have played since this physical start.
         const elapsedFrames = Math.max(0,
           (nowMs - this.rendererStartedAtLocalMs) * SAMPLE_RATE / 1000);
-        const playedEstimate = Math.min(this.audioSubmittedFrames, elapsedFrames);
-        this.audioTimestampBaseFrame = info.framePos - playedEstimate;
+        const freshOrigin = this.freshOriginBaseEnabled && this.rendererPhysicalStartCount === 1 &&
+          framePos >= 0 && framePos <= this.audioSubmittedFrames;
+        // A restart resumes counting from where the counter froze at stop; only
+        // an early read is guaranteed to still see that value.
+        const restartOrigin = !freshOrigin && this.freshOriginBaseEnabled &&
+          this.rendererPhysicalStartCount >= 2 && framePos >= 0 &&
+          nowMs - this.rendererStartedAtLocalMs <= RESTART_ORIGIN_MAX_FIRST_READ_MS;
+        const exactOrigin = freshOrigin || restartOrigin;
+        const playedEstimate = freshOrigin ? framePos : restartOrigin ? 0 :
+          Math.min(this.audioSubmittedFrames, elapsedFrames);
+        this.audioTimestampBaseFrame = framePos - playedEstimate;
         this.audioTimestampBaseReady = true;
-        baseUpdateReason = 'elapsed-time-initialization';
+        this.audioTimestampBaseExactOrigin = exactOrigin;
+        this.audioTimestampBaseFromIdleCounter = !exactOrigin;
+        this.audioTimestampBaseInitRawFrame = framePos;
+        this.envelopeRebasePending = envelopeSample !== undefined && !exactOrigin;
+        this.envelopeUnderflowsAtBase = this.readRendererUnderflowCount(renderer);
+        baseUpdateReason = freshOrigin ? 'fresh-origin' : restartOrigin ? 'restart-origin' :
+          'elapsed-time-initialization';
         const clockOffset = this.audioTimestampClockOffsetMs === undefined ? 'NA' :
           this.audioTimestampClockOffsetMs.toFixed(1);
         console.info(`[ClockDiag] rawTs=${rawTimestampMs.toFixed(1)}ms now=${nowMs.toFixed(1)}ms ` +
-          `clockOffset=${clockOffset}ms framePos=${info.framePos} ` +
+          `clockOffset=${clockOffset}ms framePos=${framePos} ` +
           `elapsedFrames=${elapsedFrames.toFixed(0)} playedEstimate=${playedEstimate.toFixed(0)} ` +
           `baseFrame=${this.audioTimestampBaseFrame.toFixed(0)}`);
-      } else if (this.lastAudioRawFrame >= 0 && info.framePos < this.lastAudioRawFrame) {
+        console.info(`[ProductionClockDiag] stage=frame-map state=base-init origin=${freshOrigin ? 'fresh' : restartOrigin ? 'restart' : 'elapsed'} ` +
+          `physicalStartCount=${this.rendererPhysicalStartCount} framePos=${framePos} ` +
+          `framePosAtLastStop=${this.framePosAtLastStop} elapsedMs=${(elapsedFrames * 1000 / SAMPLE_RATE).toFixed(1)}`);
+      } else if (this.audioTimestampBaseFromIdleCounter && framePos > this.audioTimestampBaseInitRawFrame) {
+        this.audioTimestampBaseFromIdleCounter = false;
+        const elapsedFrames = (nowMs - this.rendererStartedAtLocalMs) * SAMPLE_RATE / 1000;
+        // Same formula as the envelope rebase (age-corrected position), so the
+        // later rebase only refines this read's HAL-period lag. An underflow
+        // means not every elapsed frame played; keep the provisional base then.
+        const underflows = this.readRendererUnderflowCount(renderer);
+        const candidateBaseFrame = framePos +
+          Math.max(0, Math.min(250, timestampAgeMs)) * SAMPLE_RATE / 1000 - elapsedFrames;
+        if (elapsedFrames > 0 && elapsedFrames < this.audioSubmittedFrames &&
+          underflows >= 0 && underflows === this.envelopeUnderflowsAtBase &&
+          Math.abs(candidateBaseFrame - this.audioTimestampBaseFrame) >
+            IDLE_COUNTER_REANCHOR_MIN_MS * SAMPLE_RATE / 1000) {
+          const previousBaseFrame = this.audioTimestampBaseFrame;
+          this.audioTimestampBaseFrame = candidateBaseFrame;
+          baseUpdateReason = 'idle-counter-reanchor';
+          console.info(`[ProductionClockDiag] stage=frame-map state=base-update reason=idle-counter-reanchor ` +
+            `rendererEpoch=${this.rendererEpoch} physicalStartCount=${this.rendererPhysicalStartCount} ` +
+            `rawFrame=${framePos} previousBaseFrame=${previousBaseFrame.toFixed(1)} ` +
+            `baseFrame=${this.audioTimestampBaseFrame.toFixed(1)} ` +
+            `deltaMs=${((previousBaseFrame - this.audioTimestampBaseFrame) * 1000 / SAMPLE_RATE).toFixed(2)}`);
+        }
+      } else if (this.lastAudioRawFrame >= 0 && framePos < this.lastAudioRawFrame) {
         // Other observers can see the regression before phase feedback does.
         // Retain that evidence until a new transition proves the content origin.
         this.audioClockContinuityLost = this.audioStreaming || this.audioClockContinuityLost;
         const previousBaseFrame = this.audioTimestampBaseFrame;
-        if (this.calibrationFramePosRegressedBeyondQuantum(this.lastAudioRawFrame, info.framePos)) {
+        if (this.calibrationFramePosRegressedBeyondQuantum(this.lastAudioRawFrame, framePos)) {
           // The legacy recovery remains unchanged, but its diagnostic cannot
           // assume raw zero survived an unexplained hardware-counter reset.
           this.diagnosticRawOriginLost = true;
         }
-        this.audioTimestampBaseFrame = info.framePos - this.lastRenderedStreamFrame;
+        this.audioTimestampBaseFrame = framePos - this.lastRenderedStreamFrame;
         baseUpdateReason = 'raw-frame-regression';
         console.info(`[ProductionClockDiag] stage=frame-map state=base-update reason=raw-frame-regression ` +
           `rendererEpoch=${this.rendererEpoch} streamId=${this.rendererStreamId} ` +
           `physicalStartCount=${this.rendererPhysicalStartCount} previousRawFrame=${previousRawFrame} ` +
-          `rawFrame=${info.framePos} previousBaseFrame=${previousBaseFrame.toFixed(1)} ` +
+          `rawFrame=${framePos} previousBaseFrame=${previousBaseFrame.toFixed(1)} ` +
           `baseFrame=${this.audioTimestampBaseFrame.toFixed(1)} queryMonoMs=${nowMs.toFixed(1)}`);
       }
-      this.lastAudioRawFrame = info.framePos;
+      this.lastAudioRawFrame = framePos;
+      let rawFrameNow = framePos + Math.max(0, Math.min(250, timestampAgeMs)) * SAMPLE_RATE / 1000;
+      if (envelopeSample !== undefined) {
+        this.recordPlaybackEnvelopeSample(envelopeSample);
+        const envelopeRawFrame = this.playbackEnvelopeRawFrameAt(nowMs);
+        if (envelopeRawFrame !== undefined) {
+          rawFrameNow = envelopeRawFrame;
+          this.logPlaybackEnvelopeDiagnostics(nowMs, envelopeRawFrame);
+          if (this.maybeRebaseFromPlaybackEnvelope(renderer, nowMs)) {
+            rawFrameNow = this.playbackEnvelopeRawFrameAt(nowMs) ?? rawFrameNow;
+          }
+        }
+      }
+      this.noteFrameMapExcess(rawFrameNow - this.audioTimestampBaseFrame - this.audioSubmittedFrames, nowMs);
       // Presentation cannot advance beyond data already accepted by the
       // renderer. This clamp also contains stale first timestamps on routes
       // whose hardware clock becomes available late.
       const renderedFrames = Math.min(this.audioSubmittedFrames, Math.max(0,
-        info.framePos - this.audioTimestampBaseFrame +
-        Math.max(0, Math.min(250, timestampAgeMs)) * SAMPLE_RATE / 1000));
+        rawFrameNow - this.audioTimestampBaseFrame));
       this.lastRenderedStreamFrame = renderedFrames;
       this.queueDepthFrames = Math.max(0, this.audioSubmittedFrames - renderedFrames);
       this.productionClockSample = {
@@ -4185,7 +4899,7 @@ export class MetronomeEngine {
         streamId: this.rendererStreamId,
         physicalStartCount: this.rendererPhysicalStartCount,
         queryMonoMs: nowMs,
-        rawFrame: info.framePos,
+        rawFrame: framePos,
         rawTimestampMs,
         renderedFrame: renderedFrames,
         submittedFrames: this.audioSubmittedFrames,
@@ -4274,9 +4988,46 @@ export class MetronomeEngine {
       this.transportPreviewStartPositionBeats === undefined && this.drumPreviewPlan === undefined;
   }
 
+  private shouldResyncPhase(phaseError: number, nowMs: number): boolean {
+    // Only the envelope map is trusted for a one-step jump; with the envelope
+    // switched off (envelope-off A/B) feedback keeps bounded slewing.
+    if (!this.lastPhaseErrorAvailable) {
+      return false; // no new evidence; keep the streak
+    }
+    if (!this.playbackEnvelopeActive()) {
+      this.phaseResyncStreak = 0;
+      return false;
+    }
+    const thresholdFrames = AUDIO_PHASE_RESYNC_ENVELOPE_THRESHOLD_MS * SAMPLE_RATE / 1000;
+    if (Math.abs(phaseError) < thresholdFrames) {
+      this.phaseResyncStreak = 0;
+      this.phaseResyncAfterRebase = false;
+      return false;
+    }
+    if (this.phaseResyncAfterRebase && !this.outputRouteRephasePreparing &&
+      this.pendingAudioTransition === undefined) {
+      this.phaseResyncAfterRebase = false;
+      this.phaseResyncStreak = 0;
+      return true;
+    }
+    const consistent = this.phaseResyncStreak > 0 && phaseError * this.phaseResyncLastFrames > 0 &&
+      Math.abs(phaseError - this.phaseResyncLastFrames) <= AUDIO_PHASE_RESYNC_CONSISTENCY_MS * SAMPLE_RATE / 1000;
+    this.phaseResyncStreak = consistent ? this.phaseResyncStreak + 1 : 1;
+    this.phaseResyncLastFrames = phaseError;
+    if (this.phaseResyncStreak < AUDIO_PHASE_RESYNC_CONFIRMATIONS ||
+      (this.phaseResyncAtMs >= 0 && nowMs - this.phaseResyncAtMs < AUDIO_PHASE_RESYNC_COOLDOWN_MS) ||
+      this.outputRouteRephasePreparing || this.pendingAudioTransition !== undefined) {
+      return false;
+    }
+    this.phaseResyncStreak = 0;
+    return true;
+  }
+
   /** Residual after all queued corrections; positive means the audible source is early. */
   private measurePhaseErrorFrames(): number {
-    return this.readPhaseErrorFrames() ?? 0;
+    const reading = this.readPhaseErrorFrames();
+    this.lastPhaseErrorAvailable = reading !== undefined;
+    return reading ?? 0;
   }
 
   /** Unavailable feedback cannot prove continuity after a background suspension. */
@@ -4329,6 +5080,17 @@ export class MetronomeEngine {
     const budgetFrames = firstCheck ? AUDIO_PHASE_LOCK_MAX_STEP_FRAMES :
       Math.floor(elapsedMs * SAMPLE_RATE * AUDIO_PHASE_CORRECTION_RATE_PPM / 1e9);
     const phaseError = this.measurePhaseErrorFrames();
+    if (this.shouldResyncPhase(phaseError, nowMs)) {
+      this.phaseResyncAtMs = nowMs;
+      console.warn(`[PhaseLockDiag] stage=resync residualFrames=${phaseError} ` +
+        `residualMs=${(phaseError * 1000 / SAMPLE_RATE).toFixed(1)}`);
+      // Same path as an output-route change: keep the renderer, move this
+      // device's content onto a future beat of the unchanged shared transport.
+      void this.rescheduleForOutputRouteChange().catch((err: Error) => {
+        console.warn(`MetronomeEngine phase resync failed: ${err.message}`);
+      });
+      return;
+    }
     if (budgetFrames > 0 && Math.abs(phaseError) >= AUDIO_PHASE_LOCK_THRESHOLD_FRAMES) {
       const requested = Math.max(-budgetFrames, Math.min(budgetFrames, phaseError));
       // No quiet window must not accumulate seconds of future insert/drop work.

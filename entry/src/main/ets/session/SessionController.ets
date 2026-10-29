@@ -13,6 +13,7 @@ import {
   TRANSPORT_START_PREPARE_TIMEOUT_MS
 } from '../common/Constants';
 import { DEBUG } from 'BuildProfile';
+
 import { MonotonicClock } from '../common/MonotonicClock';
 import { createMessage } from '../protocol/messages';
 import {
@@ -70,6 +71,20 @@ import {
   rosterKeysForLobby
 } from '../assets/CharacterCatalog';
 
+// Two resync periods; must stay below ClockSync's 15s CLOCK_MAPPING_HOLDOVER_MS
+// so a member that pinged this recently still holds a usable leader mapping.
+const PAUSE_SKIP_PREPARE_MAX_PING_AGE_MS: number = 2 * RESYNC_INTERVAL_MS;
+interface ConfigurationRestartWaiter {
+  resolve: () => void;
+  reject: (error: Error) => void;
+}
+
+// Live setting changes (BPM +/-, typed value, sound, meter, beat points, rhythm)
+// restart only after this much quiet. Each restart broadcasts a snapshot that
+// re-renders PCM on every device's JS thread; on device, rapid presses caused
+// render underflows that desynchronized the team (2026-10-28).
+const CONFIGURATION_RESTART_COALESCE_MS: number = 350;
+
 export type SessionUiListener = () => void;
 
 export interface ProDrumEditorSettings {
@@ -123,6 +138,12 @@ export class SessionController {
   private readonly usedAuthNonces: Set<string> = new Set();
   private readonly pendingPings: Map<string, (payload: PongPayload) => void> = new Map();
   private readonly connectionLastSeenMs: Map<string, number> = new Map();
+  // Leader-side receipt time of each member's latest clock PING. Members ping
+  // every RESYNC_INTERVAL_MS while their JS runs, so a recent ping means their
+  // leader mapping is inside its holdover window without another prepare round.
+  private readonly connectionLastPingMs: Map<string, number> = new Map();
+  private configurationRestartTimer: number = -1;
+  private configurationRestartWaiters: ConfigurationRestartWaiter[] = [];
   private p2pInvitation: P2pRoomInvitation | undefined = undefined;
   private uiListener: SessionUiListener = () => {
   };
@@ -754,6 +775,7 @@ export class SessionController {
         this.connectionMembers.delete(connectionId);
         this.authenticatedConnections.delete(connectionId);
         this.connectionLastSeenMs.delete(connectionId);
+        this.connectionLastPingMs.delete(connectionId);
         this.releaseTransportPreparationConnection(connectionId);
         void this.broadcastSnapshot();
       }
@@ -793,6 +815,14 @@ export class SessionController {
 
   async disconnect(): Promise<void> {
     this.transportRequestGeneration += 1;
+    // A coalesced restart must not broadcast after teardown; its callers settle now.
+    if (this.configurationRestartTimer >= 0) {
+      clearTimeout(this.configurationRestartTimer);
+      this.configurationRestartTimer = -1;
+    }
+    const waiters = this.configurationRestartWaiters;
+    this.configurationRestartWaiters = [];
+    waiters.forEach((waiter: ConfigurationRestartWaiter) => waiter.resolve());
     this.drumArrangementUpdateId += 1;
     this.drumArrangementBaseline = undefined;
     this.drumArrangementPendingRaw = '';
@@ -811,6 +841,7 @@ export class SessionController {
       await this.server.stop();
       this.authenticatedConnections.clear();
       this.connectionLastSeenMs.clear();
+      this.connectionLastPingMs.clear();
       this.usedAuthNonces.clear();
     } else {
       await this.announceLeave();
@@ -864,7 +895,7 @@ export class SessionController {
       await this.broadcastSnapshot();
       return;
     }
-    await this.restartRunningTransportAfterConfiguration();
+    await this.requestCoalescedConfigurationRestart();
   }
 
   async updateSoundId(next: number): Promise<void> {
@@ -875,7 +906,7 @@ export class SessionController {
       await this.broadcastSnapshot();
       return;
     }
-    await this.restartRunningTransportAfterConfiguration();
+    await this.requestCoalescedConfigurationRestart();
   }
 
   async updateAvatar(key: string): Promise<void> {
@@ -929,7 +960,7 @@ export class SessionController {
       return;
     }
 
-    await this.restartRunningTransportAfterConfiguration();
+    await this.requestCoalescedConfigurationRestart();
   }
 
   async cycleBeatPointState(index: number): Promise<void> {
@@ -944,7 +975,38 @@ export class SessionController {
       await this.broadcastSnapshot();
       return;
     }
-    await this.restartRunningTransportAfterConfiguration();
+    await this.requestCoalescedConfigurationRestart();
+  }
+
+  /**
+   * Coalesces live configuration changes into one shared restart. Every caller
+   * resolves when that restart settles. The value is already stored, so the UI
+   * refreshes at once without re-rendering audio. If another transport request
+   * (pause/resume/start) or a stop happens while waiting, only the configuration
+   * is published, so a pending pause is never overridden by a restart.
+   */
+  private requestCoalescedConfigurationRestart(): Promise<void> {
+    if (this.configurationRestartTimer >= 0) {
+      clearTimeout(this.configurationRestartTimer);
+    }
+    const generation = this.transportRequestGeneration;
+    AppStorage.setOrCreate('sessionEpoch', (AppStorage.get<number>('sessionEpoch') ?? 0) + 1);
+    return new Promise<void>((resolve: () => void, reject: (error: Error) => void) => {
+      this.configurationRestartWaiters.push({ resolve: resolve, reject: reject });
+      this.configurationRestartTimer = setTimeout(() => {
+        this.configurationRestartTimer = -1;
+        const waiters = this.configurationRestartWaiters;
+        this.configurationRestartWaiters = [];
+        const stillPlaying = this.state === 'playing' || this.state === 'countdown';
+        const run: Promise<boolean | void> = stillPlaying && generation === this.transportRequestGeneration ?
+          this.restartRunningTransportAfterConfiguration() : this.broadcastSnapshot();
+        run.then(() => {
+          waiters.forEach((waiter: ConfigurationRestartWaiter) => waiter.resolve());
+        }, (error: Error) => {
+          waiters.forEach((waiter: ConfigurationRestartWaiter) => waiter.reject(error));
+        });
+      }, CONFIGURATION_RESTART_COALESCE_MS);
+    });
   }
 
   private async restartRunningTransportAfterConfiguration(strictReady: boolean = false): Promise<boolean> {
@@ -1016,7 +1078,7 @@ export class SessionController {
       await this.broadcastSnapshot();
       return;
     }
-    await this.restartRunningTransportAfterConfiguration();
+    await this.requestCoalescedConfigurationRestart();
   }
 
   /** Meter and all section styles are one configuration; BPM and transport intent stay owned by the room. */
@@ -1149,9 +1211,15 @@ export class SessionController {
       return;
     }
     const generation = ++this.transportRequestGeneration;
-    await this.prepareConnectedMembersForTransport();
-    if (generation !== this.transportRequestGeneration) {
-      return;
+    // A pause only needs each member's existing mapping; on device a prepare
+    // round moved the pause instant by <=0.2ms but cost 350-500ms of tap delay.
+    // Fall back to preparing when any member has not pinged recently (e.g. its
+    // JS was frozen in background) so a stale mapping is refreshed first.
+    if (!this.membersHaveRecentClockPing(MonotonicClock.nowMs())) {
+      await this.prepareConnectedMembersForTransport();
+      if (generation !== this.transportRequestGeneration) {
+        return;
+      }
     }
     const pauseAt = MonotonicClock.nowMs() + TRANSPORT_PAUSE_PREROLL_MS;
     const payload: TransportPausePayload = {
@@ -1275,6 +1343,7 @@ export class SessionController {
       const removed = this.connectionMembers.delete(connection.id);
       this.authenticatedConnections.delete(connection.id);
       this.connectionLastSeenMs.delete(connection.id);
+      this.connectionLastPingMs.delete(connection.id);
       this.releaseTransportPreparationConnection(connection.id);
       if (removed) {
         this.notifyUi();
@@ -1396,6 +1465,7 @@ export class SessionController {
     if (message.type === 'PING') {
       const ping = message.payload as PingPayload;
       const recvMono = MonotonicClock.nowMs();
+      this.connectionLastPingMs.set(connection.id, recvMono);
       const pong: PongPayload = {
         id: ping.id,
         clientMono: ping.clientMono,
@@ -1622,6 +1692,18 @@ export class SessionController {
         finish(false);
       }
     });
+  }
+
+  private membersHaveRecentClockPing(nowMs: number): boolean {
+    let fresh = true;
+    this.authenticatedConnections.forEach((connectionId: string) => {
+      const lastPingAt = this.connectionLastPingMs.get(connectionId);
+      // Written as "not within" so an invalid age bound fails closed (prepare).
+      if (lastPingAt === undefined || !(nowMs - lastPingAt <= PAUSE_SKIP_PREPARE_MAX_PING_AGE_MS)) {
+        fresh = false;
+      }
+    });
+    return fresh;
   }
 
   private prepareConnectedMembersForTransport(requireClockReady: boolean = false): Promise<TransportPreparationResult> {
@@ -1882,6 +1964,7 @@ export class SessionController {
       this.connectionMembers.delete(connectionId);
       this.authenticatedConnections.delete(connectionId);
       this.connectionLastSeenMs.delete(connectionId);
+      this.connectionLastPingMs.delete(connectionId);
       this.releaseTransportPreparationConnection(connectionId);
       for (let j = 0; j < connections.length; j++) {
         if (connections[j].id === connectionId) {

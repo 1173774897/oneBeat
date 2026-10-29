@@ -105,6 +105,10 @@ async function main() {
   running.controller.restartRunningTransportAfterConfiguration = async () => {
     configurations.push(plain(running.controller.getProDrumEditorSettings()));
   };
+  // Restart timing/coalescing is covered by transport-restart-configuration-order.cjs.
+  running.controller.requestCoalescedConfigurationRestart = async () => {
+    await running.controller.restartRunningTransportAfterConfiguration();
+  };
   await running.controller.updateBpm(164);
   await running.controller.updateMeter(7, 8);
   assert.deepEqual(configurations, [{ beatsPerBar: 4, beatUnit: 4, bpm: 164 },

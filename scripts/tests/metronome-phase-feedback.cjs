@@ -167,7 +167,10 @@ async function testCorrectionBudget() {
   const h = await playing();
   const e = h.engine;
   for (const bar of e.activeSequence) bar.samples.fill(1000);
-  imposePhaseError(h, 4410);
+  // 12ms: far above one interval's slew budget (44 frames), below the 15ms
+  // re-phase threshold that now applies on every envelope route, Bluetooth
+  // included (larger slips are covered by phase-resync.cjs).
+  imposePhaseError(h, 529);
   e.checkAudioProgress(h.now);
   assert.equal(e.phaseCorrectionFrames, 16, 'First feedback uses a small acquisition step');
   for (let i = 0; i < 20; i++) {

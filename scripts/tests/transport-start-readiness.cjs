@@ -271,6 +271,38 @@ async function main() {
     assert.equal(wire.payload.pauseAtLeaderMonoMs, h.now() + 650, 'pause retains its bounded fallback');
   }
 
+  {
+    // Members that pinged within two resync periods still hold a valid mapping:
+    // pause is published immediately instead of waiting for another prepare.
+    const h = harness(true);
+    const peer = h.addPeer('member');
+    h.controller.onLeaderMessage(peer, { type: 'PING', payload: { id: 'p1', clientMono: 1 } });
+    await h.advance(9000);
+    const sentBefore = h.sent.length;
+    await h.controller.pauseTransport();
+    const fresh = h.sent.slice(sentBefore);
+    assert.equal(fresh.some(message => message.type === 'TRANSPORT_PREPARE'), false,
+      'recent clock pings make the pause prepare round redundant');
+    const wire = fresh.find(message => message.type === 'TRANSPORT_PAUSE');
+    assert.equal(wire.payload.pauseAtLeaderMonoMs, h.now() + 650, 'pause is scheduled without prepare delay');
+  }
+
+  {
+    // A member whose last ping is older than 10s (e.g. frozen in background)
+    // gets a prepare round first so its mapping is refreshed.
+    const h = harness(true);
+    const peer = h.addPeer('member');
+    h.controller.onLeaderMessage(peer, { type: 'PING', payload: { id: 'p1', clientMono: 1 } });
+    await h.advance(10001);
+    const sentBefore = h.sent.length;
+    const pause = h.controller.pauseTransport();
+    const request = h.sent.slice(sentBefore).find(message => message.type === 'TRANSPORT_PREPARE');
+    assert.ok(request, 'stale pings keep the bounded prepare before pause');
+    ack(h, peer, request.payload.id);
+    await pause;
+    assert.ok(h.sent.some(message => message.type === 'TRANSPORT_PAUSE'));
+  }
+
   for (const method of ['startTransport', 'resumeTransport']) {
     for (const soloTeam of [true, false]) {
       const h = harness(true);
@@ -280,7 +312,7 @@ async function main() {
       assert.equal(h.sent.some(message => message.type === 'TRANSPORT_PREPARE'), false);
     }
   }
-  console.log('PASS strict transport readiness: delayed delivery, failure, bounded and parallel native sends, READY ownership, local/remote deadline parity, cancellation, retained pause boundary and solo');
+  console.log('PASS strict transport readiness: delayed delivery, failure, bounded and parallel native sends, READY ownership, local/remote deadline parity, cancellation, retained pause boundary, ping-fresh pause without prepare and solo');
 }
 
 // Fake VM timers cannot keep Node alive. A regression that leaves an awaited

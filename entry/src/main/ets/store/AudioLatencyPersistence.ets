@@ -103,6 +103,8 @@ export async function saveCalibrationMs(value: number): Promise<void> {
   }
   await pref.put(KEY_OUTPUT_COMPENSATION_MS, value);
   await pref.flush();
+  // Lets device logs attribute a later compensation change to a saved measurement.
+  console.info(`[CalibSaveDiag] outputCompensationMs previous=${calibrationMs} saved=${value}`);
   calibrationMs = value;
 }
 
