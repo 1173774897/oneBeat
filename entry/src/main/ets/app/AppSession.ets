@@ -7,7 +7,7 @@ import {
 } from '../audio/MetronomeEngine';
 import { AudioOutputMonitor } from '../audio/AudioOutputMonitor';
 import { WifiP2pManager } from '../network/p2p/WifiP2pManager';
-import { BleMemberJoinFeedbackAttempt, BleRoomDiscovery } from '../network/p2p/BleRoomDiscovery';
+import { BleJoinFeedbackChannel, BleMemberJoinFeedbackAttempt, BleRoomDiscovery } from '../network/p2p/BleRoomDiscovery';
 import {
   createP2pRoomInvitation,
   invitationWithGroupCredentials,
@@ -35,11 +35,14 @@ const MIC_PLAYBACK_REFERENCE_SAMPLE_INTERVAL_MS: number = 250;
 const MIC_PLAYBACK_REFERENCE_RATE_HZ: number = 44100;
 
 /** Informational join stages; session readiness still requires authentication and clock sync. */
-export type MemberJoinStage = 'connecting' | 'joining' | 'preparing';
+export type MemberJoinStage = 'waiting' | 'connecting' | 'joining' | 'preparing';
 
 /** AppStorage key: nickname of the member whose join request awaits the leader. */
 export const JOIN_REQUEST_NAME_KEY: string = 'pendingJoinRequestName';
 const JOIN_REQUEST_NOTICE_MS: number = 30000;
+// Upper bound for opening the BLE feedback link before P2P. Past it the member
+// joins unqueued: a missing link must not turn into a long silent wait.
+const JOIN_TURN_CHANNEL_WAIT_MS: number = 6000;
 
 export class AppSession {
   private static instance: AppSession | undefined = undefined;
@@ -93,6 +96,7 @@ export class AppSession {
     AppStorage.setOrCreate('audioOutputRouteEpoch', 0);
     AppStorage.setOrCreate(JOIN_REQUEST_NAME_KEY, '');
     this.bleDiscovery.setJoinRequestListener((displayName: string) => this.showJoinRequest(displayName));
+    this.bleDiscovery.setStaleDialogListener((displayName: string) => this.showStaleJoinDialog(displayName));
     AudioOutputMonitor.start((active: boolean, routeSignature: string) => {
       const previousRouteSignature = this.previousAudioOutputRouteSignature;
       const routeChanged = this.bluetoothRouteStateInitialized &&
@@ -428,6 +432,7 @@ export class AppSession {
     this.releaseDrumPreviewOwnership();
     this.showJoinRequest('');
     this.bleDiscovery.setJoinRequestListener(undefined);
+    this.bleDiscovery.setStaleDialogListener(undefined);
     this.latencyRouteProbeToken++;
     this.latencyRouteProbeOwner = -1;
     this.memberJoinFeedbackAttempt?.cancel();
@@ -1155,9 +1160,9 @@ export class AppSession {
         onProgress?.(progress);
       }
     };
-    // BLE 反馈通道只负责把队长的“拒绝”信号快速传回队员，属于尽力而为；
-    // 若在 P2P 连接前串行等待，会明显拖慢队长确认弹窗的出现。
-    // 这里并行发起 P2P 连接，同时后台建立 BLE 反馈通道。
+    // BLE 反馈通道负责两件事：P2P 前向队长领取“轮次”（队长同一时间只放行一个
+    // 队员，否则系统会丢弃后到的 P2P 申请、弹窗名字与实际放行的设备对不上），
+    // 以及把队长的“拒绝”快速传回。通道属于尽力而为：建立不了就不排队直接连接。
     const feedbackAttempt = new BleMemberJoinFeedbackAttempt();
     this.memberJoinFeedbackAttempt?.cancel();
     this.memberJoinFeedbackAttempt = feedbackAttempt;
@@ -1171,6 +1176,24 @@ export class AppSession {
       return new Promise<Error>(() => {});
     });
     try {
+      // The code lookup normally hands over its already-registered link
+      // (~0ms); a fresh GATT link costs 3–5s, so it is waited for only briefly.
+      const channel = await Promise.race<BleJoinFeedbackChannel | undefined>([
+        feedbackPromise,
+        new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), JOIN_TURN_CHANNEL_WAIT_MS))
+      ]);
+      if (channel !== undefined) {
+        let queued = false;
+        await channel.waitForTurn(() => {
+          queued = true;
+          onProgress?.('waiting');
+        });
+        if (queued) {
+          reportStage('turn-granted');
+        }
+      } else {
+        console.warn('[JoinDiag] stage=turn-skipped reason=no-feedback-channel');
+      }
       reportStage('p2p-start', 'connecting');
       const goIp = await this.p2p.connectToLeader(invitation, rejectionSignal);
       reportStage('p2p-ready', 'joining');
@@ -1233,6 +1256,19 @@ export class AppSession {
       this.joinRequestNoticeTimer = -1;
       AppStorage.setOrCreate(JOIN_REQUEST_NAME_KEY, '');
     }, JOIN_REQUEST_NOTICE_MS);
+  }
+
+  /**
+   * Leader: a member gave up while its system dialog may still be showing.
+   * The app cannot dismiss that dialog; the next member waits until it is
+   * closed or the system's window ends, and a tap on it applies to nobody.
+   */
+  private showStaleJoinDialog(displayName: string): void {
+    if (AppSession.instance !== this || !this.controller.isLeader) {
+      return;
+    }
+    this.showJoinRequest('');
+    showUserNotice(`「${displayName}」已放弃本次申请，系统弹窗可直接关闭，不会影响其他队员`, 'join-request');
   }
 
   /** Reads nearby rooms' invitations while the member types the code. */

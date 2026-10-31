@@ -35,6 +35,33 @@ const GATT_FEEDBACK_CLOSE_TIMEOUT_MS: number = 250;
 const MAX_GATT_READ_ATTEMPTS: number = 2;
 const JOIN_FEEDBACK_POLL_MS: number = 250;
 const JOIN_ATTEMPT_TTL_MS: number = 45000;
+// Join turns. Device 2026-10-31 (three phones): two P2P requests 16ms apart
+// reached the leader; its system kept only the first (state machine dropped
+// the second as message 113), the dialog showed the second phone's name, and
+// accepting it let the first phone in while the second failed formation. The
+// leader therefore lets exactly one registered member start P2P at a time.
+// A queued member polls every JOIN_FEEDBACK_POLL_MS; silence means it left.
+const QUEUED_ATTEMPT_IDLE_MS: number = 8000;
+// After accept, WPS PBC completed 1.4–1.6s later on device; a new request
+// before AP-STA-CONNECTED would be dropped by the busy state machine.
+const JOIN_TURN_ACCEPT_HOLD_MS: number = 5000;
+const JOIN_TURN_REJECT_HOLD_MS: number = 1000;
+// An unanswered turn lasts as long as the leader's system keeps the request.
+// Device 2026-10-31: the system stayed in GroupJoin for 30.0s after the dialog
+// appeared. A member that gave up after its own 25s timeout freed the turn too
+// early (10:52): the next request was dropped (message 113) and the still-shown
+// stale dialog's "reject" was applied to the next member. Once the window has
+// passed, the next request replaces the stale dialog (11:04:36, session
+// destroyed and recreated). The holder cannot be heard from meanwhile: BLE
+// stalls during P2P, and its C: was lost at 11:04:26. So the turn is bounded
+// by this window, measured from the grant (dialog shown ~0.2–0.4s later).
+const JOIN_TURN_MAX_MS: number = 31000;
+// Member: an answer to the first turn read normally arrives within ~100ms;
+// without one (old leader, broken link) the join proceeds unqueued.
+const JOIN_TURN_FIRST_ANSWER_MS: number = 3000;
+const JOIN_TURN_WAIT_MAX_MS: number = 90000;
+const JOIN_TURN_WAIT_TIMEOUT_MESSAGE: string = '队长一直在处理其他人的申请，请稍后再试';
+const JOIN_TURN_CANCELLED_MESSAGE: string = '本次加入已取消';
 const LEADER_REJECTED_MESSAGE: string = '队长已拒绝本次加入请求，请和队长确认后再试一次';
 
 const encoder = new util.TextEncoder();
@@ -73,6 +100,11 @@ interface LeaderJoinAttempt {
   decision: JoinDecision;
   createdAt: number;
   displayName: string;
+  // Last read from this member; only meaningful while it is queued.
+  lastSeenAt: number;
+  // 0 while queued; set when this attempt becomes the single turn holder.
+  turnGrantedAt: number;
+  decidedAt: number;
 }
 
 /** Player nicknames are at most 16 characters (TeamPage input limit). */
@@ -264,6 +296,10 @@ export class BleJoinFeedbackChannel {
   private rejectionDelivered: boolean = false;
   private pollTimer: number = -1;
   private removeCancel: () => void = (): void => {};
+  // Turn state from the latest successful read: unknown until the first answer.
+  private turnState: 'unknown' | 'queued' | 'granted' = 'unknown';
+  private turnWaiter: ((error?: Error) => void) | undefined = undefined;
+  private onQueued: (() => void) | undefined = undefined;
 
   constructor(
     client: ble.GattClientDevice,
@@ -309,7 +345,20 @@ export class BleJoinFeedbackChannel {
         this.rejectionDelivered = true;
         console.info(`BLE join feedback rejected: ${this.attemptId}`);
         this.resolveRejection(new Error(LEADER_REJECTED_MESSAGE));
+        this.settleTurn(new Error(LEADER_REJECTED_MESSAGE));
         return;
+      }
+      if (status === `W:${this.attemptId}`) {
+        if (this.turnState !== 'queued') {
+          this.turnState = 'queued';
+          console.info(`[JoinDiag] stage=turn-queued attempt=${this.attemptId}`);
+          this.onQueued?.();
+        }
+      } else if (this.turnState !== 'granted') {
+        // P/A: this attempt holds the turn. N: the leader has no record of it
+        // (expired, or a leader without turns); queueing cannot help then.
+        this.turnState = 'granted';
+        this.settleTurn();
       }
     } catch (_e) {
       // A short BLE read interruption must not abort an otherwise valid P2P join.
@@ -317,11 +366,57 @@ export class BleJoinFeedbackChannel {
     this.schedulePoll(JOIN_FEEDBACK_POLL_MS);
   }
 
+  /**
+   * Resolves once the leader lets this attempt start P2P; rejects on rejection,
+   * cancellation or an over-long wait. Without any answer the join proceeds:
+   * turns only prevent collisions, they never block a leader that lacks them.
+   */
+  waitForTurn(onQueued: () => void): Promise<void> {
+    if (this.turnState === 'granted') {
+      return Promise.resolve();
+    }
+    if (this.closed) {
+      return Promise.reject(new Error(JOIN_TURN_CANCELLED_MESSAGE));
+    }
+    this.onQueued = onQueued;
+    if (this.turnState === 'queued') {
+      onQueued();
+    }
+    return new Promise<void>((resolve, reject) => {
+      const firstAnswerTimer = setTimeout(() => {
+        if (this.turnState === 'unknown') {
+          console.warn('[JoinDiag] stage=turn-unanswered proceeding=true');
+          this.settleTurn();
+        }
+      }, JOIN_TURN_FIRST_ANSWER_MS);
+      const maxTimer = setTimeout(() => {
+        this.settleTurn(new Error(JOIN_TURN_WAIT_TIMEOUT_MESSAGE));
+      }, JOIN_TURN_WAIT_MAX_MS);
+      this.turnWaiter = (error?: Error): void => {
+        clearTimeout(firstAnswerTimer);
+        clearTimeout(maxTimer);
+        if (error !== undefined) {
+          reject(error);
+        } else {
+          resolve();
+        }
+      };
+    });
+  }
+
+  private settleTurn(error?: Error): void {
+    const waiter = this.turnWaiter;
+    this.turnWaiter = undefined;
+    this.onQueued = undefined;
+    waiter?.(error);
+  }
+
   async close(): Promise<void> {
     if (this.closed) {
       return;
     }
     this.closed = true;
+    this.settleTurn(new Error(JOIN_TURN_CANCELLED_MESSAGE));
     this.removeCancel();
     if (this.pollTimer >= 0) {
       clearTimeout(this.pollTimer);
@@ -356,6 +451,12 @@ export class BleRoomDiscovery {
   // Member: nickname sent with the join registration.
   private memberDisplayName: string = '';
   private leaderJoinAttempts: Map<string, LeaderJoinAttempt> = new Map();
+  // Device id of the one member allowed to start P2P now ('' when free).
+  private activeJoinTurnDeviceId: string = '';
+  // >0 while the system may still hold a withdrawn, undecided request: no turn
+  // is granted until then and a dialog click is attributed to nobody.
+  private staleDialogUntil: number = 0;
+  private staleDialogListener: ((displayName: string) => void) | undefined = undefined;
   private lastResolvedDeviceId: string = '';
   private lastResolvedRoomId: string = '';
   // Join attempt registered on the lookup's own GATT link before P2P starts.
@@ -416,12 +517,19 @@ export class BleRoomDiscovery {
       if (sameUuid(request.characteristicUuid, INVITATION_CHARACTERISTIC_UUID)) {
         responseValue = invitationBytes;
       } else if (sameUuid(request.characteristicUuid, JOIN_FEEDBACK_CHARACTERISTIC_UUID)) {
+        const known = this.leaderJoinAttempts.get(request.deviceId);
+        if (known !== undefined) {
+          known.lastSeenAt = Date.now();
+        }
+        this.refreshLeaderJoinTurn();
         const attempt = this.leaderJoinAttempts.get(request.deviceId);
         if (attempt === undefined) {
           responseValue = encodeText('N');
         } else {
+          // P keeps its pre-queue meaning (pending, go ahead) so members built
+          // before turns still join; W is only understood by queue-aware members.
           const decisionCode = attempt.decision === 'rejected' ? 'R' :
-            (attempt.decision === 'accepted' ? 'A' : 'P');
+            (attempt.decision === 'accepted' ? 'A' : (attempt.turnGrantedAt > 0 ? 'P' : 'W'));
           responseValue = encodeText(`${decisionCode}:${attempt.attemptId}`);
         }
       } else {
@@ -442,7 +550,6 @@ export class BleRoomDiscovery {
         !sameUuid(request.characteristicUuid, JOIN_FEEDBACK_CHARACTERISTIC_UUID)) {
         return;
       }
-      this.pruneLeaderJoinAttempts();
       const command = decoder.decodeToString(new Uint8Array(request.value));
       const attemptId = command.substring(2, 18);
       const displayName = command.length > 19 && command.charAt(18) === ':' ?
@@ -450,20 +557,35 @@ export class BleRoomDiscovery {
       let status = 0;
       if (command.startsWith('P:') && /^[0-9a-f]{16}$/.test(attemptId) &&
         (command.length === 18 || command.charAt(18) === ':')) {
+        const now = Date.now();
+        this.removeLeaderJoinAttempt(request.deviceId);
         this.leaderJoinAttempts.set(request.deviceId, {
           deviceId: request.deviceId,
           attemptId,
           decision: 'pending',
-          createdAt: Date.now(),
-          displayName
+          createdAt: now,
+          displayName,
+          lastSeenAt: now,
+          turnGrantedAt: 0,
+          decidedAt: 0
         });
-        console.info(`BLE join attempt registered: ${attemptId} named=${displayName.length > 0}`);
-        this.joinRequestListener?.(displayName);
+        console.info(`BLE join attempt registered: ${attemptId} named=${displayName.length > 0} ` +
+          `waiting=${this.leaderJoinAttempts.size}`);
+        this.refreshLeaderJoinTurn();
       } else if (command.startsWith('C:')) {
         const current = this.leaderJoinAttempts.get(request.deviceId);
         if (current !== undefined && current.attemptId === attemptId) {
-          this.leaderJoinAttempts.delete(request.deviceId);
-          this.joinRequestListener?.('');
+          // The holder may have sent its P2P request; the leader cannot tell
+          // whether a dialog is up, so it assumes one until the window ends.
+          const holdUntil = current.turnGrantedAt + JOIN_TURN_MAX_MS;
+          if (current.decision === 'pending' && current.turnGrantedAt > 0 &&
+            this.activeJoinTurnDeviceId === request.deviceId && holdUntil > Date.now()) {
+            this.staleDialogUntil = holdUntil;
+            console.info(`BLE join turn withdrawn undecided: ${attemptId} holdMs=${holdUntil - Date.now()}`);
+            this.staleDialogListener?.(current.displayName);
+          }
+          this.removeLeaderJoinAttempt(request.deviceId);
+          this.refreshLeaderJoinTurn();
         }
       } else {
         status = 1;
@@ -505,6 +627,11 @@ export class BleRoomDiscovery {
       server.close();
       throw new Error((err as Error).message ?? 'BLE 房间广播启动失败');
     }
+  }
+
+  /** Leader: told the nickname of a member that withdrew while its system dialog may still be up. */
+  setStaleDialogListener(listener: ((displayName: string) => void) | undefined): void {
+    this.staleDialogListener = listener;
   }
 
   /** Leader: receives the requesting member's nickname ('' clears the notice). */
@@ -1140,31 +1267,106 @@ export class BleRoomDiscovery {
     }
   }
 
-  private pruneLeaderJoinAttempts(): void {
+  /** Drops one attempt; if it held the turn, the turn is free and its notice cleared. */
+  private removeLeaderJoinAttempt(deviceId: string): void {
+    if (!this.leaderJoinAttempts.delete(deviceId)) {
+      return;
+    }
+    if (this.activeJoinTurnDeviceId === deviceId) {
+      this.activeJoinTurnDeviceId = '';
+      this.joinRequestListener?.('');
+    }
+  }
+
+  /**
+   * Expires stale attempts and hands the single join turn to the oldest queued
+   * member once the previous holder is decided (plus settle time) or gone.
+   * Runs on every GATT request and decision instead of on a timer: a queued
+   * member polls, so its read is what advances the queue.
+   */
+  private refreshLeaderJoinTurn(): void {
     const now = Date.now();
-    this.leaderJoinAttempts.forEach((attempt, deviceId) => {
-      if (now - attempt.createdAt > JOIN_ATTEMPT_TTL_MS) {
-        this.leaderJoinAttempts.delete(deviceId);
+    const expired: string[] = [];
+    this.leaderJoinAttempts.forEach((attempt: LeaderJoinAttempt, deviceId: string) => {
+      const stale = attempt.decision !== 'pending' ? now - attempt.decidedAt > JOIN_ATTEMPT_TTL_MS :
+        (attempt.turnGrantedAt > 0 ? now - attempt.turnGrantedAt > JOIN_TURN_MAX_MS :
+          now - attempt.lastSeenAt > QUEUED_ATTEMPT_IDLE_MS);
+      if (stale) {
+        expired.push(deviceId);
       }
     });
+    for (let i = 0; i < expired.length; i++) {
+      this.removeLeaderJoinAttempt(expired[i]);
+    }
+    if (this.staleDialogUntil > 0) {
+      if (now < this.staleDialogUntil) {
+        return;
+      }
+      this.staleDialogUntil = 0;
+      console.info('BLE join stale dialog window ended');
+    }
+    const active = this.leaderJoinAttempts.get(this.activeJoinTurnDeviceId);
+    if (active !== undefined) {
+      if (active.decision === 'pending') {
+        return;
+      }
+      const hold = active.decision === 'accepted' ? JOIN_TURN_ACCEPT_HOLD_MS : JOIN_TURN_REJECT_HOLD_MS;
+      if (now - active.decidedAt < hold) {
+        return;
+      }
+    }
+    this.activeJoinTurnDeviceId = '';
+    const attempts = Array.from(this.leaderJoinAttempts.values());
+    let granted: LeaderJoinAttempt | undefined = undefined;
+    for (let i = 0; i < attempts.length; i++) {
+      const attempt = attempts[i];
+      if (attempt.decision === 'pending' && attempt.turnGrantedAt === 0 &&
+        (granted === undefined || attempt.createdAt < granted.createdAt)) {
+        granted = attempt;
+      }
+    }
+    if (granted === undefined) {
+      return;
+    }
+    granted.turnGrantedAt = now;
+    this.activeJoinTurnDeviceId = granted.deviceId;
+    console.info(`BLE join turn granted: ${granted.attemptId} waitedMs=${now - granted.createdAt}`);
+    // The notice names only the turn holder, the one member whose P2P request
+    // can be behind the system dialog.
+    this.joinRequestListener?.(granted.displayName);
   }
 
   private applyDialogDecision(decision: JoinDecision): void {
-    this.pruneLeaderJoinAttempts();
-    let oldestDeviceId = '';
-    let oldestCreatedAt = Number.MAX_SAFE_INTEGER;
-    this.leaderJoinAttempts.forEach((attempt, deviceId) => {
-      if (attempt.decision === 'pending' && attempt.createdAt < oldestCreatedAt) {
-        oldestDeviceId = deviceId;
-        oldestCreatedAt = attempt.createdAt;
+    if (this.staleDialogUntil > 0 && Date.now() < this.staleDialogUntil) {
+      // This click answered the withdrawn member's dialog. It belongs to
+      // nobody still waiting, and closing it frees the queue at once.
+      this.staleDialogUntil = 0;
+      console.info(`BLE join stale dialog closed: ${decision} ignored`);
+      this.refreshLeaderJoinTurn();
+      return;
+    }
+    this.refreshLeaderJoinTurn();
+    let target = this.leaderJoinAttempts.get(this.activeJoinTurnDeviceId);
+    if (target !== undefined && target.decision !== 'pending') {
+      target = undefined;
+    }
+    if (target === undefined) {
+      // No pending turn holder: a member built before turns joined unqueued.
+      // Fall back to the oldest pending attempt, the pre-queue behaviour.
+      const attempts = Array.from(this.leaderJoinAttempts.values());
+      for (let i = 0; i < attempts.length; i++) {
+        const attempt = attempts[i];
+        if (attempt.decision === 'pending' && (target === undefined || attempt.createdAt < target.createdAt)) {
+          target = attempt;
+        }
       }
-    });
-    const oldest = this.leaderJoinAttempts.get(oldestDeviceId);
+    }
     // The dialog is answered either way; any request notice is now stale.
     this.joinRequestListener?.('');
-    if (oldest !== undefined) {
-      oldest.decision = decision;
-      console.info(`BLE join dialog decision ${decision}: ${oldest.attemptId}`);
+    if (target !== undefined) {
+      target.decision = decision;
+      target.decidedAt = Date.now();
+      console.info(`BLE join dialog decision ${decision}: ${target.attemptId}`);
     } else {
       console.warn(`BLE join dialog decision ${decision}: no pending attempt`);
     }
@@ -1222,6 +1424,8 @@ export class BleRoomDiscovery {
   async stopLeaderAdvertising(): Promise<void> {
     await this.stopDialogDecisionListener();
     this.leaderJoinAttempts.clear();
+    this.activeJoinTurnDeviceId = '';
+    this.staleDialogUntil = 0;
     if (this.advertisingId !== undefined) {
       try {
         await ble.stopAdvertising(this.advertisingId);

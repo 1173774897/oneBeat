@@ -350,7 +350,9 @@ struct MemberJoinPage {
   }
 
   private updateJoinProgress(stage: MemberJoinStage): void {
-    if (stage === 'connecting') {
+    if (stage === 'waiting') {
+      this.status = '队长正在处理其他人的申请，请稍候…';
+    } else if (stage === 'connecting') {
       this.status = '正在连接队长，请在队长手机上确认…';
     } else if (stage === 'joining') {
       this.status = '已建立局域连接，正在同步队伍…';
