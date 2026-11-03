@@ -73,6 +73,11 @@ export interface TransportPreparePayload {
   requireClockReady?: boolean;
   /** 严格请求的 ACK 必须明确报告测量成功，失败不能冒充准备完成。 */
   clockReady?: boolean;
+  /**
+   * 队员音频输出已预热后，从收到 TRANSPORT 到可闻起点所需的提前量（输出补偿 + 已排队音频 + 余量）。
+   * 队长取最大值决定共享起点；旧版本缺省时沿用默认预留。
+   */
+  audioLeadMs?: number;
 }
 
 export interface TransportPausePayload {

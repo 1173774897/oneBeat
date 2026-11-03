@@ -354,7 +354,7 @@ function verifyGestureWiring() {
 
 const controllerStorage = new Map();
 const { SessionController } = load(ets('session/SessionController.ets'), {
-  '../common/Constants': { TRANSPORT_RESTART_PREROLL_MS: 650, SESSION_MAX_MEMBER_COUNT: 8 },
+  '../common/Constants': { TRANSPORT_RESTART_PREROLL_MS: 650, TRANSPORT_PREROLL_MS: 650, SESSION_MAX_MEMBER_COUNT: 8 },
   BuildProfile: { DEBUG: false },
   '../common/MonotonicClock': { MonotonicClock: { nowMs: () => 1000 } },
   '../protocol/messages': { createMessage: (type, payload) => ({ type, payload }) },

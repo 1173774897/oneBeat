@@ -76,6 +76,15 @@ for (const [role, busy] of [[false, false], [false, true], [true, false], [true,
   const shadow = context.exports.bpmValueShadow.call(field);
   assert.equal(shadow.color, !role || !busy ? context.INK : '#00000000');
 }
+{
+  // The leader's busy transport button keeps its ink only while its spinner shows.
+  page.leader = true; page.busy = true; page.playButtonLoading = true;
+  const transport = options().find(button => button.accessibilityLabel === '正在准备');
+  assert.ok(transport, 'A loading transport button announces preparation');
+  assert.equal(transport.preserveDisabledAppearance, true, 'The loading face stays fully inked');
+  assert.equal(transport.active, false, 'A loading transport button still blocks repeated taps');
+  page.playButtonLoading = false;
+}
 assert.match(top, /\.textShadow\(!this\.leader \|\| !this\.busy \? \{ radius: 0, offsetX: 2, offsetY: 2, color: INK \}/,
   'Member meter text keeps its ink while leader busy feedback remains dimmed');
 require('./action-button-disabled.cjs');

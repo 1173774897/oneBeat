@@ -69,6 +69,7 @@ function harness(initialWireless = true, leader = true) {
         playbackReference: this.currentPlaybackReference() };
     }
     async scheduleFromLeaderStart(...args) { this.starts.push(args); }
+    async waitForPcmReady() { this.pcmWaits = (this.pcmWaits ?? 0) + 1; }
     async ensureRenderer() {}
     async warmUpRendererForPlayback() { this.warmups++; }
     async suspendRenderer() {}
@@ -102,6 +103,7 @@ function harness(initialWireless = true, leader = true) {
     constructor(_id, isLeader) { this.isLeader = isLeader; }
     setUiListener() {}
     setTransportPreparationHandler(handler) { this.prepareAudio = handler; }
+    setTransportOutputPreparationHandler(handler) { this.prepareOutput = handler; }
     getOffsetMs() { return 12; }
     getClockSkewPpm() { return 0; }
     getClockMappingValidUntilMs() { return Infinity; }
@@ -413,6 +415,27 @@ function assertNoMicBoundary(h, before, label) {
   await assert.rejects(brokenClock.session.verifyMicCalibrationPlaybackReference(brokenBaseline),
     /permanent frame regression/);
   assert.equal(brokenClock.timerCount(), 0, 'Unclassified clock failures must reject without retry');
+
+  // Device 2026-11-03: the tap test started before its worker-rendered click
+  // bar landed and re-rendered it on the JS thread (67ms). It now waits first.
+  const pcmGate = harness();
+  let releasePcm;
+  pcmGate.session.metronome.waitForPcmReady = () => new Promise(resolve => { releasePcm = resolve; });
+  const gated = pcmGate.session.scheduleLatencyTapMeasurement(2300, 4);
+  await Promise.resolve();
+  assert.equal(pcmGate.session.metronome.starts.length, 0, 'The tap test does not start before its PCM is ready');
+  releasePcm();
+  await gated;
+  assert.deepEqual(pcmGate.session.metronome.starts.at(-1), [2312, 0, 4, 0]);
+  const replaced = harness();
+  let releaseReplaced;
+  replaced.session.metronome.waitForPcmReady = () => new Promise(resolve => { releaseReplaced = resolve; });
+  const stale = replaced.session.scheduleLatencyTapMeasurement(2300, 4);
+  await Promise.resolve();
+  replaced.session.latencyRouteProbeToken++;
+  releaseReplaced();
+  await stale;
+  assert.equal(replaced.session.metronome.starts.length, 0, 'A measurement replaced during the wait never starts');
 
   const tap = harness();
   await tap.session.scheduleLatencyTapMeasurement(2300, 4);

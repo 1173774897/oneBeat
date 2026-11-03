@@ -13,7 +13,7 @@ import {
   invitationWithGroupCredentials,
   P2pRoomInvitation
 } from '../network/p2p/P2pInvitation';
-import { PROTOCOL_VERSION, TRANSPORT_START_PREPARE_TIMEOUT_MS } from '../common/Constants';
+import { PROTOCOL_VERSION, TRANSPORT_PCM_PREPARE_TIMEOUT_MS } from '../common/Constants';
 import { MonotonicClock } from '../common/MonotonicClock';
 import { defaultBeatPointStates } from '../common/MeterModel';
 import { SessionBackgroundKeeper } from '../session/SessionBackgroundKeeper';
@@ -55,6 +55,12 @@ export class AppSession {
   private joinRequestNoticeTimer: number = -1;
   private lastTransportKey: string = '';
   private drumPreviewToken: number = 0;
+  /**
+   * Counts auditions that actually started. drumPreviewToken also moves when
+   * a production preparation merely cancels a debounced audition, which is not
+   * a takeover: a UI wait keyed to it failed during live changes (2026-11-03).
+   */
+  private drumPreviewStarts: number = 0;
   // Local audition owns both preparation and playback. Roster/settings UI
   // notifications must not replace its kit with the team's normal click sound.
   private drumPreviewActive: boolean = false;
@@ -163,6 +169,7 @@ export class AppSession {
     });
     this.controller = controller;
     this.controller.setTransportPreparationHandler(() => this.prepareCurrentAudioConfiguration());
+    this.controller.setTransportOutputPreparationHandler(() => this.prepareOutputForSharedStart());
     SessionBackgroundKeeper.setControlHandler({
       onPlay: () => {
         if (!this.controller.isLeader) {
@@ -558,6 +565,24 @@ export class AppSession {
   }
 
   /**
+   * Runs after the PCM is ready and before any shared deadline exists: start
+   * the physical output so the start lands on its first beat instead of
+   * skipping to a reachable one. Returns this device's required lead (ms), or
+   * 0 when the output is unavailable (beats continue, sound best effort).
+   */
+  private async prepareOutputForSharedStart(): Promise<number> {
+    if (this.shutdownOperation !== undefined || this.latencyCalibrationActive) {
+      return 0;
+    }
+    // From here the stream belongs to the session: an idle-lobby notification
+    // during the rest of the preparation must not suspend it again.
+    this.keepRendererAliveForSession = true;
+    const leadMs = await this.metronome.prepareOutputForSharedStart(
+      () => this.shutdownOperation !== undefined || this.latencyCalibrationActive);
+    return leadMs ?? 0;
+  }
+
+  /**
    * Wait for this session's current local PCM without taking audio ownership or
    * starting transport. False includes timeout, replacement and another owner;
    * timeout leaves the engine's asynchronous preparation running. Ready does
@@ -579,12 +604,13 @@ export class AppSession {
     const unit = this.controller.beatUnit;
     const sound = this.controller.soundId;
     const points = this.controller.beatPointStates.join(',');
-    const previewOwner = this.drumPreviewToken;
+    const previewStarts = this.drumPreviewStarts;
     const calibrationOwner = this.latencyRouteProbeToken;
-    const deadline = bounded ? MonotonicClock.nowMs() + TRANSPORT_START_PREPARE_TIMEOUT_MS : 0;
+    // PCM-bound: a long drum program legitimately renders for seconds.
+    const deadline = bounded ? MonotonicClock.nowMs() + TRANSPORT_PCM_PREPARE_TIMEOUT_MS : 0;
     const stillCurrent = (): boolean => AppSession.instance === this && this.shutdownOperation === undefined &&
       !this.latencyCalibrationActive && !this.drumPreviewActive &&
-      previewOwner === this.drumPreviewToken && calibrationOwner === this.latencyRouteProbeToken &&
+      previewStarts === this.drumPreviewStarts && calibrationOwner === this.latencyRouteProbeToken &&
       rhythm === this.controller.rhythm && raw === this.controller.drumProgram &&
       bpm === this.controller.bpm && beats === this.controller.beatsPerBar &&
       unit === this.controller.beatUnit && sound === this.controller.soundId &&
@@ -592,11 +618,19 @@ export class AppSession {
     let timeoutId: number = -1;
     try {
       const timeout = bounded ? new Promise<boolean>((resolve: (ready: boolean) => void) => {
-        timeoutId = setTimeout(() => resolve(false), TRANSPORT_START_PREPARE_TIMEOUT_MS);
+        timeoutId = setTimeout(() => resolve(false), TRANSPORT_PCM_PREPARE_TIMEOUT_MS);
       }) : undefined;
       this.syncEngineFromSession();
-      const preparation: Promise<boolean> = rhythm === 3 ?
+      // Built-in rhythms render on a worker too (setBpm/configure above), so
+      // "ready" also waits for that PCM, not only for a drum program.
+      // configureProgram returns early for an already loaded program, while a
+      // BPM change on it is still rendering (device 2026-11-03: READY was sent
+      // with drum PCM pending, the start re-rendered 2.2s on the JS thread and
+      // skipped beats). Every rhythm therefore also waits for pending PCM.
+      const program: Promise<boolean> = rhythm === 3 ?
         (raw.length > 0 ? this.metronome.configureProgram(raw) : Promise.resolve(false)) : Promise.resolve(true);
+      const preparation: Promise<boolean> = program.then((ready: boolean): Promise<boolean> =>
+        ready ? this.metronome.waitForPcmReady().then((): boolean => true) : Promise.resolve(false));
       const ready = await (timeout === undefined ? preparation : Promise.race([preparation, timeout]));
       // A blocked JS frame can settle the PCM promise before an overdue timer
       // gets a turn. Check the monotonic deadline as well as racing the timer.
@@ -668,6 +702,7 @@ export class AppSession {
       throw new Error('鼓机权益已到期，请重新解锁后再试听');
     }
     const token = ++this.drumPreviewToken;
+    this.drumPreviewStarts++;
     this.drumPreviewActive = true;
     this.drumPreviewReady = false;
     this.drumPreviewUpdateRevision++;
@@ -759,6 +794,14 @@ export class AppSession {
     this.metronome.setBpm(120, 4);
     this.metronome.setBeatPointStates(defaultBeatPointStates(4));
     this.metronome.configure(0, 0);
+    // The click bar renders on the worker (~60ms); starting before it lands
+    // re-rendered it on the JS thread (device 2026-11-03: 67ms). Wait inside the
+    // page's lead instead, and drop a start whose measurement was replaced meanwhile.
+    const owner = this.latencyRouteProbeToken;
+    await this.metronome.waitForPcmReady();
+    if (owner !== this.latencyRouteProbeToken || !this.latencyCalibrationActive) {
+      return;
+    }
     const audioStartLeaderMonoMs = startAtLocalMonoMs + this.controller.getOffsetMs();
     // Keep the rehearsal bar on the renderer timeline so Bluetooth latency shifts
     // the count-in and measured bars together without changing their spacing.

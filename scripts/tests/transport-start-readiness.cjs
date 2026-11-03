@@ -312,7 +312,52 @@ async function main() {
       assert.equal(h.sent.some(message => message.type === 'TRANSPORT_PREPARE'), false);
     }
   }
-  console.log('PASS strict transport readiness: delayed delivery, failure, bounded and parallel native sends, READY ownership, local/remote deadline parity, cancellation, retained pause boundary, ping-fresh pause without prepare and solo');
+  {
+    // Every device prepares its output before the deadline exists; the shared
+    // start waits for the slowest instead of letting it skip opening beats.
+    const leader = harness(true);
+    const member = harness();
+    const peer = leader.addPeer('member');
+    let prepare;
+    peer.send = async message => { leader.sent.push(message); prepare = message; };
+    member.controller.sendToLeader = async message => {
+      member.sent.push(message);
+      leader.controller.onLeaderMessage(peer, message);
+    };
+    let releaseLeaderPcm;
+    leader.controller.setTransportPreparationHandler(() => new Promise(resolve => { releaseLeaderPcm = resolve; }));
+    leader.controller.setTransportOutputPreparationHandler(async () => 420);
+    member.controller.setTransportPreparationHandler(async () => true);
+    member.controller.setTransportOutputPreparationHandler(async () => 731);
+    const start = leader.controller.startTransport();
+    // A long leader render (5.2s on device) runs before the 4s clock round starts.
+    await leader.advance(5200);
+    assert.equal(prepare, undefined, 'No PREPARE (and no clock budget) while leader PCM is rendering');
+    releaseLeaderPcm(true);
+    for (let i = 0; i < 10 && prepare === undefined; i++) await leader.advance(0);
+    member.controller.onMemberMessage(prepare);
+    assert.equal(member.storage.get('memberTransportPreparingSinceMs') > 0, true,
+      'a member shows preparation while it warms its output');
+    await member.advance(0);
+    member.measurement.resolve({ offsetMs: 7, rttMs: 17 });
+    const startAt = await start;
+    assert.equal(member.sent[0].payload.audioLeadMs, 731, 'READY reports the member output lead');
+    assert.equal(startAt, leader.now() + 731 + 150, 'the slowest prepared lead plus delivery sets the deadline');
+    member.controller.onMemberMessage(transportMessages(leader)[0]);
+    assert.equal(member.storage.get('memberTransportPreparingSinceMs'), 0, 'TRANSPORT ends member preparation');
+
+    const solo = harness(true);
+    solo.controller.soloTeam = true;
+    solo.controller.setTransportPreparationHandler(async () => true);
+    solo.controller.setTransportOutputPreparationHandler(async () => 812);
+    assert.equal(await solo.controller.startTransport(), solo.now() + 812, 'solo waits for its own output lead');
+    const fast = harness(true);
+    fast.controller.soloTeam = true;
+    fast.controller.setTransportPreparationHandler(async () => true);
+    fast.controller.setTransportOutputPreparationHandler(async () => 300);
+    assert.equal(await fast.controller.startTransport(), fast.now() + 650, 'a short lead keeps the default preroll');
+  }
+  console.log('PASS strict transport readiness: delayed delivery, failure, bounded and parallel native sends, READY ownership, local/remote deadline parity, cancellation, retained pause boundary, ping-fresh pause without prepare, solo and prepared output lead');
 }
 
 // Fake VM timers cannot keep Node alive. A regression that leaves an awaited

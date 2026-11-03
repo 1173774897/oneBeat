@@ -28,6 +28,7 @@ const suites = [
   'visual-pause-instant.cjs',
   'phase-resync.cjs',
   'frame-map-broken-restart.cjs',
+  'pcm-render-offload.cjs',
   'ble-advertising-tag.cjs',
   'ble-room-lookup.cjs',
   'ble-join-feedback-lifecycle.cjs',
@@ -114,8 +115,10 @@ try {
   const typescript = resolveTypeScript();
   let passed = 0;
   for (const suite of suites) {
+    // drum-preview-live-update alone takes 51-67s depending on machine load
+    // (same before and after the 2026-11-03 changes), so 60s failed at random.
     const result = spawnSync(process.execPath, [path.join(__dirname, suite), typescript], {
-      cwd: root, encoding: 'utf8', timeout: 60000, maxBuffer: 4 * 1024 * 1024
+      cwd: root, encoding: 'utf8', timeout: 120000, maxBuffer: 4 * 1024 * 1024
     });
     process.stdout.write(result.stdout ?? '');
     process.stderr.write(result.stderr ?? '');

@@ -67,6 +67,7 @@ function harness(sample = healthy) {
     './DrumBusLimiter': (() => { const e = {}; require('node:vm').runInNewContext(ts.transpileModule(require('node:fs').readFileSync(require('node:path').resolve(__dirname, '../../entry/src/main/ets/audio/DrumBusLimiter.ets'), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021 } }).outputText, { exports: e }); return e; })(),
     '../common/MeterModel': { defaultBeatPointStates: () => [] }, BuildProfile: { DEBUG: false }
   };
+  Object.assign(mocks, require('./pcm-render-mocks.cjs').pcmRenderMocks(ts, mocks));
   const context = {
     exports: {}, require(key) {
       assert.ok(Object.hasOwn(mocks, key), `Unexpected dependency ${key}`);

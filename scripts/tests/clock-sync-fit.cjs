@@ -57,7 +57,7 @@ function memberController(h) {
       assert.ok(mocks[name], `Unmocked controller dependency ${name}`);
       return mocks[name];
     },
-    AppStorage: { get: () => undefined },
+    AppStorage: { get: () => undefined, setOrCreate: () => {} },
     Map, Set, Promise
   });
   const controller = new exports.SessionController('test-session', false, 'test');

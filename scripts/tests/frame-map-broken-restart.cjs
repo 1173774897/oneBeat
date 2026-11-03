@@ -191,6 +191,37 @@ function silenceCountedFixture({ counterStartDelayMs = 0 } = {}) {
       'No beat is written before the counter moves and the target is settled');
     assert.ok(f.h.logs.some(line => line.includes('stage=counter-wait') && line.includes('held=true')));
   }
+  {
+    // Preparing the output before the deadline: the same Bluetooth-like cold
+    // stream (broken map, counter frozen 300ms, ~400ms queue) is rebuilt and
+    // settled first, and the start then lands on beat 0 via the continuous path.
+    const f = silenceCountedFixture({ counterStartDelayMs: 300 });
+    f.state.silenceMs = 300;
+    let lead;
+    const preparing = f.e.prepareOutputForSharedStart().then(value => { lead = value; });
+    for (let i = 0; i < 200 && lead === undefined; i++) {
+      f.h.advanceClock(10);
+      const played = f.created ? f.created.getAudioTimestampInfoSync().framePos : 0;
+      while (f.e.renderer === f.created && f.e.audioSubmittedFrames < played + 0.4 * RATE) {
+        f.e.handleWriteData(new ArrayBuffer(4096 * 2));
+      }
+      await f.h.fireDueTimers();
+    }
+    await preparing;
+    assert.deepEqual(f.calls.slice(0, 4), ['stop', 'release', 'create', 'start'],
+      'Preparation replaces the broken renderer before any deadline exists');
+    assert.ok(lead >= 45 + 400 && lead <= 45 + 400 + 100 + 100,
+      `The reported lead covers compensation + queue + margin: ${lead}`);
+    const startedCalls = f.calls.length;
+    const audible = f.h.now + lead;
+    await f.e.scheduleFromLeaderStart(audible, 0, 0);
+    await f.h.fireDueTimers();
+    assert.equal(f.calls.length, startedCalls, 'The prepared start does not restart the renderer');
+    assert.ok(!f.h.logs.some(line => line.includes('stage=clamp-rephase')), 'No opening beats are skipped');
+    const target = f.h.logs.find(line => line.includes('path=continuous'));
+    assert.ok(target && target.includes('clampMs=0.00'), `The start reaches its own target: ${target}`);
+    assert.equal(f.e.pendingAudioTransition.beatIndex, 0, 'The first scheduled beat is beat 0');
+  }
   console.log('PASS frame map broken restart: a map past the written frames is flagged after the startup grace, ' +
-    'or any underflow since the base (Bluetooth), makes the next start replace the renderer (exact zero origin); otherwise it is reused; a cold start clamped >15ms re-phases onto a later beat; cold starts target the moving counter and hold the provisional beat until then');
+    'or any underflow since the base (Bluetooth), makes the next start replace the renderer (exact zero origin); otherwise it is reused; a cold start clamped >15ms re-phases onto a later beat; cold starts target the moving counter and hold the provisional beat until then; a prepared output starts on beat 0 without clamp');
 })().catch(error => { console.error(error); process.exitCode = 1; });

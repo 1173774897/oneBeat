@@ -80,6 +80,7 @@ function harness({ sampleBankClass, engineOptions = {}, drumAccess = () => true 
     constructor(_id, leader) { this.isLeader = leader; }
     setUiListener(listener) { this.listener = listener; }
     setTransportPreparationHandler(handler) { this.prepareAudio = handler; }
+    setTransportOutputPreparationHandler(handler) { this.prepareOutput = handler; }
     emit() { this.listener(); }
     getRemoteSessionEndReason() { return undefined; }
     getOffsetMs() { return 0; }

@@ -24,3 +24,9 @@ export const PING_SAMPLES: number = 11;
 export const TRANSPORT_PREPARE_TIMEOUT_MS: number = 900;
 /** 起拍必须等队员完成时钟准备；总预算包含消息发送与来回采样。 */
 export const TRANSPORT_START_PREPARE_TIMEOUT_MS: number = 4000;
+/**
+ * 本机生成新配置 PCM 的等待上限。长鼓机编排在低速下很慢（2026-11-03 真机：
+ * 16 小节 40 BPM 后台生成 5.2–5.8s），远超时钟准备的 4s；起拍宁可转圈等待，
+ * 也不能在 PCM 未就绪时开拍，否则只能在主线程同步补算并卡住音频。
+ */
+export const TRANSPORT_PCM_PREPARE_TIMEOUT_MS: number = 15000;

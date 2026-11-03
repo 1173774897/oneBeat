@@ -9,7 +9,7 @@ function deferred() {
 }
 const controllerStorage = new Map();
 const { SessionController } = load(ets('session/SessionController.ets'), {
-  '../common/Constants': { TRANSPORT_RESTART_PREROLL_MS: 650 },
+  '../common/Constants': { TRANSPORT_RESTART_PREROLL_MS: 650, TRANSPORT_PREROLL_MS: 650 },
   BuildProfile: { DEBUG: false },
   '../common/MonotonicClock': { MonotonicClock: { nowMs: () => 1000 } },
   '../protocol/messages': { createMessage: (type, payload) => ({ type, payload }) },
@@ -83,6 +83,35 @@ async function sessionTransactions() {
     assert.equal(c.state, 'playing');
     assert.equal(trace.some(x => x.type === 'TRANSPORT'), false);
     assert.equal(trace.at(-1).payload.drumProgram, before[0], 'Rollback is broadcast to members');
+  }
+  {
+    // Device 2026-11-03: a meter edit arrived while a BPM restart was rendering
+    // its drum PCM; publishing the failed round made every device render the
+    // newest PCM on the JS thread at the deadline and skip beats.
+    const queued = controllerHarness();
+    queued.c.prepareConnectedMembersForTransport = async () => {
+      queued.c.configurationRestartTimer = 7;
+      return 'failed';
+    };
+    assert.equal(await queued.c.restartRunningTransportAfterConfiguration(), false);
+    assert.equal(queued.trace.some(x => x.type === 'TRANSPORT'), false,
+      'A superseded restart leaves publication to the queued newer restart');
+    assert.equal(queued.c.state, 'playing');
+    // A round that finished just before a newer edit is also not published, but
+    // its configuration is committed through the queued restart (no rollback).
+    const finished = controllerHarness();
+    finished.c.prepareConnectedMembersForTransport = async () => {
+      finished.c.configurationRestartTimer = 8;
+      return 'ready';
+    };
+    assert.equal(await finished.c.restartRunningTransportAfterConfiguration(true), true);
+    assert.equal(finished.trace.some(x => x.type === 'TRANSPORT'), false,
+      'A prepared but superseded restart leaves publication to the queued restart');
+    const legacy = controllerHarness();
+    legacy.c.prepareConnectedMembersForTransport = async () => 'failed';
+    assert.equal(await legacy.c.restartRunningTransportAfterConfiguration(), true);
+    const transport = legacy.trace.find(x => x.type === 'TRANSPORT');
+    assert.equal(transport.payload.startAtLeaderMonoMs, 1650, 'Without a newer change the fixed 650ms fallback remains');
   }
   {
     const { c, trace } = controllerHarness();
@@ -280,11 +309,17 @@ async function audioReadinessBarrier() {
     h.controller.setTransportPreparationHandler(() => gate.promise);
     let finished = false;
     const prepare = h.controller.prepareConnectedMembersForTransport(true).then(result => { finished = true; return result; });
+    await flush();
+    // Device 2026-11-03: a long kit renders for 5s, beyond the 4s clock round.
+    // The round starts after leader PCM; members render from the snapshot meanwhile.
+    assert.equal(h.sent.find(x => x.type === 'TRANSPORT_PREPARE'), undefined,
+      'Peer clock preparation waits for the leader PCM');
+    gate.resolve(true); await flush();
     const message = h.sent.find(x => x.type === 'TRANSPORT_PREPARE');
-    assert.ok(message, 'Peer clock preparation starts without waiting for the leader kit loader');
+    assert.ok(message, 'The clock round starts once leader PCM is ready');
+    assert.equal(finished, false, 'The start still waits for every peer');
     h.controller.onLeaderMessage(peer, { type: 'TRANSPORT_READY', payload: { id: message.payload.id, clockReady: true } });
-    await flush(); assert.equal(finished, false, 'Ready peers cannot start while the leader PCM is still loading');
-    gate.resolve(true); assert.equal(await prepare, 'ready');
+    assert.equal(await prepare, 'ready');
   }
   {
     const h = transportHarness(true), gate = deferred();
@@ -292,8 +327,9 @@ async function audioReadinessBarrier() {
     h.controller.setTransportPreparationHandler(() => gate.promise);
     let finished = false;
     const prepare = h.controller.prepareConnectedMembersForTransport(true).then(result => { finished = true; return result; });
-    await h.advance(3999); await flush(); assert.equal(finished, false);
-    await h.advance(1); assert.equal(await prepare, 'failed', 'Cold local audio loading is bounded by the existing strict 4-second budget');
+    await h.advance(14999); await flush(); assert.equal(finished, false,
+      'A long local render may exceed the 4s clock round');
+    await h.advance(1); assert.equal(await prepare, 'failed', 'Local PCM is bounded by the 15-second PCM budget');
     gate.resolve(true); await flush();
     assert.equal(h.sent.length, 0, 'A late local loader completion does not publish transport');
   }

@@ -120,4 +120,56 @@ for (const accent of [1, 1.15]) for (const style of catalog.DRUM_STYLES) {
 }
 assert.ok(limitedStyles >= 10, 'Even with -3 dB kit headroom most built-in kits still need limiting');
 
-console.log(`PASS drum bus limiter: -1 dBFS ceiling, exact below it, zero latency at bar/loop boundaries, ${limitedStyles} real kit cases limited without clipping or polarity change`);
+// Chunked limiting (head-first drum rendering, 2026-11-03): consecutive chunks
+// carrying DrumBusLimiterState must equal one limitDrumBus call sample for sample.
+const { limitDrumBusChunk, freshDrumBusLimiterState, DRUM_BUS_LOOKAHEAD_FRAMES } = load('audio/DrumBusLimiter.ets');
+function chunked(bars, looping, splits) {
+  let state = freshDrumBusLimiterState();
+  const out = [];
+  const bounds = [0, ...splits, bars.length];
+  for (let c = 0; c + 1 < bounds.length; c++) {
+    const [a, b] = [bounds[c], bounds[c + 1]];
+    const next = b < bars.length ? bars[b] : looping ? bars[0] : undefined;
+    const lookahead = next === undefined ? new Float32Array(0) : next.mix.subarray(0, DRUM_BUS_LOOKAHEAD_FRAMES);
+    // Cross a structured clone like the TaskPool boundary does.
+    const result = limitDrumBusChunk(bars.slice(a, b), lookahead, structuredClone(state));
+    state = result.state;
+    out.push(...result.outputs);
+  }
+  return out;
+}
+let seed = 7;
+const random = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
+function randomBars(count, overChance) {
+  return Array.from({ length: count }, () => {
+    const mix = new Float32Array(3000 + Math.floor(random() * 3000));
+    for (let i = 0; i < mix.length; i++) {
+      mix[i] = Math.round((random() * 2 - 1) * (random() < overChance ? 60000 : 20000));
+    }
+    return { mix };
+  });
+}
+for (const looping of [false, true]) {
+  const bars = randomBars(9, 0.002);
+  const whole = limitDrumBus(bars, looping);
+  for (const splits of [[1], [2, 4], [1, 2, 3, 4, 5, 6, 7, 8], [8], [3, 6]]) {
+    const parts = chunked(bars, looping, splits);
+    assert.equal(parts.length, whole.length);
+    for (let i = 0; i < whole.length; i++) {
+      assert.deepEqual(Array.from(parts[i]), Array.from(whole[i]),
+        `Chunked limiting equals one pass (looping=${looping}, splits=${splits}, bar=${i})`);
+    }
+  }
+}
+{
+  // Overs only at the end of the first chunk: the next chunk has none of its
+  // own but is still inside the release, so only a carried state limits it.
+  const bars = randomBars(3, 0);
+  bars[0].mix.fill(60000, bars[0].mix.length - 50);
+  const whole = limitDrumBus(bars, false);
+  assert.ok(whole[1].some((value, i) => value !== Math.round(bars[1].mix[i])), 'The release reaches into bar 1');
+  const parts = chunked(bars, false, [1]);
+  assert.deepEqual(Array.from(parts[1]), Array.from(whole[1]), 'A decaying release continues across chunks');
+}
+
+console.log(`PASS drum bus limiter: -1 dBFS ceiling, exact below it, zero latency at bar/loop boundaries, ${limitedStyles} real kit cases limited without clipping or polarity change, chunked limiting identical to one pass`);

@@ -22,11 +22,15 @@ const mocks = {
   './DrumSampleBank': { DrumSampleBank: { loadStyle: () => new Promise(resolve => loads.push(resolve)) } },
   '../common/MeterModel': { defaultBeatPointStates: () => [] },
   // The production limiter keeps this mix-free fixture's PCM exact.
-  './DrumBusLimiter': (() => { const exports = {}; vm.runInNewContext(ts.transpileModule(fs.readFileSync('entry/src/main/ets/audio/DrumBusLimiter.ets', 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021 } }).outputText, { exports }); return exports; })()
+  './DrumBusLimiter': (() => { const exports = {}; vm.runInNewContext(ts.transpileModule(fs.readFileSync('entry/src/main/ets/audio/DrumBusLimiter.ets', 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021 } }).outputText, { exports }); return exports; })(),
+  // No TaskPool runner in unit tests: configuration PCM renders synchronously.
+  './PcmRenderOffload': { PcmRenderOffload: { get: () => undefined } }
 };
 // Neutralize the sub-audible dither so nonzero counts measure click content.
 const deterministicMath = Object.create(Math);
 deterministicMath.random = () => 0.5;
+// The shared pure renderer runs for real against the same module mocks.
+mocks['./PcmRender'] = (() => { const exports = {}; vm.runInNewContext(ts.transpileModule(fs.readFileSync('entry/src/main/ets/audio/PcmRender.ets', 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021 } }).outputText, { exports, require: name => mocks[name], console, ArrayBuffer, Map, Int16Array, Float32Array, DataView, Date, Math: deterministicMath }); return exports; })();
 const context = { exports: {}, require: name => mocks[name], console, ArrayBuffer, Map, Int16Array,
   Math: deterministicMath };
 const source = fs.readFileSync('entry/src/main/ets/audio/MetronomeEngine.ets', 'utf8');

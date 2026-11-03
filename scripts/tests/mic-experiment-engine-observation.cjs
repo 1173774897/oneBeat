@@ -72,6 +72,7 @@ function harness() {
     './DrumBusLimiter': (() => { const e = {}; require('node:vm').runInNewContext(ts.transpileModule(require('node:fs').readFileSync(require('node:path').resolve(__dirname, '../../entry/src/main/ets/audio/DrumBusLimiter.ets'), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021 } }).outputText, { exports: e }); return e; })(),
     '../common/MeterModel': { defaultBeatPointStates: () => [] }, BuildProfile: { DEBUG: false }
   };
+  Object.assign(mocks, require('./pcm-render-mocks.cjs').pcmRenderMocks(ts, mocks));
   const context = {
     exports: {}, require(name) { assert.ok(name in mocks, `Missing mock ${name}`); return mocks[name]; },
     console: { info() {}, warn() {} }, ArrayBuffer, Map, Int16Array, DataView, Math,

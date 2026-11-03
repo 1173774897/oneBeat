@@ -16,6 +16,7 @@ import { WalkScene } from '../scene/WalkScene';
 import { EditableBpm } from '../components/EditableBpm';
 import { MeterEditorOverlay } from '../components/EditableMeter';
 import { BeatPointState, defaultBeatPointStates } from '../common/MeterModel';
+import { TRANSPORT_START_PREPARE_TIMEOUT_MS } from '../common/Constants';
 import { logUserFailure, showUserNotice, userErrorMessage } from '../common/UserFeedback';
 import {
   drumProgramStyleKeys,
@@ -67,6 +68,8 @@ const WALK_RELOAD_MIN_VISIBLE_MS: number = 300;
 const WALK_RELOAD_LONG_MS: number = 3000;
 const WALK_RELOAD_ROW_HEIGHT: number = 16;
 const WALK_RELOAD_SPINNER_SIZE: number = 12;
+// Matches the 32vp play/stop icon it replaces inside the 68vp button.
+const PLAY_BUTTON_SPINNER_SIZE: number = 32;
 const WALK_RELOAD_TOP_GAP: number = 4;
 const WALK_RELOAD_BOTTOM_GAP: number = 5;
 
@@ -88,6 +91,12 @@ interface WalkReloadRequest {
 @Component
 struct MainPage {
   @StorageLink('sessionEpoch') @Watch('refresh') epoch: number = 0;
+  // Set by SessionController while this member prepares output for a shared
+  // start; the leader's own spinner is owned by toggle().
+  @StorageLink('memberTransportPreparingSinceMs') @Watch('onMemberTransportPreparing')
+  memberTransportPreparingSinceMs: number = 0;
+  private memberPrepareReloadId: number = 0;
+  private memberPrepareExpiryTimer: number = -1;
   @State members: SessionMember[] = [];
   @State bpm: number = 120;
   @State beats: number = 4;
@@ -119,6 +128,11 @@ struct MainPage {
   @State busy: boolean = false;
   @State topReloadPending: boolean = false;
   @State bottomReloadPending: boolean = false;
+  // Play/pause button face shows a spinner instead of its icon while a start,
+  // resume or pause is being prepared (leader) or awaited (member).
+  @State playButtonLoading: boolean = false;
+  private playButtonLoadingOwner: number = 0;
+  private playButtonLoadingTimer: number = -1;
   @State topReloadOpacity: number = 0;
   @State bottomReloadOpacity: number = 0;
   @State topReloadText: string = '';
@@ -271,6 +285,57 @@ struct MainPage {
     if (pending !== wasPending) { this.animateReload(region, pending, pending); }
   }
 
+  /**
+   * owner identifies who turned the spinner on, so a finishing request cannot
+   * clear one that a later request (or the member preparation) now owns.
+   */
+  private setPlayButtonLoading(owner: number, pending: boolean): void {
+    if (!pending) {
+      if (owner !== 0 && owner !== this.playButtonLoadingOwner) { return; }
+      clearTimeout(this.playButtonLoadingTimer);
+      this.playButtonLoadingTimer = -1;
+      this.playButtonLoadingOwner = 0;
+      this.playButtonLoading = false;
+      return;
+    }
+    clearTimeout(this.playButtonLoadingTimer);
+    this.playButtonLoadingOwner = owner;
+    // Same delay as the bottom-row cue: a fast tap never flashes a spinner.
+    this.playButtonLoadingTimer = setTimeout(() => {
+      this.playButtonLoadingTimer = -1;
+      if (this.playButtonLoadingOwner === owner) { this.playButtonLoading = true; }
+    }, WALK_RELOAD_DELAY_MS);
+  }
+
+  private onMemberTransportPreparing(): void {
+    clearTimeout(this.memberPrepareExpiryTimer);
+    this.memberPrepareExpiryTimer = -1;
+    if (this.memberPrepareReloadId !== 0) {
+      this.setPlayButtonLoading(-this.memberPrepareReloadId, false);
+      this.finishReloadFeedback(this.memberPrepareReloadId);
+      this.memberPrepareReloadId = 0;
+    }
+    const session = AppSession.get();
+    if (this.memberTransportPreparingSinceMs <= 0 || this.leader || !this.pageActive || session === undefined) {
+      return;
+    }
+    // Shown only after WALK_RELOAD_DELAY_MS, so a fast preparation stays silent.
+    const live = this.state === 'playing' || this.state === 'countdown';
+    const id = this.beginReloadFeedback('bottom', session, live ? '正在准备节奏…' : '正在准备播放…');
+    this.memberPrepareReloadId = id;
+    // Negative owners keep member preparation apart from leader action ids.
+    this.setPlayButtonLoading(-id, true);
+    // The leader's failed preparation publishes nothing; stop at its budget.
+    this.memberPrepareExpiryTimer = setTimeout(() => {
+      this.memberPrepareExpiryTimer = -1;
+      if (this.memberPrepareReloadId === id) {
+        this.setPlayButtonLoading(-id, false);
+        this.finishReloadFeedback(id);
+        this.memberPrepareReloadId = 0;
+      }
+    }, TRANSPORT_START_PREPARE_TIMEOUT_MS + 1000);
+  }
+
   private beginReloadFeedback(region: WalkReloadRegion, session: AppSession,
     label: string = '正在准备节奏…'): number {
     const id = ++this.reloadSequence;
@@ -332,6 +397,10 @@ struct MainPage {
     const requests: WalkReloadRequest[] = [];
     this.reloadRequests.forEach((request: WalkReloadRequest) => requests.push(request));
     this.reloadRequests.clear();
+    this.memberPrepareReloadId = 0;
+    this.setPlayButtonLoading(0, false);
+    clearTimeout(this.memberPrepareExpiryTimer);
+    this.memberPrepareExpiryTimer = -1;
     requests.forEach((request: WalkReloadRequest) => {
       clearTimeout(request.slowTimer);
       clearTimeout(request.hideTimer);
@@ -970,6 +1039,7 @@ struct MainPage {
     this.busySession = session;
     const pausing = this.state === 'playing' || this.state === 'countdown';
     const loading = this.beginReloadFeedback('bottom', session, pausing ? '正在暂停…' : '正在准备播放…');
+    this.setPlayButtonLoading(request, true);
     try {
       if (!await this.waitForReloadFrame(loading)) { return; }
       if (pausing) { await session.leaderPause(); }
@@ -978,6 +1048,7 @@ struct MainPage {
       if (!pausing) { await this.waitForReloadAudio(loading, session); }
     } catch (error) { this.reportActionFailure('walk-playback', request, error, '播放操作失败，请重试'); }
     finally {
+      this.setPlayButtonLoading(request, false);
       this.finishReloadFeedback(loading);
       this.releaseBusy(request);
       if (this.isCurrentAction('walk-playback', request)) {
@@ -1003,6 +1074,10 @@ struct MainPage {
       session === undefined || !session.controller.isLeader) { return; }
     const request = this.beginAction(scope);
     const loading = this.beginReloadFeedback(region, session);
+    // A live change restarts the shared transport after every device is ready;
+    // the transport button shows that wait. Idle/paused edits restart nothing.
+    const restartsTransport = this.state === 'playing' || this.state === 'countdown';
+    if (restartsTransport) { this.setPlayButtonLoading(request, true); }
     try {
       if (!await this.waitForReloadFrame(loading)) { return; }
       await operation(session);
@@ -1010,6 +1085,7 @@ struct MainPage {
     } catch (error) {
       this.reportActionFailure(scope, request, error, failure);
     } finally {
+      if (restartsTransport) { this.setPlayButtonLoading(request, false); }
       this.finishReloadFeedback(loading);
       if (this.isCurrentAction(scope, request)) { this.refresh(); }
     }
@@ -1663,15 +1739,22 @@ struct MainPage {
         }
         ActionButton({
           active: this.leader && !this.busy, controlWidth: 68, controlHeight: 68, fill: CORAL,
-          preserveDisabledAppearance: !this.leader,
-          accessibilityLabel: this.state === 'playing' || this.state === 'countdown' ? '停止播放' : '开始播放',
+          // While loading the face stays fully inked so the spinner reads as progress, not disabled.
+          preserveDisabledAppearance: !this.leader || this.playButtonLoading === true,
+          accessibilityLabel: this.playButtonLoading ? '正在准备' :
+            this.state === 'playing' || this.state === 'countdown' ? '停止播放' : '开始播放',
           lineWidth: 2, lineColor: INK, cornerRadius: 34,
           inkShadow: { radius: INK_SHADOW_RADIUS, offsetX: 3, offsetY: 3, color: INK },
           action: () => { void this.toggle(); }
         }) {
-          Image($rawfile(this.state === 'playing' || this.state === 'countdown' ?
-            'comic/icons/stop.svg' : 'comic/icons/play.svg'))
-            .width(32).height(32).objectFit(ImageFit.Contain)
+          if (this.playButtonLoading) {
+            LoadingProgress().width(PLAY_BUTTON_SPINNER_SIZE).height(PLAY_BUTTON_SPINNER_SIZE)
+              .color(INK).enableLoading(true).accessibilityLevel('no')
+          } else {
+            Image($rawfile(this.state === 'playing' || this.state === 'countdown' ?
+              'comic/icons/stop.svg' : 'comic/icons/play.svg'))
+              .width(32).height(32).objectFit(ImageFit.Contain)
+          }
         }
         ActionButton({
           active: this.leader && !this.busy && this.bpm < 240, controlWidth: 38, controlHeight: 38, fill: PAPER,

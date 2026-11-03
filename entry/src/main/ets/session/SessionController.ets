@@ -10,7 +10,8 @@ import {
   TRANSPORT_PAUSE_PREROLL_MS,
   TRANSPORT_PREROLL_MS,
   TRANSPORT_RESTART_PREROLL_MS,
-  TRANSPORT_START_PREPARE_TIMEOUT_MS
+  TRANSPORT_START_PREPARE_TIMEOUT_MS,
+  TRANSPORT_PCM_PREPARE_TIMEOUT_MS
 } from '../common/Constants';
 import { DEBUG } from 'BuildProfile';
 
@@ -113,8 +114,16 @@ interface TransportPrepareWaiter {
   peerCount: number;
   requireClockReady: boolean;
   timerId: number;
+  /** Largest output lead reported by members of this preparation. */
+  maxPeerAudioLeadMs: number;
   resolve: (result: TransportPreparationResult) => void;
 }
+
+// A member's reported lead starts when it receives TRANSPORT; the leader adds
+// this budget for the message's delivery (the old fixed preroll covered both).
+const TRANSPORT_START_DELIVERY_MARGIN_MS: number = 150;
+// Upper bound on the prepared preroll, so one bad report cannot stall a start.
+const TRANSPORT_START_MAX_PREROLL_MS: number = 2500;
 
 const SOLO_BOT_ID_PREFIX: string = 'solo-bot-';
 const SOLO_BOT_DISPLAY_NAME: string = '人机';
@@ -165,6 +174,12 @@ export class SessionController {
   private drumArrangementBaseline: DrumArrangementConfiguration | undefined = undefined;
   private drumArrangementPendingRaw: string = '';
   private transportPreparationHandler: (() => Promise<boolean>) | undefined = undefined;
+  private transportOutputPreparationHandler: (() => Promise<number>) | undefined = undefined;
+  /** Output lead reported by this device's latest strict preparation. */
+  private localOutputLeadMs: number = 0;
+  /** Preroll chosen by the latest successful strict preparation for start/resume. */
+  private preparedStartPrerollMs: number = TRANSPORT_PREROLL_MS;
+  private lastPreparedPeerAudioLeadMs: number = 0;
   private clockSyncWork: Promise<SyncSample> | undefined = undefined;
   // Diagnostic metadata only: transport preparation can inherit an in-flight
   // light resync, so the requested count does not prove how many samples ran.
@@ -815,6 +830,7 @@ export class SessionController {
 
   async disconnect(): Promise<void> {
     this.transportRequestGeneration += 1;
+    this.setMemberTransportPreparing(false);
     // A coalesced restart must not broadcast after teardown; its callers settle now.
     if (this.configurationRestartTimer >= 0) {
       clearTimeout(this.configurationRestartTimer);
@@ -1027,13 +1043,31 @@ export class SessionController {
     if (generation !== this.transportRequestGeneration) {
       return false;
     }
-    const prepared = await this.prepareConnectedMembersForTransport(strictReady);
+    // Always the strict round (device 2026-11-03: a live BPM/meter change that
+    // did not wait for every device's PCM and output rebuilt a cold renderer
+    // inside the 650ms preroll and skipped 1-2 beats). The round waits for the
+    // new PCM, repairs the output and reports each device's lead first.
+    const prepared = await this.prepareConnectedMembersForTransport(true);
     if (generation !== this.transportRequestGeneration) {
       return false;
+    }
+    if (this.configurationRestartTimer >= 0) {
+      // A newer change is queued (device 2026-11-03: a meter or BPM edit during
+      // this round, whether the round failed on it or finished just before it).
+      // Publishing now would send the newest configuration unprepared: every
+      // device renders it on the JS thread at the deadline and skips beats. The
+      // queued restart publishes it after its own round. A finished round's
+      // configuration is part of that one, so a strict caller is not rolled back.
+      console.info(`[TransportPrepareDiag] role=leader stage=restart-superseded result=${prepared}`);
+      return prepared === 'ready';
     }
     if (strictReady && prepared !== 'ready') {
       throw new Error('播放准备未完成，编排未切换，请稍后重试');
     }
+    // BPM/meter/sound values are already published, so a failed round (legacy
+    // member, timeout) still switches on the old fixed budget instead of failing.
+    const restartPrerollMs = prepared === 'ready' ?
+      Math.max(TRANSPORT_RESTART_PREROLL_MS, this.preparedStartPrerollMs) : TRANSPORT_RESTART_PREROLL_MS;
     this.state = 'countdown';
     await this.broadcastSnapshot();
     if (generation !== this.transportRequestGeneration) {
@@ -1041,7 +1075,7 @@ export class SessionController {
     }
     const nextBarBeatIndex = (Math.floor(this.beatIndex / this.beatsPerBar) + 1) * this.beatsPerBar;
     this.beatIndex = nextBarBeatIndex;
-    const restartAt = MonotonicClock.nowMs() + TRANSPORT_RESTART_PREROLL_MS;
+    const restartAt = MonotonicClock.nowMs() + restartPrerollMs;
     if (DEBUG) {
       console.info(`OneBeatSync restart[leader] restartAt=${restartAt.toFixed(2)}ms beat=${nextBarBeatIndex} beatsPerBar=${this.beatsPerBar} now=${MonotonicClock.nowMs().toFixed(2)}ms`);
     }
@@ -1190,7 +1224,7 @@ export class SessionController {
     this.beatIndex = 0;
     const countInBeats = this.beatsPerBar * COUNT_IN_BARS;
     const countdownMs = Math.round(countInBeats * 60000 / this.bpm);
-    const startAt = MonotonicClock.nowMs() + TRANSPORT_PREROLL_MS;
+    const startAt = MonotonicClock.nowMs() + this.preparedStartPrerollMs;
     const payload: TransportPayload = {
       startAtLeaderMonoMs: startAt,
       countdownMs: countdownMs,
@@ -1247,7 +1281,7 @@ export class SessionController {
     // 恢复时把拍号对齐到下一小节 downbeat，保证 count-in 结束后主循环从第 1 拍（小节头）切入
     this.beatIndex = Math.ceil(this.beatIndex / this.beatsPerBar) * this.beatsPerBar;
     const countInBeats = this.beatsPerBar * COUNT_IN_BARS;
-    const resumeAt = MonotonicClock.nowMs() + TRANSPORT_PREROLL_MS;
+    const resumeAt = MonotonicClock.nowMs() + this.preparedStartPrerollMs;
     const payload: TransportResumePayload = {
       resumeAtLeaderMonoMs: resumeAt,
       beatIndex: this.beatIndex,
@@ -1419,6 +1453,11 @@ export class SessionController {
           return;
         }
         waiter.pendingConnectionIds.delete(connection.id);
+        // Older members omit the lead; they keep the default preroll budget.
+        const lead = ready.audioLeadMs;
+        if (typeof lead === 'number' && Number.isFinite(lead) && lead > waiter.maxPeerAudioLeadMs) {
+          waiter.maxPeerAudioLeadMs = lead;
+        }
         if (waiter.pendingConnectionIds.size === 0) {
           this.finishTransportPreparation(waiter.id, 'ready');
         }
@@ -1523,6 +1562,7 @@ export class SessionController {
       return;
     }
     if (message.type === 'TRANSPORT') {
+      this.setMemberTransportPreparing(false);
       this.cancelScheduledPauseState();
       this.state = 'countdown';
       AppStorage.setOrCreate('lastTransportMessage', JSON.stringify(message));
@@ -1537,6 +1577,7 @@ export class SessionController {
       return;
     }
     if (message.type === 'TRANSPORT_RESUME') {
+      this.setMemberTransportPreparing(false);
       this.cancelScheduledPauseState();
       this.state = 'countdown';
       AppStorage.setOrCreate('lastTransportMessage', JSON.stringify(message));
@@ -1672,8 +1713,47 @@ export class SessionController {
     this.transportPreparationHandler = handler;
   }
 
-  private async prepareLocalTransportConfiguration(): Promise<boolean> {
+  /**
+   * Runs after the PCM handler succeeds, inside the same strict budget: starts
+   * the physical output and resolves the lead (ms) it needs before an audible
+   * start, so the shared deadline can wait for the slowest device.
+   */
+  setTransportOutputPreparationHandler(handler: () => Promise<number>): void {
+    this.transportOutputPreparationHandler = handler;
+  }
+
+  private readLocalOutputLeadMs(): number {
+    const lead = this.localOutputLeadMs;
+    return Number.isFinite(lead) && lead > 0 ? lead : 0;
+  }
+
+  /**
+   * Every device prepared its output before this point, so the shared start
+   * waits for the slowest one instead of letting it skip the opening beats.
+   */
+  private choosePreparedStartPreroll(localLeadMs: number, peerLeadMs: number): number {
+    const peerNeedMs = peerLeadMs > 0 ? peerLeadMs + TRANSPORT_START_DELIVERY_MARGIN_MS : 0;
+    const preroll = Math.min(TRANSPORT_START_MAX_PREROLL_MS,
+      Math.max(TRANSPORT_PREROLL_MS, localLeadMs, peerNeedMs));
+    console.info(`[TransportPrepareDiag] role=leader stage=preroll prerollMs=${Math.round(preroll)} ` +
+      `localLeadMs=${Math.round(localLeadMs)} peerLeadMs=${Math.round(peerLeadMs)}`);
+    return preroll;
+  }
+
+  /**
+   * Publishes when this member started preparing for a shared start (0 = not
+   * preparing). It ends when TRANSPORT arrives; a failed leader preparation
+   * sends nothing, so the page expires its own spinner after the budget.
+   */
+  private setMemberTransportPreparing(preparing: boolean): void {
+    AppStorage.setOrCreate('memberTransportPreparingSinceMs', preparing ? MonotonicClock.nowMs() : 0);
+  }
+
+  private async prepareLocalTransportConfiguration(
+    timeoutMs: number = TRANSPORT_START_PREPARE_TIMEOUT_MS): Promise<boolean> {
     const handler = this.transportPreparationHandler;
+    const outputHandler = this.transportOutputPreparationHandler;
+    this.localOutputLeadMs = 0;
     if (handler === undefined) { return true; }
     // A blocked native/resource request cannot extend the existing strict-start
     // budget; its eventual result belongs only to this preparation attempt.
@@ -1685,9 +1765,19 @@ export class SessionController {
         clearTimeout(timer);
         resolve(ready);
       };
-      const timer = setTimeout(() => finish(false), TRANSPORT_START_PREPARE_TIMEOUT_MS);
+      const timer = setTimeout(() => finish(false), timeoutMs);
       try {
-        void handler().then((ready: boolean) => finish(ready), () => finish(false));
+        void handler().then((ready: boolean) => {
+          if (!ready || outputHandler === undefined || settled) {
+            finish(ready);
+            return;
+          }
+          // An output failure is not a start failure: the old path still plays.
+          void outputHandler().then((lead: number) => {
+            if (!settled) { this.localOutputLeadMs = lead; }
+            finish(true);
+          }, () => finish(true));
+        }, () => finish(false));
       } catch (_error) {
         finish(false);
       }
@@ -1707,6 +1797,9 @@ export class SessionController {
   }
 
   private prepareConnectedMembersForTransport(requireClockReady: boolean = false): Promise<TransportPreparationResult> {
+    if (requireClockReady) {
+      this.preparedStartPrerollMs = TRANSPORT_PREROLL_MS;
+    }
     if (!requireClockReady || this.transportPreparationHandler === undefined) {
       return this.prepareConnectedPeersForTransport(requireClockReady);
     }
@@ -1715,16 +1808,27 @@ export class SessionController {
 
   private async prepareConnectedMembersAndLocalAudio(): Promise<TransportPreparationResult> {
     const generation = this.transportRequestGeneration;
-    const local = this.prepareLocalTransportConfiguration();
-    const peers = this.prepareConnectedPeersForTransport(true);
-    const localReady = await local;
-    const peersReady = await peers;
+    // Leader PCM first, under its own long budget: a long drum program can take
+    // seconds to render (device 2026-11-03: 5.2s), far beyond the 4s clock
+    // round. Members render the same configuration from the snapshot onward, so
+    // by then they are close to done and the clock round keeps its budget.
+    const localReady = await this.prepareLocalTransportConfiguration(TRANSPORT_PCM_PREPARE_TIMEOUT_MS);
     if (generation !== this.transportRequestGeneration) { return 'cancelled'; }
+    if (!localReady) {
+      return 'failed';
+    }
+    const peersReady = await this.prepareConnectedPeersForTransport(true);
+    if (generation !== this.transportRequestGeneration) { return 'cancelled'; }
+    if (localReady && peersReady === 'ready') {
+      this.preparedStartPrerollMs = this.choosePreparedStartPreroll(this.readLocalOutputLeadMs(),
+        this.lastPreparedPeerAudioLeadMs);
+    }
     return localReady ? peersReady : 'failed';
   }
 
   private async prepareConnectedPeersForTransport(requireClockReady: boolean = false): Promise<TransportPreparationResult> {
     this.finishTransportPreparation();
+    this.lastPreparedPeerAudioLeadMs = 0;
     if (this.soloTeam || this.authenticatedConnections.size === 0) {
       return 'ready';
     }
@@ -1744,6 +1848,7 @@ export class SessionController {
       peerCount: pendingConnectionIds.size,
       requireClockReady: requireClockReady,
       timerId: -1,
+      maxPeerAudioLeadMs: 0,
       resolve: resolveReady
     };
     this.transportPrepareWaiter = waiter;
@@ -1802,7 +1907,9 @@ export class SessionController {
     if (waiter.timerId >= 0) {
       clearTimeout(waiter.timerId);
     }
+    this.lastPreparedPeerAudioLeadMs = reason === 'ready' ? waiter.maxPeerAudioLeadMs : 0;
     console.info(`[TransportPrepareDiag] role=leader stage=finish id=${waiter.id} reason=${reason} ` +
+      `maxPeerAudioLeadMs=${Math.round(waiter.maxPeerAudioLeadMs)} ` +
       `peers=${waiter.peerCount} pending=${waiter.pendingConnectionIds.size} ` +
       `elapsedMs=${(MonotonicClock.nowMs() - waiter.startedAtMs).toFixed(1)}`);
     waiter.resolve(reason);
@@ -1828,6 +1935,9 @@ export class SessionController {
     const offsetBeforeMs = this.clockSync.getOffsetMs();
     const reused = this.clockSyncWork !== undefined;
     const actualSampleCount = reused ? this.clockSyncWorkSampleCount : PING_SAMPLES;
+    if (payload.requireClockReady === true) {
+      this.setMemberTransportPreparing(true);
+    }
     const audioReadyWork = payload.requireClockReady === true && this.transportPreparationHandler !== undefined ?
       this.prepareLocalTransportConfiguration() : undefined;
     let result = 'failure';
@@ -1852,6 +1962,18 @@ export class SessionController {
     }
     const audioReady = audioReadyWork === undefined || await audioReadyWork;
     if (!audioReady) { result = 'failure'; }
+    // A slow PCM render can outlive the accepted sample's age limit; measure
+    // once more rather than refuse a start that is otherwise ready.
+    if (result === 'success' && !this.clockSync.getReadiness().ready) {
+      try {
+        const retry = await this.measureClockSync(PING_SAMPLES);
+        if (!ClockSyncEstimator.getSampleReadiness(retry).ready || !this.clockSync.applySample(retry)) {
+          result = 'failure';
+        }
+      } catch (_e) {
+        result = 'failure';
+      }
+    }
     // Audio preparation can outlive the accepted clock sample. Recheck at ACK,
     // not only before that await; READY covers this measurement, not future delivery.
     const readiness = this.clockSync.getReadiness();
@@ -1865,12 +1987,17 @@ export class SessionController {
       `offsetBeforeMs=${offsetBeforeMs.toFixed(2)} sampleOffsetMs=${sampleOffset} ` +
       `usedOffsetMs=${this.clockSync.getOffsetMs().toFixed(2)} rttMs=${sampleRtt} ` +
       `clockReason=${clockReason} sampleAgeMs=${readiness.sampleAgeMs.toFixed(1)} ` +
-      `clockErrorEstimateMs=${readiness.errorEstimateMs.toFixed(2)} clockMode=${readiness.mode}`);
+      `clockErrorEstimateMs=${readiness.errorEstimateMs.toFixed(2)} clockMode=${readiness.mode} ` +
+      `audioLeadMs=${audioReadyWork !== undefined ? Math.round(this.readLocalOutputLeadMs()) : 'none'}`);
+    if (payload.requireClockReady === true && result !== 'success') {
+      this.setMemberTransportPreparing(false);
+    }
     if (this.isMemberTransportConnected()) {
       try {
         await this.sendToLeader(createMessage('TRANSPORT_READY', {
           id: payload.id,
-          clockReady: payload.requireClockReady === true ? result === 'success' : undefined
+          clockReady: payload.requireClockReady === true ? result === 'success' : undefined,
+          audioLeadMs: audioReadyWork !== undefined && result === 'success' ? this.readLocalOutputLeadMs() : undefined
         } as TransportPreparePayload));
       } catch (_e) {
         // A closed connection no longer participates in the leader's waiter.

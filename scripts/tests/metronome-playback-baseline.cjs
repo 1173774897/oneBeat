@@ -84,6 +84,7 @@ function fixture(version, route, micExact) {
   };
   const deterministicMath = Object.create(Math);
   deterministicMath.random = () => 0.5;
+  Object.assign(mocks, require('./pcm-render-mocks.cjs').pcmRenderMocks(ts, mocks, deterministicMath));
   const context = {
     exports: {}, require: name => {
       assert.ok(name in mocks, `Missing mock for ${name}`);

@@ -19,7 +19,26 @@ import {
   sectionFillStartBeat
 } from './DrumMachineCatalog';
 import { DrumSampleBank } from './DrumSampleBank';
-import { DrumBusLimitStats, DrumBusMix, limitDrumBus } from './DrumBusLimiter';
+import {
+  applyDitherFloor,
+  applyDitherFloorToRange,
+  countInPattern,
+  finishPcmBars,
+  MixedBar,
+  mixPcmBar,
+  mixPcmRideTails,
+  PcmBarShape,
+  pcmHeadBarCount,
+  PcmRenderJob,
+  pcmTailChunkBars,
+  PcmRenderResult,
+  PcmVoiceContext,
+  programBarStyleKeys,
+  RenderedBar,
+  renderPcmJob
+} from './PcmRender';
+import { PcmRenderOffload } from './PcmRenderOffload';
+import { DrumBusLimiterState } from './DrumBusLimiter';
 
 import { BeatPointState, defaultBeatPointStates, normalizeBeatPointStates } from '../common/MeterModel';
 import { DEBUG } from 'BuildProfile';
@@ -70,11 +89,6 @@ const DRUM_PREVIEW_BOUNDARY_CAPACITY: number = 256;
 const DRUM_PREVIEW_CLOCK_MAX_AGE_MS: number = 2000;
 const DRUM_PREVIEW_CLOCK_REPEAT_GRACE_MS: number = 40;
 const DRUM_PREVIEW_CLOCK_CONFIRM_WINDOW_MS: number = 400;
-// Sub-audible dither floor laid under the click samples so the stream is never
-// pure digital zero. Pure zero runs are what the smart PA silence detector
-// (CustStreamCheck -> SmartpaPowerOff) keys on to power off the amplifier.
-// ~ -80dBFS peak; raise only if device logs still show zero_volume=true.
-const DITHER_FLOOR_GAIN: number = 0.0001;
 // 播放中持续相位锁定的校正参数。
 // 相位误差（音频播放头相对墙钟时间轴）超过该阈值时启动插帧/丢帧校正。
 const AUDIO_PHASE_LOCK_THRESHOLD_FRAMES: number = 44; // 约 1ms
@@ -128,6 +142,10 @@ const START_CLAMP_REPHASE_MS: number = 15;
 // for the counter to move, until this lead before the target's hardware time.
 const COLD_START_COUNTER_WAIT_LEAD_MS: number = 150;
 const COLD_START_COUNTER_POLL_MS: number = 10;
+// Extra lead a prepared running stream reports on top of compensation + queue:
+// write callbacks arrive in ~20ms blocks and the start passes a JS timer plus
+// the renderer operation queue before its target frame is committed.
+const SHARED_START_LEAD_MARGIN_MS: number = 100;
 // Bounded by polls, not only by the clock, so a stalled clock cannot hold the
 // renderer queue (device start delays seen: up to ~550ms).
 const COLD_START_COUNTER_MAX_POLLS: number = 80;
@@ -180,17 +198,6 @@ const ROUTE_REPHASE_COUNTER_WAIT_MS: number = 1500;
 const ROUTE_REPHASE_FRESH_AGE_MS: number = 60;
 const ROUTE_REPHASE_COUNTER_POLL_MS: number = 20;
 
-function applyDitherFloorToRange(samples: Int16Array, start: number, end: number): void {
-  for (let i = start; i < end; i++) {
-    const tpdf = (Math.random() + Math.random() - 1.0) * DITHER_FLOOR_GAIN;
-    samples[i] = Math.round(tpdf * 32767);
-  }
-}
-
-function applyDitherFloor(data: ArrayBuffer): void {
-  const samples = new Int16Array(data);
-  applyDitherFloorToRange(samples, 0, samples.length);
-}
 
 export type BeatCallback = (beatIndex: number, beatInBar: number, scheduledAtMonoMs: number) => void;
 
@@ -310,18 +317,27 @@ interface PendingCalibrationSignal {
   fullySubmitted: boolean;
 }
 
-interface RenderedBar {
-  samples: Int16Array;
-  frameCount: number;
-  samplesPerBeat: number;
-  beatsPerBar: number;
+/** A configuration render running on a TaskPool worker. */
+interface PendingPcmRender {
+  revision: number;
+  job: PcmRenderJob;
+  requestedAtMs: number;
 }
 
-/** A bar before the drum bus limiter: voices are summed without clamping. */
-interface MixedBar extends DrumBusMix {
-  frameCount: number;
-  samplesPerBeat: number;
-  beatsPerBar: number;
+/** Bars after an applied head, filled chunk by chunk in order. */
+interface PendingPcmTail {
+  revision: number;
+  job: PcmRenderJob;
+  headBars: number;
+  /** First bar not rendered yet; the next chunk starts here. */
+  nextBar: number;
+  /** Limiter state after the last rendered bar; the next chunk continues it. */
+  limiterState: DrumBusLimiterState | undefined;
+  placeholders: RenderedBar[];
+  /** The current chunk already failed once and is being retried. */
+  retried: boolean;
+  /** Retry failed too: remaining bars are rendered during the next preparation. */
+  failed: boolean;
 }
 
 interface DrumProgramPreparation {
@@ -585,6 +601,11 @@ export class MetronomeEngine {
   private preparedCountInRevision: number = -1;
   private preparedCountInCapacity: number = 0;
   private deferPendingSequenceActivation: boolean = false;
+  private pendingPcmRender: PendingPcmRender | undefined = undefined;
+  /** Placeholder bars of the applied head, until its full job fills them. */
+  private pcmTail: PendingPcmTail | undefined = undefined;
+  private pcmRenderRevision: number = 0;
+  private pcmRenderWaiters: Array<() => void> = [];
   private activeSequence: RenderedBar[] = [];
   private activeSequenceLooping: boolean = true;
   private activeSequenceFinished: boolean = false;
@@ -789,7 +810,7 @@ export class MetronomeEngine {
       this.pattern = BuiltInRhythmFactory.create(this.rhythm, this.beatsPerBar, this.beatPointStates);
     }
     if (leavingProgram || rhythmChanged || soundChanged || this.pendingSequence.length === 0) {
-      this.rebuildPendingSequence([this.pattern], true);
+      this.rebuildPendingSequence([this.pattern], true, true);
     }
   }
 
@@ -1048,8 +1069,10 @@ export class MetronomeEngine {
     this.customProgram = program;
     this.customProgramLooping = looping;
     this.sampleBank = bank;
-    this.rebuildPendingSequence(buildProgramSequence(program), looping);
-    return true;
+    this.rebuildPendingSequence(buildProgramSequence(program), looping, true);
+    // Ready means the PCM exists: a strict start must not ACK while it renders.
+    await this.waitForPcmReady();
+    return token === this.configurationToken;
   }
 
   private async loadProgramBank(program: DrumProgram): Promise<Map<string, ArrayBuffer>> {
@@ -1078,6 +1101,8 @@ export class MetronomeEngine {
   /** Arm only the immediately following count-in-free, looping whole-song audition. */
   attachDrumPreviewPlan(sectionKeys: string[]): void {
     this.clearDrumPreviewPlan();
+    this.flushPendingPcmRender('preview-plan');
+    this.completePcmTail('preview-plan');
     const program = this.customProgram;
     if (program === undefined || !this.customProgramLooping) {
       throw new Error('整曲试听尚未准备完成');
@@ -1134,7 +1159,7 @@ export class MetronomeEngine {
     }
     // Explicit render inputs keep a prepared style/bank out of the active engine
     // until its boundary. No PCM generation or resource access occurs in writeData.
-    const sequence = this.renderSequence(buildProgramSequence(program), true, bank, program);
+    const sequence = await this.renderSequenceAsync(buildProgramSequence(program), true, bank, program);
     const plan = this.createDrumPreviewPlan(raw, program, bank, sequence, sectionKeys);
     if (context !== this.drumPreviewPlan || revision !== this.drumPreviewUpdateRevision ||
       configuration !== this.configurationToken || !this.running) {
@@ -1556,9 +1581,9 @@ export class MetronomeEngine {
     if (bpmChanged || meterChanged || this.pendingSequence.length === 0) {
       if (this.customProgram !== undefined) {
         this.customProgram.beatsPerBar = beatsPerBar;
-        this.rebuildPendingSequence(buildProgramSequence(this.customProgram), this.customProgramLooping);
+        this.rebuildPendingSequence(buildProgramSequence(this.customProgram), this.customProgramLooping, true);
       } else {
-        this.rebuildPendingSequence([this.pattern], true);
+        this.rebuildPendingSequence([this.pattern], true, true);
       }
     }
   }
@@ -1572,9 +1597,9 @@ export class MetronomeEngine {
     this.beatPointStates = normalized;
     this.pattern = BuiltInRhythmFactory.create(this.rhythm, this.beatsPerBar, this.beatPointStates);
     if (this.customProgram !== undefined) {
-      this.rebuildPendingSequence(buildProgramSequence(this.customProgram), this.customProgramLooping);
+      this.rebuildPendingSequence(buildProgramSequence(this.customProgram), this.customProgramLooping, true);
     } else {
-      this.rebuildPendingSequence([this.pattern], true);
+      this.rebuildPendingSequence([this.pattern], true, true);
     }
   }
 
@@ -1893,7 +1918,7 @@ export class MetronomeEngine {
   /** Start the persistent renderer with dither only; do not start a UI transport. */
   private async ensureSilentRendererRunning(requireExactCalibrationClock: boolean = false,
     isCancelled: () => boolean = () => false,
-    keepRunningOnRouteChange: boolean = false): Promise<void> {
+    keepRunningOnRouteChange: boolean = false, rebuildBrokenFrameMap: boolean = false): Promise<void> {
     await this.queueRendererOperation(async () => {
       if (isCancelled()) {
         return;
@@ -1911,7 +1936,8 @@ export class MetronomeEngine {
       const healthy = this.rendererStarted && renderer.state === audio.AudioState.STATE_RUNNING &&
         now - this.lastWriteProgressMs < AUDIO_CALLBACK_STALL_MS &&
         (!routeReset || keepRunningOnRouteChange) && !rebuildForMic &&
-        (!requireExactCalibrationClock || this.calibrationFrameOriginExact);
+        (!requireExactCalibrationClock || this.calibrationFrameOriginExact) &&
+        !(rebuildBrokenFrameMap && this.audioTimestampBaseBroken);
       if (healthy) {
         console.info(`[CalibDiag] renderer healthy, keep buffer, queueDepthFrames=${this.queueDepthFrames} submittedFrames=${this.audioSubmittedFrames}`);
         return;
@@ -2003,6 +2029,57 @@ export class MetronomeEngine {
    * presentation target。固定等待也让正式播放复用的 A2DP 链路处于同一运行状态；
    * 软件队列深度不会进入校准值。
    */
+  /**
+   * Prepare the physical output before a shared start deadline exists.
+   *
+   * A cold start (new session, or a renderer rebuilt after a broken frame map)
+   * needs renderer creation, a moving hardware counter (~550ms on Bluetooth)
+   * and the output queue ahead of its first beat. Inside the fixed 650ms
+   * preroll that clamps the target and re-phases to a later beat, so the first
+   * beats are skipped. Doing that work here, while the transport is idle or
+   * paused, lets the following start take the continuous path.
+   *
+   * Returns the lead this device needs between scheduling a start and its
+   * audible time (compensation + queued audio + margin), or undefined when the
+   * output could not be prepared; the caller keeps the default preroll then.
+   */
+  async prepareOutputForSharedStart(isCancelled: () => boolean = () => false): Promise<number | undefined> {
+    const startedAt = MonotonicClock.nowMs();
+    try {
+      await this.ensureRenderer();
+      if (isCancelled()) { return undefined; }
+      const current = this.renderer;
+      if (current !== undefined && this.rendererStarted) {
+        // Paused streams get no beat-time map reads; check the map here (excess
+        // via a read, plus underflow) so a break during the pause is rebuilt
+        // now rather than inside the start.
+        this.readRenderedStreamFrames(current, MonotonicClock.nowMs());
+        this.noteUnderflowSinceBase(current);
+      }
+      const rebuilt = !this.rendererStarted || this.audioTimestampBaseBroken;
+      await this.ensureSilentRendererRunning(false, isCancelled, true, true);
+      if (isCancelled()) { return undefined; }
+      // The target of the next start is computed from this counter; a frozen
+      // or stale one would place it late (see COLD_START_COUNTER_WAIT_LEAD_MS).
+      await this.waitForFreshMovingCounter(() => !isCancelled(),
+        MonotonicClock.nowMs() + ROUTE_REPHASE_COUNTER_WAIT_MS);
+      if (isCancelled()) { return undefined; }
+      const renderer = this.renderer;
+      if (renderer === undefined || !this.rendererStarted) { return undefined; }
+      this.refreshOutputLatency();
+      this.readRenderedStreamFrames(renderer, MonotonicClock.nowMs());
+      const queueMs = this.queueDepthFrames * 1000 / SAMPLE_RATE;
+      const leadMs = Math.ceil(Math.max(0, this.outputLatencyMs) + queueMs + SHARED_START_LEAD_MARGIN_MS);
+      console.info(`[StartTimingDiag] stage=output-prepared rebuilt=${rebuilt} leadMs=${leadMs} ` +
+        `compensationMs=${this.outputLatencyMs} queueMs=${queueMs.toFixed(1)} ` +
+        `waitedMs=${(MonotonicClock.nowMs() - startedAt).toFixed(1)} physicalStartCount=${this.rendererPhysicalStartCount}`);
+      return leadMs;
+    } catch (err) {
+      console.warn(`[StartTimingDiag] stage=output-prepare-failed message=${(err as Error).message}`);
+      return undefined;
+    }
+  }
+
   private async warmUpRenderQueueForCalibration(): Promise<void> {
     const CALIBRATION_WARMUP_MS = 1200;
     const renderer = this.renderer;
@@ -2586,22 +2663,275 @@ export class MetronomeEngine {
     this.timerId = setTimeout(() => this.emitBeatAndScheduleNext(token), wait);
   }
 
-  private rebuildPendingSequence(patterns: SequencerPattern[], looping: boolean): void {
-    const sequence = this.renderSequence(patterns, looping, this.sampleBank, this.customProgram);
+  /**
+   * Prepare the PCM for a new configuration. With allowOffload and a
+   * registered runner it renders on a TaskPool worker so writeData keeps being
+   * serviced; the current sequence keeps playing until the result is applied.
+   * Anything that consumes the new PCM (a start, a preview plan) first calls
+   * flushPendingPcmRender(), which renders the same job synchronously if the
+   * worker has not answered yet: a late result may cost a stall, never a
+   * start with the old configuration's PCM.
+   */
+  private rebuildPendingSequence(patterns: SequencerPattern[], looping: boolean, allowOffload: boolean = false): void {
+    const runner = allowOffload ? PcmRenderOffload.get() : undefined;
+    if (runner === undefined) {
+      this.pendingPcmRender = undefined;
+      this.pcmTail = undefined;
+      this.pcmRenderRevision++;
+      this.applyRenderedSequence(this.renderSequence(patterns, looping, this.sampleBank, this.customProgram),
+        looping, undefined);
+      return;
+    }
+    const revision = ++this.pcmRenderRevision;
+    const job: PcmRenderJob = {
+      context: this.pcmVoiceContext(), patterns, looping, bank: this.sampleBank,
+      program: this.customProgram === undefined ? undefined : this.cloneProgram(this.customProgram),
+      countInBeats: this.countInCapacity(0)
+    };
+    const pending: PendingPcmRender = { revision, job, requestedAtMs: MonotonicClock.nowMs() };
+    this.pendingPcmRender = pending;
+    this.pcmTail = undefined;
+    const headBars = pcmHeadBarCount(patterns.length);
+    if (headBars > 0) {
+      // A start begins at bar 0, so only the head gates readiness. Later bars
+      // follow chunk by chunk (continuePcmTail) and replace placeholders as
+      // each arrives, so playback rarely meets one.
+      runner(this.pcmChunkJob(job, 0, headBars, undefined)).then((result: PcmRenderResult) => {
+        if (this.pendingPcmRender !== pending) {
+          return;
+        }
+        this.pendingPcmRender = undefined;
+        const tail = this.applyHeadSequence(revision, job, result);
+        console.info(`[PcmRenderDiag] stage=offload-head revision=${revision} bars=${result.sequence.length}/` +
+          `${patterns.length} renderMs=${result.renderMs} ` +
+          `roundTripMs=${(MonotonicClock.nowMs() - pending.requestedAtMs).toFixed(1)} placeholders=${tail.length}`);
+        this.continuePcmTail();
+      }, (err: Error) => {
+        if (this.pendingPcmRender !== pending) {
+          return;
+        }
+        console.warn(`[PcmRenderDiag] stage=offload-failed part=head revision=${revision} message=${err?.message}`);
+        this.flushPendingPcmRender('offload-failed');
+      });
+      return;
+    }
+    runner(job).then((result: PcmRenderResult) => {
+      if (this.pendingPcmRender !== pending) {
+        return;
+      }
+      this.pendingPcmRender = undefined;
+      this.applyRenderedSequence(result.sequence, looping, result.countIn);
+      console.info(`[PcmRenderDiag] stage=offload revision=${revision} bars=${result.sequence.length} ` +
+        `renderMs=${result.renderMs} roundTripMs=${(MonotonicClock.nowMs() - pending.requestedAtMs).toFixed(1)}`);
+    }, (err: Error) => {
+      if (this.pendingPcmRender !== pending) {
+        return;
+      }
+      // E.g. a TaskPool serialization limit: keep correctness on this thread.
+      console.warn(`[PcmRenderDiag] stage=offload-failed revision=${revision} message=${err?.message}`);
+      this.flushPendingPcmRender('offload-failed');
+    });
+  }
+
+  private pcmChunkJob(job: PcmRenderJob, startBar: number, endBar: number,
+    limiterState: DrumBusLimiterState | undefined): PcmRenderJob {
+    return {
+      context: job.context, patterns: job.patterns, looping: job.looping, bank: job.bank, program: job.program,
+      countInBeats: startBar === 0 ? job.countInBeats : 0, chunk: { startBar, endBar, limiterState }
+    };
+  }
+
+  /**
+   * Head bars plus placeholders for the rest. Placeholders share one dither
+   * buffer (never digital zero: the smart PA powers off on zero runs) and keep
+   * each bar's real length, so playback that outruns the tail chunks stays on
+   * the shared grid and only plays dither until the real bar arrives.
+   */
+  private applyHeadSequence(revision: number, job: PcmRenderJob, result: PcmRenderResult): RenderedBar[] {
+    const silence = result.silence ?? new Int16Array(0);
+    const placeholders: RenderedBar[] = (result.placeholders ?? []).map((shape: PcmBarShape): RenderedBar => ({
+      samples: silence.subarray(0, shape.frameCount), frameCount: shape.frameCount,
+      samplesPerBeat: shape.samplesPerBeat, beatsPerBar: shape.beatsPerBar
+    }));
+    this.applyRenderedSequence(result.sequence.concat(placeholders), job.looping, result.countIn);
+    const headBars = result.sequence.length;
+    this.pcmTail = placeholders.length === 0 ? undefined : {
+      revision, job, headBars, nextBar: headBars, limiterState: result.limiterState, placeholders,
+      retried: false, failed: false
+    };
+    return placeholders;
+  }
+
+  /** Render the next tail chunk on the worker; one retry, then defer to the next preparation. */
+  private continuePcmTail(): void {
+    const tail = this.pcmTail;
+    const runner = PcmRenderOffload.get();
+    if (tail === undefined || tail.failed) {
+      return;
+    }
+    const total = tail.job.patterns.length;
+    if (runner === undefined) {
+      tail.failed = true;
+      return;
+    }
+    const startBar = tail.nextBar;
+    const endBar = Math.min(total, startBar + pcmTailChunkBars(total));
+    const requestedAt = MonotonicClock.nowMs();
+    runner(this.pcmChunkJob(tail.job, startBar, endBar, tail.limiterState)).then((result: PcmRenderResult) => {
+      if (this.pcmTail !== tail) {
+        return;
+      }
+      this.applyPcmTailChunk(tail, startBar, result);
+      console.info(`[PcmRenderDiag] stage=offload-tail revision=${tail.revision} bars=${startBar}-${endBar}/${total} ` +
+        `renderMs=${result.renderMs} roundTripMs=${(MonotonicClock.nowMs() - requestedAt).toFixed(1)}`);
+      this.continuePcmTail();
+    }, (err: Error) => {
+      if (this.pcmTail !== tail) {
+        return;
+      }
+      if (!tail.retried) {
+        tail.retried = true;
+        console.warn(`[PcmRenderDiag] stage=tail-retry revision=${tail.revision} bars=${startBar}-${endBar}/${total} ` +
+          `message=${err?.message}`);
+        this.continuePcmTail();
+        return;
+      }
+      // Placeholders keep playing dither on the grid; waitForPcmReady renders
+      // the rest before the next start, never inside a start or writeData.
+      tail.failed = true;
+      console.warn(`[PcmRenderDiag] stage=offload-failed part=tail revision=${tail.revision} ` +
+        `bars=${startBar}-${endBar}/${total} message=${err?.message}`);
+    });
+  }
+
+  private applyPcmTailChunk(tail: PendingPcmTail, startBar: number, result: PcmRenderResult): void {
+    this.fillPcmTail(tail, startBar, result.sequence);
+    tail.nextBar = startBar + result.sequence.length;
+    tail.limiterState = result.limiterState;
+    tail.retried = false;
+    if (tail.nextBar >= tail.job.patterns.length && this.pcmTail === tail) {
+      this.pcmTail = undefined;
+    }
+  }
+
+  /**
+   * Swap real bars in for placeholders by identity. The active sequence may be
+   * a copy (count-in prefix) and may be playing a placeholder right now; frame
+   * positions are identical, so a mid-bar swap continues on the same grid.
+   */
+  private fillPcmTail(tail: PendingPcmTail, startBar: number, bars: RenderedBar[]): void {
+    for (let i = 0; i < bars.length; i++) {
+      const placeholder = tail.placeholders[startBar + i - tail.headBars];
+      const real = bars[i];
+      if (placeholder === undefined || real.frameCount !== placeholder.frameCount) {
+        continue;
+      }
+      const pendingIndex = this.pendingSequence.indexOf(placeholder);
+      if (pendingIndex >= 0) {
+        this.pendingSequence[pendingIndex] = real;
+      }
+      const activeIndex = this.activeSequence.indexOf(placeholder);
+      if (activeIndex >= 0) {
+        this.activeSequence[activeIndex] = real;
+      }
+      if (this.activeBar === placeholder) {
+        this.activeBar = real;
+      }
+    }
+  }
+
+  /** Render every remaining tail bar here, continuing the carried limiter state. */
+  private completePcmTail(reason: string): void {
+    const tail = this.pcmTail;
+    if (tail === undefined) {
+      return;
+    }
+    const startedAt = MonotonicClock.nowMs();
+    const total = tail.job.patterns.length;
+    const startBar = tail.nextBar;
+    // Detach first: a worker chunk still in flight must not apply afterwards.
+    this.pcmTail = undefined;
+    this.applyPcmTailChunk(tail, startBar,
+      renderPcmJob(this.pcmChunkJob(tail.job, startBar, total, tail.limiterState)));
+    console.warn(`[PcmRenderDiag] stage=sync-tail reason=${reason} revision=${tail.revision} ` +
+      `bars=${startBar}-${total}/${total} renderMs=${(MonotonicClock.nowMs() - startedAt).toFixed(1)}`);
+  }
+
+  /** Render a still-pending worker job here, so the caller sees the newest PCM. */
+  private flushPendingPcmRender(reason: string): void {
+    const pending = this.pendingPcmRender;
+    if (pending === undefined) {
+      return;
+    }
+    this.pendingPcmRender = undefined;
+    this.pcmTail = undefined;
+    const startedAt = MonotonicClock.nowMs();
+    // Only the head blocks this thread; the tail chunks then render on the
+    // worker as usual. A worker failure renders everything here.
+    const headBars = reason === 'offload-failed' ? 0 : pcmHeadBarCount(pending.job.patterns.length);
+    if (headBars > 0) {
+      this.applyHeadSequence(pending.revision, pending.job,
+        renderPcmJob(this.pcmChunkJob(pending.job, 0, headBars, undefined)));
+      this.continuePcmTail();
+    } else {
+      const result = renderPcmJob(pending.job);
+      this.applyRenderedSequence(result.sequence, pending.job.looping, result.countIn);
+    }
+    console.warn(`[PcmRenderDiag] stage=sync-fallback reason=${reason} revision=${pending.revision} headBars=${headBars} ` +
+      `renderMs=${(MonotonicClock.nowMs() - startedAt).toFixed(1)} ` +
+      `waitedMs=${(startedAt - pending.requestedAtMs).toFixed(1)}`);
+  }
+
+  /** Resolves once no configuration render is pending (the newest one applied). */
+  async waitForPcmReady(): Promise<void> {
+    // A newer request can replace the pending one; keep waiting for the newest.
+    while (this.pendingPcmRender !== undefined) {
+      await new Promise<void>((resolve: () => void) => {
+        this.pcmRenderWaiters.push(resolve);
+      });
+    }
+    // A tail whose worker chunk failed twice is completed here: preparation
+    // runs before any shared deadline, and output preparation afterwards
+    // repairs a stream this stall may have underflowed.
+    if (this.pcmTail?.failed === true) {
+      this.completePcmTail('tail-failed');
+    }
+  }
+
+  private applyRenderedSequence(sequence: RenderedBar[], looping: boolean, countIn: RenderedBar | undefined): void {
     this.pendingSequence = sequence;
     this.pendingSequenceLooping = looping;
     this.pendingRevision++;
-    this.prepareCountInBuffers();
+    if (countIn !== undefined && countIn.beatsPerBar >= this.countInCapacity(0)) {
+      this.installCountInBuffers(countIn, 0);
+    } else {
+      this.prepareCountInBuffers();
+    }
     // Configuration packets arrive before their shared transport boundary. The
     // old sequence must keep looping until that boundary instead of switching
     // on whichever device happens to finish its current bar first.
     this.deferPendingSequenceActivation = this.audioStreaming;
+    const waiters = this.pcmRenderWaiters;
+    this.pcmRenderWaiters = [];
+    waiters.forEach((resolve: () => void) => resolve());
+  }
+
+  private pcmVoiceContext(): PcmVoiceContext {
+    return {
+      bpm: this.bpm, beatPointStates: this.beatPointStates.slice(), drumKitGain: this.drumKitGain,
+      accentBuffer: this.accentBuffer, weakBuffer: this.weakBuffer
+    };
+  }
+
+  /** setBpm mutates customProgram in place; a job keeps the meter it was created with. */
+  private cloneProgram(program: DrumProgram): DrumProgram {
+    return JSON.parse(JSON.stringify(program)) as DrumProgram;
   }
 
   private renderSequence(patterns: SequencerPattern[], looping: boolean,
     bank: Map<string, ArrayBuffer>, program: DrumProgram | undefined): RenderedBar[] {
     const mixes: MixedBar[] = [];
-    const styles = this.programBarStyleKeys(program);
+    const styles = programBarStyleKeys(program);
     for (let i = 0; i < patterns.length; i++) {
       mixes.push(this.mixBar(patterns[i], true, bank, program, styles[i]));
     }
@@ -2610,101 +2940,32 @@ export class MetronomeEngine {
     return this.finishBars(mixes, looping);
   }
 
+  /** Off-thread when a runner is registered; the preview keeps its own sync fallback. */
+  private async renderSequenceAsync(patterns: SequencerPattern[], looping: boolean,
+    bank: Map<string, ArrayBuffer>, program: DrumProgram): Promise<RenderedBar[]> {
+    const runner = PcmRenderOffload.get();
+    if (runner === undefined) {
+      return this.renderSequence(patterns, looping, bank, program);
+    }
+    const job: PcmRenderJob = {
+      context: this.pcmVoiceContext(), patterns, looping, bank, program: this.cloneProgram(program), countInBeats: 0
+    };
+    try {
+      return (await runner(job)).sequence;
+    } catch (err) {
+      console.warn(`[PcmRenderDiag] stage=preview-offload-failed message=${(err as Error).message}`);
+      return renderPcmJob(job).sequence;
+    }
+  }
+
   private finishBars(mixes: MixedBar[], looping: boolean): RenderedBar[] {
-    const stats: DrumBusLimitStats = { overSamples: 0, limitedSamples: 0, peak: 0, minGain: 1 };
-    const samples = limitDrumBus(mixes, looping, stats);
-    if (stats.overSamples > 0) {
-      console.info(`[DrumBusDiag] bars=${mixes.length} overSamples=${stats.overSamples}` +
-        ` limitedSamples=${stats.limitedSamples} peakDbfs=${(20 * Math.log10(stats.peak / 32768)).toFixed(2)}` +
-        ` minGainDb=${(20 * Math.log10(stats.minGain)).toFixed(2)}`);
-    }
-    const bars: RenderedBar[] = [];
-    for (let i = 0; i < mixes.length; i++) {
-      bars.push({
-        samples: samples[i],
-        frameCount: mixes[i].frameCount,
-        samplesPerBeat: mixes[i].samplesPerBeat,
-        beatsPerBar: mixes[i].beatsPerBar
-      });
-    }
-    return bars;
-  }
-
-  private programBarStyleKeys(program: DrumProgram | undefined): string[] {
-    const styles: string[] = [];
-    if (program !== undefined) {
-      for (let section = 0; section < program.sections.length; section++) {
-        const current = program.sections[section];
-        const style = drumSectionStyleKey(program, current);
-        for (let repeat = 0; repeat < current.repeats; repeat++) {
-          styles.push(style);
-        }
-      }
-    }
-    return styles;
-  }
-
-  private drumSample(bank: Map<string, ArrayBuffer>, sampleKey: string,
-    styleKey?: string): ArrayBuffer | undefined {
-    const styled = styleKey === undefined ? undefined : bank.get(`${styleKey}/${sampleKey}`);
-    return styled ?? bank.get(sampleKey);
+    return finishPcmBars(mixes, looping);
   }
 
   private mixRideTails(patterns: SequencerPattern[], sequence: MixedBar[], looping: boolean,
     bank: Map<string, ArrayBuffer> = this.sampleBank,
     program: DrumProgram | undefined = this.customProgram): void {
-    if (sequence.length === 0) {
-      return;
-    }
-    const styles = this.programBarStyleKeys(program);
-    // Only the new, sustained ride voice needs this continuation. Mix it while
-    // preparing PCM, never in writeData, and keep every bar's frame count and
-    // transport boundary unchanged. Looping PCM includes the previous cycle's
-    // steady-state ring so its seam cannot chop the cymbal tail.
-    for (let barIndex = 0; barIndex < patterns.length; barIndex++) {
-      const pattern = patterns[barIndex];
-      const bar = sequence[barIndex];
-      const ride = this.drumSample(bank, 'ride', styles[barIndex]);
-      if (ride === undefined) {
-        continue;
-      }
-      // A ringing cymbal retains its source kit across the next section's style boundary.
-      const source = new DataView(ride);
-      const sourceFrames = Math.floor(ride.byteLength / BYTES_PER_SAMPLE);
-      for (let eventIndex = 0; eventIndex < pattern.events.length; eventIndex++) {
-        const event = pattern.events[eventIndex];
-        if (event.sampleKey !== 'ride') {
-          continue;
-        }
-        const eventBeat = Math.floor(event.tick / pattern.ticksPerBeat) % Math.max(1, pattern.beatsPerBar);
-        const pointState = this.beatPointStates[eventBeat] ?? 'normal';
-        if (pointState === 'silent') {
-          continue;
-        }
-        const startFrame = Math.round(event.tick * bar.samplesPerBeat / pattern.ticksPerBeat);
-        if (startFrame < 0 || startFrame >= bar.frameCount) {
-          continue;
-        }
-        const pointGain = program !== undefined && pointState === 'accent' ? 1.15 : 1;
-        let sourceFrame = bar.frameCount - startFrame;
-        let targetBarIndex = barIndex + 1;
-        while (sourceFrame < sourceFrames) {
-          if (!looping && targetBarIndex >= sequence.length) {
-            break;
-          }
-          const target = sequence[targetBarIndex % sequence.length];
-          const count = Math.min(sourceFrames - sourceFrame, target.frameCount);
-          for (let frame = 0; frame < count; frame++) {
-            const mixed = target.mix[frame] + source.getInt16((sourceFrame + frame) * BYTES_PER_SAMPLE, true) *
-              event.velocity * pointGain * this.drumKitGain;
-            // Per-voice rounding is unchanged; range is enforced once by the drum bus limiter.
-            target.mix[frame] = Math.round(mixed);
-          }
-          sourceFrame += count;
-          targetBarIndex++;
-        }
-      }
-    }
+    mixPcmRideTails(this.pcmVoiceContext(), patterns, sequence, looping, bank, program);
   }
 
   private renderBar(pattern: SequencerPattern, applyBeatPointPattern: boolean = true,
@@ -2716,64 +2977,16 @@ export class MetronomeEngine {
   private mixBar(pattern: SequencerPattern, applyBeatPointPattern: boolean = true,
     bank: Map<string, ArrayBuffer> = this.sampleBank,
     program: DrumProgram | undefined = this.customProgram, styleKey?: string): MixedBar {
-    const samplesPerBeat = SAMPLE_RATE * 60 / Math.max(1, this.bpm);
-    const frameCount = Math.max(1, Math.round(samplesPerBeat * pattern.beatsPerBar));
-    const data = new ArrayBuffer(frameCount * BYTES_PER_SAMPLE);
-    applyDitherFloor(data);
-    const dither = new Int16Array(data);
-    const output = new Float32Array(frameCount);
-    for (let i = 0; i < frameCount; i++) {
-      output[i] = dither[i];
-    }
-
-    for (let eventIndex = 0; eventIndex < pattern.events.length; eventIndex++) {
-      const event = pattern.events[eventIndex];
-      const eventBeat = Math.floor(event.tick / pattern.ticksPerBeat) % Math.max(1, pattern.beatsPerBar);
-      const pointState = this.beatPointStates[eventBeat] ?? 'normal';
-      if (applyBeatPointPattern && pointState === 'silent') {
-        continue;
-      }
-      const bankSample = this.drumSample(bank, event.sampleKey, styleKey);
-      const sourceData = bankSample !== undefined ? bankSample :
-        event.sampleKey === 'accent' ? this.accentBuffer : this.weakBuffer;
-      const source = new DataView(sourceData);
-      const sourceFrames = Math.floor(sourceData.byteLength / BYTES_PER_SAMPLE);
-      const startFrame = Math.round(event.tick * samplesPerBeat / pattern.ticksPerBeat);
-      const availableFrames = Math.min(sourceFrames, frameCount - startFrame);
-      // Click tones ('accent'/'weak', bundled or from a sound bank) keep unity; only kit voices get headroom.
-      const kitVoice = bankSample !== undefined && event.sampleKey !== 'accent' && event.sampleKey !== 'weak';
-      const voiceGain = kitVoice ? this.drumKitGain : 1;
-      for (let frame = 0; frame < availableFrames; frame++) {
-        const target = startFrame + frame;
-        const pointGain = applyBeatPointPattern && program !== undefined && pointState === 'accent' ? 1.15 : 1;
-        const mixed = output[target] +
-          source.getInt16(frame * BYTES_PER_SAMPLE, true) * event.velocity * pointGain * voiceGain;
-        // Per-voice rounding is unchanged; range is enforced once by the drum bus limiter.
-        output[target] = Math.round(mixed);
-      }
-    }
-
-    return {
-      mix: output,
-      frameCount: frameCount,
-      samplesPerBeat: samplesPerBeat,
-      beatsPerBar: pattern.beatsPerBar
-    };
+    return mixPcmBar(this.pcmVoiceContext(), pattern, applyBeatPointPattern, bank, program, styleKey);
   }
 
   private renderCountInBar(beats: number): RenderedBar {
-    const events: SequencerEvent[] = [];
-    for (let beat = 0; beat < beats; beat++) {
-      events.push({
-        tick: beat * DEFAULT_TICKS_PER_BEAT,
-        sampleKey: beat === 0 ? 'accent' : 'weak',
-        velocity: 1
-      });
-    }
-    return this.renderBar(new SequencerPattern(DEFAULT_TICKS_PER_BEAT, beats, events), false);
+    return this.renderBar(countInPattern(beats), false);
   }
 
   private preparePlaybackBuffers(countInBeats: number): void {
+    // Every start/transition consumes the newest configuration; never the old PCM.
+    this.flushPendingPcmRender('playback-start');
     if (this.pendingSequence.length === 0) {
       this.rebuildPendingSequence([this.pattern], true);
     }
@@ -2783,19 +2996,28 @@ export class MetronomeEngine {
     }
   }
 
-  private prepareCountInBuffers(requiredBeats: number = 0): void {
+  private countInCapacity(requiredBeats: number): number {
     const pendingBeats = this.pendingAudioTransition?.kind === 'play'
       ? this.pendingAudioTransition.countInBeats : 0;
-    const capacity = Math.ceil(Math.max(1, this.beatsPerBar, requiredBeats,
+    return Math.ceil(Math.max(1, this.beatsPerBar, requiredBeats,
       this.transportCountInBeats, pendingBeats));
-    const full = this.renderCountInBar(capacity);
+  }
+
+  private prepareCountInBuffers(requiredBeats: number = 0): void {
+    this.installCountInBuffers(this.renderCountInBar(this.countInCapacity(requiredBeats)), requiredBeats);
+  }
+
+  private installCountInBuffers(full: RenderedBar, requiredBeats: number): void {
+    const pendingBeats = this.pendingAudioTransition?.kind === 'play'
+      ? this.pendingAudioTransition.countInBeats : 0;
+    const capacity = full.beatsPerBar;
     const prepared = new Map<number, RenderedBar>();
     // Every remaining count-in restarts with an accent. Prefixes of the same
     // rendered bar preserve its rounding and sounds without repeating the PCM
     // allocation/dither loop in writeData. A revision also covers sample-bank
     // changes; configurationToken alone changes even when PCM is unchanged.
     const addPrefix = (beats: number): void => {
-      if (beats <= 0 || prepared.has(beats)) {
+      if (beats <= 0 || beats > capacity || prepared.has(beats)) {
         return;
       }
       const frameCount = Math.max(1, Math.round(full.samplesPerBeat * beats));

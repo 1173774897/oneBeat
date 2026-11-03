@@ -8,6 +8,7 @@ import { RecordingShareService } from '../sharing/RecordingShareService';
 import { initializeShareCheckInStore, refreshShareCheckInClock } from '../store/ShareCheckInStore';
 import { DrumSampleBank } from '../audio/DrumSampleBank';
 import { TeamAcousticProbe } from '../audio/TeamAcousticProbe';
+import { registerPcmRenderTaskPool } from '../audio/PcmRenderTask';
 import { initializeDrumProgramLibrary } from '../audio/DrumProgramLibrary';
 import { AppSession } from '../app/AppSession';
 import { SessionBackgroundKeeper } from '../session/SessionBackgroundKeeper';
@@ -24,6 +25,8 @@ import { bindAudioLatencyPersistenceContext, restoreCalibrationMs, restoreInputL
 export default class EntryAbility extends UIAbility {
   onCreate(_want: Want, _launchParam: AbilityConstant.LaunchParam): void {
     hilog.info(DOMAIN, TAG, 'EntryAbility onCreate');
+    // Configuration PCM renders on TaskPool so it cannot starve writeData.
+    registerPcmRenderTaskPool();
     SessionBackgroundKeeper.initialize(this.context);
     bindStoreSessionPersistenceContext(this.context);
     bindAudioLatencyPersistenceContext(this.context);

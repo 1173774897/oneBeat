@@ -1,0 +1,3482 @@
+{
+  "errors": [],
+  "checks": 139,
+  "maxDialogHeight": 522,
+  "measurements": [
+    {
+      "width": 388,
+      "product": "cloud",
+      "design": "inline",
+      "state": "collapsed",
+      "x": 174,
+      "height": 440,
+      "right": 562,
+      "viewport": 736,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 66,
+      "moreVisible": false,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "cloud",
+      "design": "benefits",
+      "state": "collapsed",
+      "x": 174,
+      "height": 458,
+      "right": 562,
+      "viewport": 736,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 44,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "cloud",
+      "design": "benefits",
+      "state": "expanded",
+      "x": 174,
+      "height": 502,
+      "right": 562,
+      "viewport": 736,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 88,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "cloud",
+      "design": "detail",
+      "state": "collapsed",
+      "x": 174,
+      "height": 453,
+      "right": 562,
+      "viewport": 736,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 44,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "cloud",
+      "design": "detail",
+      "state": "expanded",
+      "x": 174,
+      "height": 473,
+      "right": 562,
+      "viewport": 736,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 0,
+      "moreVisible": false,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "teapot",
+      "design": "inline",
+      "state": "collapsed",
+      "x": 174,
+      "height": 440,
+      "right": 562,
+      "viewport": 736,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 66,
+      "moreVisible": false,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "teapot",
+      "design": "benefits",
+      "state": "collapsed",
+      "x": 174,
+      "height": 458,
+      "right": 562,
+      "viewport": 736,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 44,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "teapot",
+      "design": "benefits",
+      "state": "expanded",
+      "x": 174,
+      "height": 480,
+      "right": 562,
+      "viewport": 736,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 66,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "teapot",
+      "design": "detail",
+      "state": "collapsed",
+      "x": 174,
+      "height": 453,
+      "right": 562,
+      "viewport": 736,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 44,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "teapot",
+      "design": "detail",
+      "state": "expanded",
+      "x": 174,
+      "height": 473,
+      "right": 562,
+      "viewport": 736,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 0,
+      "moreVisible": false,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "wave",
+      "design": "inline",
+      "state": "collapsed",
+      "x": 174,
+      "height": 440,
+      "right": 562,
+      "viewport": 736,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 66,
+      "moreVisible": false,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "wave",
+      "design": "benefits",
+      "state": "collapsed",
+      "x": 174,
+      "height": 458,
+      "right": 562,
+      "viewport": 736,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 44,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "wave",
+      "design": "benefits",
+      "state": "expanded",
+      "x": 174,
+      "height": 480,
+      "right": 562,
+      "viewport": 736,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 66,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "wave",
+      "design": "detail",
+      "state": "collapsed",
+      "x": 174,
+      "height": 453,
+      "right": 562,
+      "viewport": 736,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 44,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "wave",
+      "design": "detail",
+      "state": "expanded",
+      "x": 174,
+      "height": 473,
+      "right": 562,
+      "viewport": 736,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 0,
+      "moreVisible": false,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "mismatch",
+      "design": "inline",
+      "state": "collapsed",
+      "x": 174,
+      "height": 440,
+      "right": 562,
+      "viewport": 736,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 66,
+      "moreVisible": false,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "mismatch",
+      "design": "benefits",
+      "state": "collapsed",
+      "x": 174,
+      "height": 458,
+      "right": 562,
+      "viewport": 736,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 44,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "mismatch",
+      "design": "benefits",
+      "state": "expanded",
+      "x": 174,
+      "height": 480,
+      "right": 562,
+      "viewport": 736,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 66,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "mismatch",
+      "design": "detail",
+      "state": "collapsed",
+      "x": 174,
+      "height": 453,
+      "right": 562,
+      "viewport": 736,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 44,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "mismatch",
+      "design": "detail",
+      "state": "expanded",
+      "x": 174,
+      "height": 473,
+      "right": 562,
+      "viewport": 736,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 0,
+      "moreVisible": false,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "scooter",
+      "design": "inline",
+      "state": "collapsed",
+      "x": 174,
+      "height": 440,
+      "right": 562,
+      "viewport": 736,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 66,
+      "moreVisible": false,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "scooter",
+      "design": "benefits",
+      "state": "collapsed",
+      "x": 174,
+      "height": 458,
+      "right": 562,
+      "viewport": 736,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 44,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "scooter",
+      "design": "benefits",
+      "state": "expanded",
+      "x": 174,
+      "height": 480,
+      "right": 562,
+      "viewport": 736,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 66,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "scooter",
+      "design": "detail",
+      "state": "collapsed",
+      "x": 174,
+      "height": 453,
+      "right": 562,
+      "viewport": 736,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 44,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "scooter",
+      "design": "detail",
+      "state": "expanded",
+      "x": 174,
+      "height": 473,
+      "right": 562,
+      "viewport": 736,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 0,
+      "moreVisible": false,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "lilroll",
+      "design": "inline",
+      "state": "collapsed",
+      "x": 174,
+      "height": 440,
+      "right": 562,
+      "viewport": 736,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 66,
+      "moreVisible": false,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "lilroll",
+      "design": "benefits",
+      "state": "collapsed",
+      "x": 174,
+      "height": 458,
+      "right": 562,
+      "viewport": 736,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 44,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "lilroll",
+      "design": "benefits",
+      "state": "expanded",
+      "x": 174,
+      "height": 480,
+      "right": 562,
+      "viewport": 736,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 66,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "lilroll",
+      "design": "detail",
+      "state": "collapsed",
+      "x": 174,
+      "height": 453,
+      "right": 562,
+      "viewport": 736,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 44,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "lilroll",
+      "design": "detail",
+      "state": "expanded",
+      "x": 174,
+      "height": 473,
+      "right": 562,
+      "viewport": 736,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 0,
+      "moreVisible": false,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "lamp",
+      "design": "inline",
+      "state": "collapsed",
+      "x": 174,
+      "height": 473,
+      "right": 562,
+      "viewport": 736,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 66,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "lamp",
+      "design": "inline",
+      "state": "expanded",
+      "x": 174,
+      "height": 495,
+      "right": 562,
+      "viewport": 736,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 88,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "lamp",
+      "design": "benefits",
+      "state": "collapsed",
+      "x": 174,
+      "height": 458,
+      "right": 562,
+      "viewport": 736,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 44,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "lamp",
+      "design": "benefits",
+      "state": "expanded",
+      "x": 174,
+      "height": 502,
+      "right": 562,
+      "viewport": 736,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 88,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "lamp",
+      "design": "detail",
+      "state": "collapsed",
+      "x": 174,
+      "height": 453,
+      "right": 562,
+      "viewport": 736,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 44,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "lamp",
+      "design": "detail",
+      "state": "expanded",
+      "x": 174,
+      "height": 495,
+      "right": 562,
+      "viewport": 736,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 0,
+      "moreVisible": false,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "neon_street",
+      "design": "inline",
+      "state": "collapsed",
+      "x": 174,
+      "height": 440,
+      "right": 562,
+      "viewport": 736,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 66,
+      "moreVisible": false,
+      "rights": "永久解锁并加入“我的”单人练习可选；多人场景由队长设置",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "neon_street",
+      "design": "benefits",
+      "state": "collapsed",
+      "x": 174,
+      "height": 458,
+      "right": 562,
+      "viewport": 736,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 44,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人练习可选；多人场景由队长设置",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "neon_street",
+      "design": "benefits",
+      "state": "expanded",
+      "x": 174,
+      "height": 480,
+      "right": 562,
+      "viewport": 736,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 66,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人练习可选；多人场景由队长设置",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "neon_street",
+      "design": "detail",
+      "state": "collapsed",
+      "x": 174,
+      "height": 453,
+      "right": 562,
+      "viewport": 736,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 44,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人练习可选；多人场景由队长设置",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "neon_street",
+      "design": "detail",
+      "state": "expanded",
+      "x": 174,
+      "height": 473,
+      "right": 562,
+      "viewport": 736,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 0,
+      "moreVisible": false,
+      "rights": "永久解锁并加入“我的”单人练习可选；多人场景由队长设置",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "monthly",
+      "design": "inline",
+      "state": "collapsed",
+      "x": 174,
+      "height": 467,
+      "right": 562,
+      "viewport": 736,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 44,
+      "moreVisible": false,
+      "rights": "有效期内畅用全部角色、场景包含后续上架内容与 PRO 定制鼓机",
+      "renewalVisible": true
+    },
+    {
+      "width": 388,
+      "product": "monthly",
+      "design": "benefits",
+      "state": "collapsed",
+      "x": 174,
+      "height": 472,
+      "right": 562,
+      "viewport": 736,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 44,
+      "moreVisible": false,
+      "rights": "有效期内畅用全部角色、场景包含后续上架内容与 PRO 定制鼓机",
+      "renewalVisible": true
+    },
+    {
+      "width": 388,
+      "product": "monthly",
+      "design": "detail",
+      "state": "collapsed",
+      "x": 174,
+      "height": 500,
+      "right": 562,
+      "viewport": 736,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 44,
+      "moreVisible": false,
+      "rights": "有效期内畅用全部角色、场景包含后续上架内容与 PRO 定制鼓机",
+      "renewalVisible": true
+    },
+    {
+      "width": 388,
+      "product": "cloud",
+      "design": "inline",
+      "state": "collapsed",
+      "x": 26,
+      "height": 440,
+      "right": 414,
+      "viewport": 440,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 66,
+      "moreVisible": false,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "cloud",
+      "design": "benefits",
+      "state": "collapsed",
+      "x": 26,
+      "height": 458,
+      "right": 414,
+      "viewport": 440,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 44,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "cloud",
+      "design": "benefits",
+      "state": "expanded",
+      "x": 26,
+      "height": 502,
+      "right": 414,
+      "viewport": 440,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 88,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "cloud",
+      "design": "detail",
+      "state": "collapsed",
+      "x": 26,
+      "height": 453,
+      "right": 414,
+      "viewport": 440,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 44,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "cloud",
+      "design": "detail",
+      "state": "expanded",
+      "x": 26,
+      "height": 473,
+      "right": 414,
+      "viewport": 440,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 0,
+      "moreVisible": false,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "teapot",
+      "design": "inline",
+      "state": "collapsed",
+      "x": 26,
+      "height": 440,
+      "right": 414,
+      "viewport": 440,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 66,
+      "moreVisible": false,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "teapot",
+      "design": "benefits",
+      "state": "collapsed",
+      "x": 26,
+      "height": 458,
+      "right": 414,
+      "viewport": 440,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 44,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "teapot",
+      "design": "benefits",
+      "state": "expanded",
+      "x": 26,
+      "height": 480,
+      "right": 414,
+      "viewport": 440,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 66,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "teapot",
+      "design": "detail",
+      "state": "collapsed",
+      "x": 26,
+      "height": 453,
+      "right": 414,
+      "viewport": 440,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 44,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "teapot",
+      "design": "detail",
+      "state": "expanded",
+      "x": 26,
+      "height": 473,
+      "right": 414,
+      "viewport": 440,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 0,
+      "moreVisible": false,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "wave",
+      "design": "inline",
+      "state": "collapsed",
+      "x": 26,
+      "height": 440,
+      "right": 414,
+      "viewport": 440,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 66,
+      "moreVisible": false,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "wave",
+      "design": "benefits",
+      "state": "collapsed",
+      "x": 26,
+      "height": 458,
+      "right": 414,
+      "viewport": 440,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 44,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "wave",
+      "design": "benefits",
+      "state": "expanded",
+      "x": 26,
+      "height": 480,
+      "right": 414,
+      "viewport": 440,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 66,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "wave",
+      "design": "detail",
+      "state": "collapsed",
+      "x": 26,
+      "height": 453,
+      "right": 414,
+      "viewport": 440,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 44,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "wave",
+      "design": "detail",
+      "state": "expanded",
+      "x": 26,
+      "height": 473,
+      "right": 414,
+      "viewport": 440,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 0,
+      "moreVisible": false,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "mismatch",
+      "design": "inline",
+      "state": "collapsed",
+      "x": 26,
+      "height": 440,
+      "right": 414,
+      "viewport": 440,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 66,
+      "moreVisible": false,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "mismatch",
+      "design": "benefits",
+      "state": "collapsed",
+      "x": 26,
+      "height": 458,
+      "right": 414,
+      "viewport": 440,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 44,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "mismatch",
+      "design": "benefits",
+      "state": "expanded",
+      "x": 26,
+      "height": 480,
+      "right": 414,
+      "viewport": 440,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 66,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "mismatch",
+      "design": "detail",
+      "state": "collapsed",
+      "x": 26,
+      "height": 453,
+      "right": 414,
+      "viewport": 440,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 44,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "mismatch",
+      "design": "detail",
+      "state": "expanded",
+      "x": 26,
+      "height": 473,
+      "right": 414,
+      "viewport": 440,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 0,
+      "moreVisible": false,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "scooter",
+      "design": "inline",
+      "state": "collapsed",
+      "x": 26,
+      "height": 440,
+      "right": 414,
+      "viewport": 440,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 66,
+      "moreVisible": false,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "scooter",
+      "design": "benefits",
+      "state": "collapsed",
+      "x": 26,
+      "height": 458,
+      "right": 414,
+      "viewport": 440,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 44,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "scooter",
+      "design": "benefits",
+      "state": "expanded",
+      "x": 26,
+      "height": 480,
+      "right": 414,
+      "viewport": 440,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 66,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "scooter",
+      "design": "detail",
+      "state": "collapsed",
+      "x": 26,
+      "height": 453,
+      "right": 414,
+      "viewport": 440,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 44,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "scooter",
+      "design": "detail",
+      "state": "expanded",
+      "x": 26,
+      "height": 473,
+      "right": 414,
+      "viewport": 440,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 0,
+      "moreVisible": false,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "lilroll",
+      "design": "inline",
+      "state": "collapsed",
+      "x": 26,
+      "height": 440,
+      "right": 414,
+      "viewport": 440,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 66,
+      "moreVisible": false,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "lilroll",
+      "design": "benefits",
+      "state": "collapsed",
+      "x": 26,
+      "height": 458,
+      "right": 414,
+      "viewport": 440,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 44,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "lilroll",
+      "design": "benefits",
+      "state": "expanded",
+      "x": 26,
+      "height": 480,
+      "right": 414,
+      "viewport": 440,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 66,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "lilroll",
+      "design": "detail",
+      "state": "collapsed",
+      "x": 26,
+      "height": 453,
+      "right": 414,
+      "viewport": 440,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 44,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "lilroll",
+      "design": "detail",
+      "state": "expanded",
+      "x": 26,
+      "height": 473,
+      "right": 414,
+      "viewport": 440,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 0,
+      "moreVisible": false,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "lamp",
+      "design": "inline",
+      "state": "collapsed",
+      "x": 26,
+      "height": 473,
+      "right": 414,
+      "viewport": 440,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 66,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "lamp",
+      "design": "inline",
+      "state": "expanded",
+      "x": 26,
+      "height": 495,
+      "right": 414,
+      "viewport": 440,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 88,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "lamp",
+      "design": "benefits",
+      "state": "collapsed",
+      "x": 26,
+      "height": 458,
+      "right": 414,
+      "viewport": 440,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 44,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "lamp",
+      "design": "benefits",
+      "state": "expanded",
+      "x": 26,
+      "height": 502,
+      "right": 414,
+      "viewport": 440,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 88,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "lamp",
+      "design": "detail",
+      "state": "collapsed",
+      "x": 26,
+      "height": 453,
+      "right": 414,
+      "viewport": 440,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 44,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "lamp",
+      "design": "detail",
+      "state": "expanded",
+      "x": 26,
+      "height": 495,
+      "right": 414,
+      "viewport": 440,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 0,
+      "moreVisible": false,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "neon_street",
+      "design": "inline",
+      "state": "collapsed",
+      "x": 26,
+      "height": 440,
+      "right": 414,
+      "viewport": 440,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 66,
+      "moreVisible": false,
+      "rights": "永久解锁并加入“我的”单人练习可选；多人场景由队长设置",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "neon_street",
+      "design": "benefits",
+      "state": "collapsed",
+      "x": 26,
+      "height": 458,
+      "right": 414,
+      "viewport": 440,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 44,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人练习可选；多人场景由队长设置",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "neon_street",
+      "design": "benefits",
+      "state": "expanded",
+      "x": 26,
+      "height": 480,
+      "right": 414,
+      "viewport": 440,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 66,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人练习可选；多人场景由队长设置",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "neon_street",
+      "design": "detail",
+      "state": "collapsed",
+      "x": 26,
+      "height": 453,
+      "right": 414,
+      "viewport": 440,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 44,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人练习可选；多人场景由队长设置",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "neon_street",
+      "design": "detail",
+      "state": "expanded",
+      "x": 26,
+      "height": 473,
+      "right": 414,
+      "viewport": 440,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 0,
+      "moreVisible": false,
+      "rights": "永久解锁并加入“我的”单人练习可选；多人场景由队长设置",
+      "renewalVisible": false
+    },
+    {
+      "width": 388,
+      "product": "monthly",
+      "design": "inline",
+      "state": "collapsed",
+      "x": 26,
+      "height": 467,
+      "right": 414,
+      "viewport": 440,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 44,
+      "moreVisible": false,
+      "rights": "有效期内畅用全部角色、场景包含后续上架内容与 PRO 定制鼓机",
+      "renewalVisible": true
+    },
+    {
+      "width": 388,
+      "product": "monthly",
+      "design": "benefits",
+      "state": "collapsed",
+      "x": 26,
+      "height": 472,
+      "right": 414,
+      "viewport": 440,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 44,
+      "moreVisible": false,
+      "rights": "有效期内畅用全部角色、场景包含后续上架内容与 PRO 定制鼓机",
+      "renewalVisible": true
+    },
+    {
+      "width": 388,
+      "product": "monthly",
+      "design": "detail",
+      "state": "collapsed",
+      "x": 26,
+      "height": 500,
+      "right": 414,
+      "viewport": 440,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 44,
+      "moreVisible": false,
+      "rights": "有效期内畅用全部角色、场景包含后续上架内容与 PRO 定制鼓机",
+      "renewalVisible": true
+    },
+    {
+      "width": 296,
+      "product": "cloud",
+      "design": "inline",
+      "state": "collapsed",
+      "x": 12,
+      "height": 471,
+      "right": 308,
+      "viewport": 320,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 66,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 296,
+      "product": "cloud",
+      "design": "inline",
+      "state": "expanded",
+      "x": 12,
+      "height": 493,
+      "right": 308,
+      "viewport": 320,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 88,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 296,
+      "product": "cloud",
+      "design": "benefits",
+      "state": "collapsed",
+      "x": 12,
+      "height": 456,
+      "right": 308,
+      "viewport": 320,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 44,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 296,
+      "product": "cloud",
+      "design": "benefits",
+      "state": "expanded",
+      "x": 12,
+      "height": 522,
+      "right": 308,
+      "viewport": 320,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 110,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 296,
+      "product": "cloud",
+      "design": "detail",
+      "state": "collapsed",
+      "x": 12,
+      "height": 451,
+      "right": 308,
+      "viewport": 320,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 44,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 296,
+      "product": "cloud",
+      "design": "detail",
+      "state": "expanded",
+      "x": 12,
+      "height": 493,
+      "right": 308,
+      "viewport": 320,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 0,
+      "moreVisible": false,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 296,
+      "product": "teapot",
+      "design": "inline",
+      "state": "collapsed",
+      "x": 12,
+      "height": 471,
+      "right": 308,
+      "viewport": 320,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 66,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 296,
+      "product": "teapot",
+      "design": "inline",
+      "state": "expanded",
+      "x": 12,
+      "height": 493,
+      "right": 308,
+      "viewport": 320,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 88,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 296,
+      "product": "teapot",
+      "design": "benefits",
+      "state": "collapsed",
+      "x": 12,
+      "height": 456,
+      "right": 308,
+      "viewport": 320,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 44,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 296,
+      "product": "teapot",
+      "design": "benefits",
+      "state": "expanded",
+      "x": 12,
+      "height": 500,
+      "right": 308,
+      "viewport": 320,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 88,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 296,
+      "product": "teapot",
+      "design": "detail",
+      "state": "collapsed",
+      "x": 12,
+      "height": 451,
+      "right": 308,
+      "viewport": 320,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 44,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 296,
+      "product": "teapot",
+      "design": "detail",
+      "state": "expanded",
+      "x": 12,
+      "height": 493,
+      "right": 308,
+      "viewport": 320,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 0,
+      "moreVisible": false,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 296,
+      "product": "wave",
+      "design": "inline",
+      "state": "collapsed",
+      "x": 12,
+      "height": 471,
+      "right": 308,
+      "viewport": 320,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 66,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 296,
+      "product": "wave",
+      "design": "inline",
+      "state": "expanded",
+      "x": 12,
+      "height": 493,
+      "right": 308,
+      "viewport": 320,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 88,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 296,
+      "product": "wave",
+      "design": "benefits",
+      "state": "collapsed",
+      "x": 12,
+      "height": 456,
+      "right": 308,
+      "viewport": 320,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 44,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 296,
+      "product": "wave",
+      "design": "benefits",
+      "state": "expanded",
+      "x": 12,
+      "height": 500,
+      "right": 308,
+      "viewport": 320,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 88,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 296,
+      "product": "wave",
+      "design": "detail",
+      "state": "collapsed",
+      "x": 12,
+      "height": 451,
+      "right": 308,
+      "viewport": 320,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 44,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 296,
+      "product": "wave",
+      "design": "detail",
+      "state": "expanded",
+      "x": 12,
+      "height": 493,
+      "right": 308,
+      "viewport": 320,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 0,
+      "moreVisible": false,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 296,
+      "product": "mismatch",
+      "design": "inline",
+      "state": "collapsed",
+      "x": 12,
+      "height": 471,
+      "right": 308,
+      "viewport": 320,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 66,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 296,
+      "product": "mismatch",
+      "design": "inline",
+      "state": "expanded",
+      "x": 12,
+      "height": 493,
+      "right": 308,
+      "viewport": 320,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 88,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 296,
+      "product": "mismatch",
+      "design": "benefits",
+      "state": "collapsed",
+      "x": 12,
+      "height": 456,
+      "right": 308,
+      "viewport": 320,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 44,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 296,
+      "product": "mismatch",
+      "design": "benefits",
+      "state": "expanded",
+      "x": 12,
+      "height": 500,
+      "right": 308,
+      "viewport": 320,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 88,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 296,
+      "product": "mismatch",
+      "design": "detail",
+      "state": "collapsed",
+      "x": 12,
+      "height": 451,
+      "right": 308,
+      "viewport": 320,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 44,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 296,
+      "product": "mismatch",
+      "design": "detail",
+      "state": "expanded",
+      "x": 12,
+      "height": 493,
+      "right": 308,
+      "viewport": 320,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 0,
+      "moreVisible": false,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 296,
+      "product": "scooter",
+      "design": "inline",
+      "state": "collapsed",
+      "x": 12,
+      "height": 471,
+      "right": 308,
+      "viewport": 320,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 66,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 296,
+      "product": "scooter",
+      "design": "inline",
+      "state": "expanded",
+      "x": 12,
+      "height": 493,
+      "right": 308,
+      "viewport": 320,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 88,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 296,
+      "product": "scooter",
+      "design": "benefits",
+      "state": "collapsed",
+      "x": 12,
+      "height": 456,
+      "right": 308,
+      "viewport": 320,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 44,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 296,
+      "product": "scooter",
+      "design": "benefits",
+      "state": "expanded",
+      "x": 12,
+      "height": 500,
+      "right": 308,
+      "viewport": 320,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 88,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 296,
+      "product": "scooter",
+      "design": "detail",
+      "state": "collapsed",
+      "x": 12,
+      "height": 451,
+      "right": 308,
+      "viewport": 320,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 44,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 296,
+      "product": "scooter",
+      "design": "detail",
+      "state": "expanded",
+      "x": 12,
+      "height": 493,
+      "right": 308,
+      "viewport": 320,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 0,
+      "moreVisible": false,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 296,
+      "product": "lilroll",
+      "design": "inline",
+      "state": "collapsed",
+      "x": 12,
+      "height": 471,
+      "right": 308,
+      "viewport": 320,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 66,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 296,
+      "product": "lilroll",
+      "design": "inline",
+      "state": "expanded",
+      "x": 12,
+      "height": 493,
+      "right": 308,
+      "viewport": 320,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 88,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 296,
+      "product": "lilroll",
+      "design": "benefits",
+      "state": "collapsed",
+      "x": 12,
+      "height": 456,
+      "right": 308,
+      "viewport": 320,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 44,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 296,
+      "product": "lilroll",
+      "design": "benefits",
+      "state": "expanded",
+      "x": 12,
+      "height": 500,
+      "right": 308,
+      "viewport": 320,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 88,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 296,
+      "product": "lilroll",
+      "design": "detail",
+      "state": "collapsed",
+      "x": 12,
+      "height": 451,
+      "right": 308,
+      "viewport": 320,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 44,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 296,
+      "product": "lilroll",
+      "design": "detail",
+      "state": "expanded",
+      "x": 12,
+      "height": 493,
+      "right": 308,
+      "viewport": 320,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 0,
+      "moreVisible": false,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 296,
+      "product": "lamp",
+      "design": "inline",
+      "state": "collapsed",
+      "x": 12,
+      "height": 471,
+      "right": 308,
+      "viewport": 320,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 66,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 296,
+      "product": "lamp",
+      "design": "inline",
+      "state": "expanded",
+      "x": 12,
+      "height": 515,
+      "right": 308,
+      "viewport": 320,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 110,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 296,
+      "product": "lamp",
+      "design": "benefits",
+      "state": "collapsed",
+      "x": 12,
+      "height": 456,
+      "right": 308,
+      "viewport": 320,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 44,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 296,
+      "product": "lamp",
+      "design": "benefits",
+      "state": "expanded",
+      "x": 12,
+      "height": 522,
+      "right": 308,
+      "viewport": 320,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 110,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 296,
+      "product": "lamp",
+      "design": "detail",
+      "state": "collapsed",
+      "x": 12,
+      "height": 451,
+      "right": 308,
+      "viewport": 320,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 44,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 296,
+      "product": "lamp",
+      "design": "detail",
+      "state": "expanded",
+      "x": 12,
+      "height": 515,
+      "right": 308,
+      "viewport": 320,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 0,
+      "moreVisible": false,
+      "rights": "永久解锁并加入“我的”单人、多人练习均可选用",
+      "renewalVisible": false
+    },
+    {
+      "width": 296,
+      "product": "neon_street",
+      "design": "inline",
+      "state": "collapsed",
+      "x": 12,
+      "height": 471,
+      "right": 308,
+      "viewport": 320,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 66,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人练习可选；多人场景由队长设置",
+      "renewalVisible": false
+    },
+    {
+      "width": 296,
+      "product": "neon_street",
+      "design": "inline",
+      "state": "expanded",
+      "x": 12,
+      "height": 493,
+      "right": 308,
+      "viewport": 320,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 88,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人练习可选；多人场景由队长设置",
+      "renewalVisible": false
+    },
+    {
+      "width": 296,
+      "product": "neon_street",
+      "design": "benefits",
+      "state": "collapsed",
+      "x": 12,
+      "height": 456,
+      "right": 308,
+      "viewport": 320,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 44,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人练习可选；多人场景由队长设置",
+      "renewalVisible": false
+    },
+    {
+      "width": 296,
+      "product": "neon_street",
+      "design": "benefits",
+      "state": "expanded",
+      "x": 12,
+      "height": 500,
+      "right": 308,
+      "viewport": 320,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 88,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人练习可选；多人场景由队长设置",
+      "renewalVisible": false
+    },
+    {
+      "width": 296,
+      "product": "neon_street",
+      "design": "detail",
+      "state": "collapsed",
+      "x": 12,
+      "height": 451,
+      "right": 308,
+      "viewport": 320,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 44,
+      "moreVisible": true,
+      "rights": "永久解锁并加入“我的”单人练习可选；多人场景由队长设置",
+      "renewalVisible": false
+    },
+    {
+      "width": 296,
+      "product": "neon_street",
+      "design": "detail",
+      "state": "expanded",
+      "x": 12,
+      "height": 493,
+      "right": 308,
+      "viewport": 320,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 0,
+      "moreVisible": false,
+      "rights": "永久解锁并加入“我的”单人练习可选；多人场景由队长设置",
+      "renewalVisible": false
+    },
+    {
+      "width": 296,
+      "product": "monthly",
+      "design": "inline",
+      "state": "collapsed",
+      "x": 12,
+      "height": 465,
+      "right": 308,
+      "viewport": 320,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 44,
+      "moreVisible": false,
+      "rights": "有效期内畅用全部角色、场景包含后续上架内容与 PRO 定制鼓机",
+      "renewalVisible": true
+    },
+    {
+      "width": 296,
+      "product": "monthly",
+      "design": "benefits",
+      "state": "collapsed",
+      "x": 12,
+      "height": 470,
+      "right": 308,
+      "viewport": 320,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 44,
+      "moreVisible": false,
+      "rights": "有效期内畅用全部角色、场景包含后续上架内容与 PRO 定制鼓机",
+      "renewalVisible": true
+    },
+    {
+      "width": 296,
+      "product": "monthly",
+      "design": "detail",
+      "state": "collapsed",
+      "x": 12,
+      "height": 498,
+      "right": 308,
+      "viewport": 320,
+      "actions": [
+        {
+          "text": "再想想",
+          "height": 44
+        },
+        {
+          "text": "确认购买",
+          "height": 44
+        }
+      ],
+      "outside": [],
+      "introHeight": 44,
+      "moreVisible": false,
+      "rights": "有效期内畅用全部角色、场景包含后续上架内容与 PRO 定制鼓机",
+      "renewalVisible": true
+    }
+  ]
+}

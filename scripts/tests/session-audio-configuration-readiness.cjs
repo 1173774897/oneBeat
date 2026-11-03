@@ -7,7 +7,8 @@ const vm = require('node:vm');
 const ts = require(process.argv[2] || '/Applications/DevEco-Studio.app/Contents/tools/hvigor/hvigor/node_modules/typescript/lib/typescript.js');
 const { fixture } = require('./metronome-start-timing.cjs');
 const { program, bank, catalog, flush } = require('./drum-preview-session-ownership.cjs');
-const BUDGET_MS = 4000;
+// AppSession bounds a UI wait for PCM by the PCM budget, not the 4s clock round.
+const BUDGET_MS = 15000;
 const compiled = ts.transpileModule(fs.readFileSync(path.resolve(__dirname,
   '../../entry/src/main/ets/app/AppSession.ets'), 'utf8'), {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021 }, reportDiagnostics: true
@@ -36,6 +37,7 @@ function harness() {
     constructor(_id, isLeader) { this.isLeader = isLeader; }
     setUiListener(listener) { this.listener = listener; }
     setTransportPreparationHandler(handler) { this.prepareAudio = handler; }
+    setTransportOutputPreparationHandler(handler) { this.prepareOutput = handler; }
     getRemoteSessionEndReason() { return undefined; }
     getOffsetMs() { return 0; }
     getClockSkewPpm() { return 0; }
@@ -50,7 +52,7 @@ function harness() {
     '../network/p2p/WifiP2pManager': { WifiP2pManager: class {} },
     '../network/p2p/BleRoomDiscovery': { BleRoomDiscovery: class { setJoinRequestListener() {} setStaleDialogListener() {} setMemberDisplayName() {} } },
     '../network/p2p/P2pInvitation': {},
-    '../common/Constants': { PROTOCOL_VERSION: 6, TRANSPORT_START_PREPARE_TIMEOUT_MS: BUDGET_MS },
+    '../common/Constants': { PROTOCOL_VERSION: 6, TRANSPORT_PCM_PREPARE_TIMEOUT_MS: BUDGET_MS },
     '../common/MonotonicClock': { MonotonicClock: { nowMs: () => h.now } },
     '../common/MeterModel': { defaultBeatPointStates: count => Array(count).fill('normal') },
     '../common/UserFeedback': { showUserNotice() {}, logUserFailure: (...args) => failures.push(args) },
@@ -191,7 +193,8 @@ async function testOwnershipBoundaries() {
     const h = harness();
     h.drum();
     const ready = h.session.waitForCurrentAudioConfiguration();
-    if (boundary === 'preview-roundtrip') h.session.drumPreviewToken++;
+    // A real audition start moves both counters; only the start count marks a takeover.
+    if (boundary === 'preview-roundtrip') { h.session.drumPreviewToken++; h.session.drumPreviewStarts++; }
     if (boundary === 'calibration-roundtrip') h.session.latencyRouteProbeToken++;
     if (boundary === 'shutdown') h.session.shutdownOperation = Promise.resolve();
     if (boundary === 'retired') h.Session.instance = undefined;
@@ -245,9 +248,39 @@ async function testTimeoutAndFailure() {
   assert.equal(failed.timers.size, 0);
 }
 
+async function testDrumBpmRenderPending() {
+  // Device 2026-11-03: a BPM change on an already loaded drum program rendered
+  // on the worker; configureProgram returned early, READY went out with PCM
+  // pending, and the start re-rendered 2.2s on the JS thread and skipped beats.
+  const h = harness();
+  h.drum();
+  const first = h.session.waitForCurrentAudioConfiguration();
+  h.loads[0].resolve();
+  assert.equal(await first, true);
+  // Stand in for a worker job still running for the same loaded program.
+  h.engine.pendingPcmRender = { revision: 99, job: {}, requestedAtMs: h.now };
+  let settled = false;
+  const waiting = h.session.waitForCurrentAudioConfiguration().then(value => { settled = true; return value; });
+  await flush();
+  assert.equal(settled, false, 'A loaded drum program is not ready while its new PCM renders');
+  h.engine.pendingPcmRender = undefined;
+  h.engine.applyRenderedSequence(h.engine.pendingSequence, true, undefined);
+  assert.equal(await waiting, true, 'Ready once the pending render is applied');
+  // Device 2026-11-03: a live restart's preparation cancels debounced
+  // auditions while the walking page waits; that is not a preview takeover.
+  h.engine.pendingPcmRender = { revision: 100, job: {}, requestedAtMs: h.now };
+  const concurrent = h.session.waitForCurrentAudioConfiguration();
+  await flush();
+  h.session.preemptDrumPreview();
+  h.engine.pendingPcmRender = undefined;
+  h.engine.applyRenderedSequence(h.engine.pendingSequence, true, undefined);
+  assert.equal(await concurrent, true, 'Cancelling a debounced audition does not fail a concurrent UI wait');
+}
+
 async function main() {
   await testClockExperimentOwnership();
   await testColdAndCachedPcm();
+  await testDrumBpmRenderPending();
   await testOrdinaryAndStrictPreparation();
   await testConfigurationReplacement();
   await testOwnershipBoundaries();
