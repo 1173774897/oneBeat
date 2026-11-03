@@ -29,8 +29,10 @@ assert.match(nativeSource,
 assert.doesNotMatch(mixFileSource, /EstimateEchoAt\(/,
   'A gain or manual alignment remux must not repeat the expensive FIR fit');
 assert.match(mixFileSource,
-  /effectiveMicShiftUs = options\.micShiftUs \+ processedInfo\.autoMicShiftUs[\s\S]*ReadAlignedProcessedMic\([^;]*effectiveMicShiftUs[\s\S]*MixProcessedMicSample/,
+  /effectiveMicShiftUs = processedInfo\.manualMicShiftUs \+ processedInfo\.autoMicShiftUs[\s\S]*ReadAlignedProcessedMic\([^;]*effectiveMicShiftUs[\s\S]*limiter\.Push[\s\S]*LimitedBusSample/,
   'Automatic baseline and manual edit must shift only the cached MIC residual before the final mix');
+assert.doesNotMatch(mixFileSource, /MixProcessedMicSample/,
+  'The export bus is limited, never hard clamped per sample');
 function compile(path) {
   const compiled = ts.transpileModule(fs.readFileSync(path, 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021 }, reportDiagnostics: true
@@ -110,12 +112,12 @@ function harness(options = {}) {
       const systemAecCache = nativeOptions?.systemAecMic ??
         [...pendingCaptures.values()][0]?.micCaptureMode === 'system-aec';
       assert.equal(args.processedMicPath, systemAecCache ?
-        `${args.micPath}.system-aec-v3.f32` : `${args.micPath}.clean-v3.f32`);
+        `${args.micPath}.system-aec-v5.f32` : `${args.micPath}.clean-v3.f32`);
       assert.ok(args.autoMicShiftKnown === 0 || args.autoMicShiftKnown === 1);
       calls.mixes.push(args);
       if (options.mixFailures > 0) { options.mixFailures--; throw new Error('encode failed'); }
       files.add(args.outputPath);
-      return args.autoMicShiftKnown === 1 ? {
+      return { micShiftUs: args.micShiftUs, ...(args.autoMicShiftKnown === 1 ? {
         autoMicShiftUs: args.autoMicShiftUs,
         autoMicShiftConfidence: args.autoMicShiftConfidence,
         autoMicShiftReliable: args.autoMicShiftReliable === 1
@@ -123,7 +125,7 @@ function harness(options = {}) {
         autoMicShiftUs: -1000, autoMicShiftConfidence: .8, autoMicShiftReliable: true
       } : {
         autoMicShiftUs: 0, autoMicShiftConfidence: 0, autoMicShiftReliable: false
-      };
+      }) };
     }
   };
   const input = { id: 3, deviceType: options.headsetMic ? 7 : 15 };
@@ -155,7 +157,8 @@ function harness(options = {}) {
       stat: async () => ({ isFile: () => true, size: options.zeroOutput ? 0 : 1000 }),
       unlink: async path => { calls.deleted.push(path); files.delete(path); } } },
     '../audio/AudioOutputMonitor': { AudioOutputMonitor: {
-      isBuiltInSpeakerActive: () => options.builtInSpeaker === true
+      isBuiltInSpeakerActive: () => options.builtInSpeaker === true,
+      isHeadphoneOutputActive: () => options.headphoneOutput === true
     } },
     '../app/AppSession': { AppSession: { get: () => session } },
     '../common/MonotonicClock': { MonotonicClock: { nowMs: () => now } },
@@ -282,7 +285,7 @@ function harness(options = {}) {
   assert.equal(automaticMix.autoMicShiftReliable, true);
   assert.equal(normal.calls.mixes.at(-1).speakerBleedCancel, 4,
     'Built-in speaker mix passes only a ceiling; native code estimates the actual bleed level');
-  await assert.rejects(normal.mixer.exportMixed(clip, 2.01, '/recordings/bad.mp4'), /200%/);
+  await assert.rejects(normal.mixer.exportMixed(clip, 4.01, '/recordings/bad.mp4'), /400%/);
   const legacy = { ...clip, captureSyncValid: undefined, captureMappingVersion: undefined, videoTimestampDivisor: undefined };
   normal.mixer.validateCaptureTiming(legacy);
   assert.throws(() => normal.mixer.validateCaptureTiming({ ...clip, captureSyncValid: false }), /时间戳不兼容/);
@@ -416,8 +419,10 @@ function harness(options = {}) {
   assert.equal(aecClip.autoMicShiftConfidence, 0);
   assert.equal(aecClip.autoMicShiftReliable, false);
   assert.equal(aec.calls.mixes[0].speakerBleedCancel, 0);
-  assert.equal(aec.calls.mixes[0].autoMicShiftKnown, 1);
-  assert.equal(aec.calls.mixes[0].processedMicPath, `${aecClip.micPath}.system-aec-v3.f32`);
+  // A new speaker AEC take has no baseline yet: the first export measures the residual round trip.
+  assert.equal(aec.calls.mixes[0].autoMicShiftKnown, 0);
+  assert.equal(aec.calls.mixes[0].estimateResidualLag, true);
+  assert.equal(aec.calls.mixes[0].processedMicPath, `${aecClip.micPath}.system-aec-v5.f32`);
   assert.deepEqual(aec.calls.tasks, [true, false]);
   assert.equal(aec.timers.size, 0);
   assert.deepEqual(aec.calls.playbackMutations, [], 'Starting and ending AEC never touches the existing team transport or calibration');
@@ -443,6 +448,19 @@ function harness(options = {}) {
     if (unavailable.sdkApiVersion < 20) assert.deepEqual(fallback.calls.aecQueries, [],
       'Old SDKs must not call an unavailable API merely to decide the fallback');
   }
+
+  // Instrument capture: ear-worn output has no acoustic echo, so it keeps the plain
+  // screen MIC even where LIVE AEC is supported, without querying the AEC capability.
+  const headphone = harness({ sdkApiVersion: 20, liveAecSupported: true, headphoneOutput: true });
+  await headphone.initialize(); await headphone.coordinator.start('team'); await headphone.advance(500);
+  const headphoneClip = await headphone.coordinator.stop();
+  assert.equal(headphone.calls.nativeOptions[0].systemAecMic, false);
+  assert.deepEqual(headphone.calls.aecQueries, []);
+  assert.deepEqual(headphone.calls.inputQueries, [0, 0]);
+  assert.equal(headphoneClip.micCaptureMode, 'screen-mic');
+  assert.equal(headphoneClip.captureMappingVersion, 2);
+  assert.equal(headphoneClip.builtInSpeakerCapture, false);
+  assert.equal(headphone.calls.mixes[0].speakerBleedCancel, 0, 'Headphone takes never run the speaker echo fit');
 
   for (const unsafeResult of [
     { actualMicCaptureMode: 'screen-mic' },
@@ -509,5 +527,5 @@ function harness(options = {}) {
       'The AEC safety observer must not pause, restart, reschedule or recalibrate the accompaniment');
     assert.equal(protectedTeam.timers.size, 0);
   }
-  console.log('PASS Recording lifecycle: consent, separate sources, measured MIC, 0–2 gain, retry and timing guards');
+  console.log('PASS Recording lifecycle: consent, separate sources, measured MIC, 0–4 gain, retry and timing guards');
 })().catch(error => { console.error(error); process.exitCode = 1; });

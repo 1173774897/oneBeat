@@ -70,11 +70,11 @@ class StorePurchaseError extends Error {
 }
 
 const STORE_EXCLUSIVE_CHARACTERS: StoreCharacter[] = [
-  { key: 'cloud', name: '云行者', caption: '轻盈天空拍', asset: 'cloud', color: '#DCE9FA', productId: 'onebeat.character.cloud' },
-  { key: 'teapot', name: '茶壶太太', caption: '慢火稳拍', asset: 'teapot', color: '#FFD06A', productId: 'onebeat.character.teapot' },
+  { key: 'cloud', name: '云行者', caption: '轻盈天空拍', asset: 'cloud', photoAsset: 'comic/store/cloud.png', color: '#DCE9FA', productId: 'onebeat.character.cloud' },
+  { key: 'teapot', name: '茶壶太太', caption: '慢火稳拍', asset: 'teapot', photoAsset: 'comic/store/teapot.png', color: '#FFD06A', productId: 'onebeat.character.teapot' },
   { key: 'wave', name: 'Wave', caption: '浪线步态', asset: 'wave', photoAsset: 'comic/store/wave.png', color: '#7EC8FF', productId: 'onebeat.character.wave' },
   { key: 'mismatch', name: '条纹步客', caption: '酷脸推进', asset: 'mismatch', photoAsset: 'comic/store/mismatch.png', color: '#E8DFF6', productId: 'onebeat.character.mismatch' },
-  { key: 'scooter', name: '思古特', caption: '双拍十六帧', asset: 'scooter', color: '#FF9E7A', productId: 'onebeat.character.scooter' },
+  { key: 'scooter', name: '青柠滑手', caption: '双拍十六帧', asset: 'scooter', color: '#FF9E7A', productId: 'onebeat.character.scooter' },
   { key: 'lilroll', name: '轮滑小子', caption: '贴地飞行', asset: 'lilroll', color: '#C7B8EC', productId: 'onebeat.character.lilroll' },
   { key: 'lamp', name: '台灯漫游者', caption: '暖光引路', asset: 'lamp', photoAsset: 'comic/store/lamp.png', color: '#FFB347', productId: 'onebeat.character.lamp' }
 ];

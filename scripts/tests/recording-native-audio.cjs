@@ -21,7 +21,7 @@ function run(command, args) {
 try {
   // Exercise the production C++ helpers too: ArkTS mocks cannot detect a DSP
   // regression in peak handling, PCM gain, or sample/timestamp conversion.
-  for (const suite of ['recording-mic-level', 'recording-audio-math', 'recording-system-mic']) {
+  for (const suite of ['recording-mic-level', 'recording-audio-math', 'recording-system-mic', 'recording-residual-lag']) {
     const binary = path.join(temporary, suite);
     run(compiler, ['-std=c++17', '-O2', '-Wall', '-Wextra', '-Werror',
       path.join(__dirname, `${suite}.cpp`), '-o', binary]);

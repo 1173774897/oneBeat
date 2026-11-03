@@ -1,0 +1,209 @@
+{
+  "original": "/Users/lizhe/Downloads/onebeatprocessing/screenshottemplet/transparent-screens/editing/06.psd",
+  "additions": "/Users/lizhe/work/oneBeat/designs/app-market/2026-11-02-editable-psd/.build/06-additions.psd",
+  "output": "/Users/lizhe/work/oneBeat/designs/app-market/2026-11-02-editable-psd/psd/06.psd",
+  "original_sha256": "027302c900fa669476d09ef664c6756c1ee99fd8390dff5000af8aa2e6d38370",
+  "additions_sha256": "1585d408191391fc21bb811f35c41e357ed179804927622eb595c4df8bae286b",
+  "output_sha256": "2a9c3c6364567dce0e9a7dcf4e68474908d7c87e02d8761c16c78416ebca0193",
+  "original_layer_count": 3,
+  "added_layer_count": 7,
+  "output_layer_count": 10,
+  "stored_layer_order": "original bottom-to-top records followed by additions bottom-to-top records",
+  "composite_source": "explicit RGBA cache encoded to original channel count",
+  "removed_global_text_caches": [],
+  "replaced_thumbnails": [
+    {
+      "resource_id": 1036,
+      "old_length": 10300,
+      "new_length": 13715,
+      "width": 144,
+      "height": 256,
+      "old_sha256": "613da6105148aa924d743d86317f638d44ebbc46c034a9ea5fa92559680f196a",
+      "new_sha256": "dfd92cfa24ff0396e0aca86575e11e5adcf5ca5153ab44b99c5f3adea7acf0b9"
+    }
+  ],
+  "original_layers": [
+    {
+      "index": 0,
+      "name": "微信图片_20261031133802_172_312",
+      "layer_id": 2,
+      "record_sha256": "41ad88335a15f86d6a60a4f3cc8cbc213a4e63636a6b9929d0d47ec79cb9a52f",
+      "record_equal": true,
+      "channels": [
+        {
+          "id": -1,
+          "length": 41367,
+          "sha256": "a210a51b3f7c930e47b686ed2e93dc8c57c868454e4245181730c2e670341074",
+          "equal": true
+        },
+        {
+          "id": 0,
+          "length": 228066,
+          "sha256": "81ee8ce21531154e56f426e0bdc54a26f3d8473c3d2ec58f55ba919f492ef21e",
+          "equal": true
+        },
+        {
+          "id": 1,
+          "length": 220764,
+          "sha256": "8d9043ff42e5e2d827b1f4fe0b1fc6f066297f5de37c68f8a40714ab7a5f2bcd",
+          "equal": true
+        },
+        {
+          "id": 2,
+          "length": 249066,
+          "sha256": "e83ddda0b803c20d2f4c0648e4a66a3a9f0a399c58496f876253fc5ca0cd3e18",
+          "equal": true
+        }
+      ]
+    },
+    {
+      "index": 1,
+      "name": "Background",
+      "layer_id": 1,
+      "record_sha256": "dc0e01f051aeffc3194f988b83c3c19b2c894c4531096db32e20c0edbf17339a",
+      "record_equal": true,
+      "channels": [
+        {
+          "id": -1,
+          "length": 46975,
+          "sha256": "80539d3dbfb3159af0c30a8b51abdb0ff914f8bb499b39dac0423f18e64cacb1",
+          "equal": true
+        },
+        {
+          "id": 0,
+          "length": 413878,
+          "sha256": "a609a7749b3fa1d68a468a2f879210ff1f401853d5e6289961c228784b8a0f99",
+          "equal": true
+        },
+        {
+          "id": 1,
+          "length": 614478,
+          "sha256": "61c99ee1231fdd69dd34766478005a81cfd33207c758ec7efed28d22af214a31",
+          "equal": true
+        },
+        {
+          "id": 2,
+          "length": 595498,
+          "sha256": "34d2f60b375fee30f6bc2a81bdf2cfa9cbdf90cbbb0cba67193bb7ab05a567bb",
+          "equal": true
+        }
+      ]
+    },
+    {
+      "index": 2,
+      "name": "06-text",
+      "layer_id": 3,
+      "record_sha256": "c26ce26205b7840e243be050c5303f7227faa25a686be3009063581a59750a8d",
+      "record_equal": true,
+      "channels": [
+        {
+          "id": -1,
+          "length": 364,
+          "sha256": "516b37f06ed7b59e4d7d793a6aafa555b7b48e6f3000b4205dc55a5a7e2ef3ca",
+          "equal": true
+        },
+        {
+          "id": 0,
+          "length": 2347,
+          "sha256": "ab17750b3fb471bbaf6763472eaeea6ce014a7217eae8be2e10d8af4a03bbbcb",
+          "equal": true
+        },
+        {
+          "id": 1,
+          "length": 2355,
+          "sha256": "d38b1780d30bd57a9ee1f99d9ddd5014bfe51491bb5b630a66d0b298f796ac73",
+          "equal": true
+        },
+        {
+          "id": 2,
+          "length": 2349,
+          "sha256": "ea9c3fde6bea1b2f38af7001f8af01ee35333d2e3844986019df6921d53e9fab",
+          "equal": true
+        }
+      ]
+    }
+  ],
+  "original_global_blocks": [
+    {
+      "key": "lnk2",
+      "length": 719544,
+      "sha256": "9e570ebaec53d07188d9c97113ba67b436fe782c8155c2760a7622bdb1704943",
+      "equal": true
+    }
+  ],
+  "original_resources": [
+    {
+      "id": 1005,
+      "length": 16,
+      "sha256": "c31afe2593499fdd5f1a958b70f3cd8b6f529cc9e1fe867c0deeaedd67ec4936",
+      "equal": true,
+      "thumbnail_replaced": false
+    },
+    {
+      "id": 1032,
+      "length": 16,
+      "sha256": "0c8fd02b505326a47d941a442e556487d61d00f10158eb4973e75290a502435e",
+      "equal": true,
+      "thumbnail_replaced": false
+    },
+    {
+      "id": 1036,
+      "length": 10300,
+      "sha256": "613da6105148aa924d743d86317f638d44ebbc46c034a9ea5fa92559680f196a",
+      "equal": false,
+      "thumbnail_replaced": true
+    },
+    {
+      "id": 1044,
+      "length": 4,
+      "sha256": "64f5fc43bc077eee5aa08445311bbbc9dd1fdfc644e8c19c51d609f1f74e59b8",
+      "equal": true,
+      "thumbnail_replaced": false
+    },
+    {
+      "id": 1050,
+      "length": 170,
+      "sha256": "712d07a622d319e5fff3eb4d4f7153194da3d9227d6149f15553e6816f431fb1",
+      "equal": true,
+      "thumbnail_replaced": false
+    },
+    {
+      "id": 1065,
+      "length": 42,
+      "sha256": "39cd6b44f427268df97a2fa0c49455a9c83d0ca1b94d9be548bd7520c34476e6",
+      "equal": true,
+      "thumbnail_replaced": false
+    },
+    {
+      "id": 1069,
+      "length": 6,
+      "sha256": "1ecd30e7d06c653bd3715995e43f4a1f42ab1a6b097c7369c344e910cb8e1f34",
+      "equal": true,
+      "thumbnail_replaced": false
+    },
+    {
+      "id": 1076,
+      "length": 310,
+      "sha256": "5337bff16952e9395dfcfd41251292a29731ce39d26d22b83e32ca8aee3a8101",
+      "equal": true,
+      "thumbnail_replaced": false
+    },
+    {
+      "id": 1077,
+      "length": 4,
+      "sha256": "14c01682089b0b3670d2cf36cc250882b07b778ee5b461c31d44ed102d08e857",
+      "equal": true,
+      "thumbnail_replaced": false
+    }
+  ],
+  "checks": {
+    "header_byte_identical": true,
+    "all_original_layer_records_byte_identical": true,
+    "all_original_channel_streams_byte_identical": true,
+    "all_retained_global_blocks_byte_identical": true,
+    "global_mask_byte_identical": true,
+    "non_thumbnail_resources_byte_identical": true,
+    "layer_count_sign_preserved": true,
+    "layer_info_even_padded": true
+  }
+}

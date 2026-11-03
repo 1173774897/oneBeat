@@ -1,0 +1,223 @@
+{
+  "canvas": {
+    "width": 1080,
+    "height": 1920
+  },
+  "checks": [
+    {
+      "id": "01",
+      "geometry": {
+        "transform": {
+          "x": 0,
+          "y": 0,
+          "width": 1080,
+          "height": 1920
+        },
+        "quad": [
+          {
+            "x": 367,
+            "y": 305
+          },
+          {
+            "x": 979,
+            "y": 305
+          },
+          {
+            "x": 979,
+            "y": 1695
+          },
+          {
+            "x": 367,
+            "y": 1695
+          }
+        ],
+        "plane": {
+          "width": 612,
+          "height": 1390
+        },
+        "samplePoint": {
+          "x": 540,
+          "y": 1000
+        }
+      },
+      "centerMaskAlpha": 255,
+      "renderedHoleAlpha": 0,
+      "visibleMaskPixels": 847921,
+      "antialiasedMaskPixels": 0,
+      "preservedPixels": 1225679,
+      "cutoutAlphaVerified": true
+    },
+    {
+      "id": "02",
+      "geometry": {
+        "transform": {
+          "x": 0,
+          "y": 0,
+          "width": 1080,
+          "height": 1920
+        },
+        "quad": [
+          {
+            "x": 133,
+            "y": 315
+          },
+          {
+            "x": 788,
+            "y": 315
+          },
+          {
+            "x": 788,
+            "y": 1745
+          },
+          {
+            "x": 133,
+            "y": 1745
+          }
+        ],
+        "plane": {
+          "width": 655,
+          "height": 1430
+        },
+        "samplePoint": {
+          "x": 540,
+          "y": 1000
+        }
+      },
+      "centerMaskAlpha": 255,
+      "renderedHoleAlpha": 0,
+      "visibleMaskPixels": 933253,
+      "antialiasedMaskPixels": 0,
+      "preservedPixels": 1140347,
+      "cutoutAlphaVerified": true
+    },
+    {
+      "id": "03",
+      "geometry": {
+        "transform": {
+          "x": 0,
+          "y": 0,
+          "width": 1080,
+          "height": 1920
+        },
+        "quad": [
+          {
+            "x": 199,
+            "y": 593
+          },
+          {
+            "x": 882,
+            "y": 593
+          },
+          {
+            "x": 882,
+            "y": 1866
+          },
+          {
+            "x": 199,
+            "y": 1866
+          }
+        ],
+        "plane": {
+          "width": 683,
+          "height": 1273
+        },
+        "samplePoint": {
+          "x": 540,
+          "y": 1000
+        }
+      },
+      "centerMaskAlpha": 255,
+      "renderedHoleAlpha": 0,
+      "visibleMaskPixels": 863950,
+      "antialiasedMaskPixels": 0,
+      "preservedPixels": 1209650,
+      "cutoutAlphaVerified": true
+    },
+    {
+      "id": "04",
+      "geometry": {
+        "transform": {
+          "x": 0,
+          "y": 0,
+          "width": 1080,
+          "height": 1920
+        },
+        "quad": [
+          {
+            "x": 82,
+            "y": 314
+          },
+          {
+            "x": 746,
+            "y": 314
+          },
+          {
+            "x": 746,
+            "y": 1757
+          },
+          {
+            "x": 82,
+            "y": 1757
+          }
+        ],
+        "plane": {
+          "width": 664,
+          "height": 1443
+        },
+        "samplePoint": {
+          "x": 540,
+          "y": 1000
+        }
+      },
+      "centerMaskAlpha": 255,
+      "renderedHoleAlpha": 0,
+      "visibleMaskPixels": 955480,
+      "antialiasedMaskPixels": 0,
+      "preservedPixels": 1118120,
+      "cutoutAlphaVerified": true
+    },
+    {
+      "id": "05",
+      "geometry": {
+        "transform": {
+          "x": 0,
+          "y": 0,
+          "width": 1080,
+          "height": 1920
+        },
+        "quad": [
+          {
+            "x": 318,
+            "y": 309
+          },
+          {
+            "x": 980,
+            "y": 309
+          },
+          {
+            "x": 980,
+            "y": 1743
+          },
+          {
+            "x": 318,
+            "y": 1743
+          }
+        ],
+        "plane": {
+          "width": 662,
+          "height": 1434
+        },
+        "samplePoint": {
+          "x": 540,
+          "y": 1000
+        }
+      },
+      "centerMaskAlpha": 255,
+      "renderedHoleAlpha": 0,
+      "visibleMaskPixels": 945765,
+      "antialiasedMaskPixels": 0,
+      "preservedPixels": 1127835,
+      "cutoutAlphaVerified": true
+    }
+  ]
+}

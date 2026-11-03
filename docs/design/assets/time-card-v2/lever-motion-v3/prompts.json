@@ -1,0 +1,24 @@
+[
+  {
+    "key": "lever-moving",
+    "args": {
+      "transparent_background": true,
+      "referenced_image_paths": [
+        "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/calibration/time-card-v2/lever.png",
+        "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/calibration/time-card-v2/machine-rear.png"
+      ],
+      "prompt": "Use case: precise-object-edit. Production animated machine part for OneBeat's comic time-card punch machine. Image 1 is the EDIT TARGET, an isolated teal-grip lever with an oversized golden cylindrical blob at its foot. Image 2 is the actual stationary machine frame, STYLE/CONNECTION reference only, do NOT draw this machine. Redesign only the lower connection so the moving lever is mechanically plausible: completely REMOVE the large gold cylinder and its silver bolt, and extend the existing narrow flat silver steel shaft down into a SMALL FLAT SILVER ANNULAR CRANK EYE at the original bolt's center. This eye is part of the moving lever and has a genuinely transparent round bore. There is no fixed bearing housing in this image. Preserve the original teal rounded grip, little gold collar immediately under the grip, long narrow silver shaft, exact upright/slightly-left leaning resting orientation, comic ink contour, worn highlights and restrained halftone. Do not add another handle, gears, springs, furniture or background. Maintain the ORIGINAL SQUARE canvas registration and relative artwork placement: grip and upper shaft stay where they are, crank eye center stays exactly where the original silver bolt center was, approximately x=690,y=1030 on a 1254x1254 reference canvas, i.e.55.02% across and82.14% down. Eye outer diameter roughly110 reference pixels, bore diameter roughly42 reference pixels, so it is much slimmer than the old golden block. Complete image comfortably inside the square frame, including grip and eye. Genuine transparent background, fully empty outside the exact ink silhouette, no haze, glow, cast shadow, floor or checkerboard. No machine frame, fixed flange, bolts over the eye, large gold mass, text or watermark. This file contains ONLY the rotating lever and its small integral silver crank eye. Preserve proportions and registration for a pivot animation."
+    }
+  },
+  {
+    "key": "lever-fixed-pivot",
+    "args": {
+      "transparent_background": true,
+      "referenced_image_paths": [
+        "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/calibration/time-card-v2/machine-rear.png",
+        "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/calibration/time-card-v2/lever.png"
+      ],
+      "prompt": "Use case: stylized-concept. Production STATIONARY PIVOT MOUNT overlay for the illustrated OneBeat time-card punch machine. Image 1 is the actual blue machine frame: exact style, material and camera reference only. Image 2 is the existing lever: style reference only; DO NOT include the lever or its large golden cylinder. Draw one SMALL LOW-PROFILE steel bearing flange attached to a short blue-gray mounting tang on its LEFT, like a flush bolted cover at the machine's right side. Its function must be obvious: two modest mounting screws anchor the bracket to the blue frame, and a central silver axle end-cap keeps the moving lever's crank eye on a fixed transverse shaft. Design a restrained oval/rounded-diamond steel mounting plate with a short leftward blue-painted shoulder that disappears into the blue machine casing, two small screws above and below or diagonally flanking the pivot, and one circular silver axle cap and thin dark bearing ring. The circular axle cap's center MUST be exactly the center of the square canvas (50%,50%). The stationary plate/tang can extend left of the center but the circular shaft end stays centered. Entire object should occupy roughly the middle half of the image width/height, with broad TRANSPARENT margins on all sides. The axle cap should be approximately one quarter of the image width; overall mount about half image width. Same slightly top-down frontal three-quarter perspective as the machine, front silver circular face readable, compact thickness only. Worn cool silver, charcoal outlines, pale-blue enamel mounting shoulder, a few restrained scratches/halftone matching the reference. No gold cylindrical drum, yellow lump, freestanding pedestal, handle, lever, moving rod, gears, hands, full machine, background, glow, cast shadow, text or checkerboard. Genuine fully transparent background outside the exact compact metal/bracket silhouette. This overlay remains FIXED while the lever rotates behind its central cap."
+    }
+  }
+]

@@ -1,0 +1,52 @@
+{
+  "canvas": { "width": 1080, "height": 1920 },
+  "pageCount": 6,
+  "paletteSource": "entry/src/main/ets/components/ComicKit.ets",
+  "palette": {
+    "paper": "#FFF9EE", "ink": "#171B1F", "coral": "#FF7056",
+    "lilac": "#C5B7EB", "teal": "#29B5AE", "white": "#FFFDF8", "blue": "#A9C9F2"
+  },
+  "phone": {
+    "inset": 24, "radius": 100, "outlineWidth": 4,
+    "frame": "paper", "outline": "ink", "screen": "white",
+    "shadow": { "x": 18, "y": 20, "color": "teal", "opacity": 0.95 }
+  },
+  "pairPhones": [
+    { "id": "A", "x": 320, "y": 780, "width": 830, "height": 1750, "rotation": -10 },
+    { "id": "B", "x": 1080, "y": -420, "width": 830, "height": 1750, "rotation": -10 }
+  ],
+  "singlePhones": [
+    { "id": "C", "page": 3, "x": 134, "y": 580, "width": 812, "height": 1760, "rotation": -2 },
+    { "id": "D", "page": 4, "x": 134, "y": 580, "width": 812, "height": 1760, "rotation": 2 },
+    { "id": "E", "page": 5, "x": 134, "y": 580, "width": 812, "height": 1760, "rotation": 0 },
+    { "id": "F", "page": 6, "x": 134, "y": 580, "width": 812, "height": 1760, "rotation": -1 }
+  ],
+  "titleSafeAreas": {
+    "pair": [
+      { "x": 80, "y": 120, "width": 820, "height": 420 },
+      { "x": 1400, "y": 1500, "width": 650, "height": 330 }
+    ],
+    "single": { "x": 80, "y": 100, "width": 920, "height": 360 }
+  },
+  "preview": { "scale": 0.25, "gutter": 16, "padding": 16 },
+  "directions": [
+    {
+      "id": "direction-1-illustrations", "name": "方向一 · 原有插图点缀",
+      "background": "lilac", "illustrationsFile": "direction-one-art.json",
+      "singlePhoneOverrides": [
+        { "page": 3, "x": 80, "y": 620, "width": 740, "height": 1640, "rotation": -2 },
+        { "page": 4, "x": 260, "y": 620, "width": 740, "height": 1640, "rotation": 2 },
+        { "page": 5, "x": 80, "y": 620, "width": 740, "height": 1640, "rotation": 0 },
+        { "page": 6, "x": 260, "y": 620, "width": 740, "height": 1640, "rotation": -1 }
+      ]
+    },
+    {
+      "id": "direction-2-panorama", "name": "方向二 · 六屏连续长卷",
+      "background": "paper",
+      "panorama": {
+        "asset": "assets/panorama-background-neutral.png", "x": 0, "y": 0,
+        "width": 6480, "height": 1920, "fit": "cover", "opacity": 1
+      }
+    }
+  ]
+}

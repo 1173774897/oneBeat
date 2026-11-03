@@ -67,7 +67,8 @@ function harness() {
     userErrorMessage: (_error, fallback) => fallback,
     showUserNotice: message => toasts.push(message),
     navigateToHome: async () => routes.push('home'),
-    router: { pushUrl: args => routes.push(args.url), back: () => routes.push('back') },
+    navigateToTeam: async () => routes.push('team'),
+    router: { pushUrl: args => routes.push(args.url), back: () => routes.push('back'), getParams: () => ({}) },
     access: { off: () => trace.push('remove-bluetooth-listener') }
   };
   vm.runInNewContext(compiled.outputText, context);
@@ -273,9 +274,39 @@ async function flushWalkingFrame() {
   assert.match(source, /const BLUETOOTH_ROUTE_CONFIRM_WIDTH: number = 318;/);
   assert.match(source, /const BLUETOOTH_ROUTE_PROBE_BUTTON_HEIGHT: number = 48;/);
   assert.match(source, /return '声音不同步时，可校准耳机';/);
-  assert.match(source, /return '耳机设置 ›';/);
+  assert.match(source, /return '蓝牙耳机校准';/);
   assert.doesNotMatch(actualMethodsBetween('  private soloCalibrationEntryLabel(): string {', '  @Builder'),
     /latencyCalibrationMs|ms/, 'The solo entry should leave compensation details to calibration');
+
+  const soloEntry = harness();
+  soloEntry.page.soloTeam = true;
+  assert.equal(soloEntry.page.shouldShowSoloCalibrationEntry(), true);
+  assert.equal(soloEntry.page.soloCalibrationEntryLabel(), '蓝牙耳机校准');
+  assert.equal(soloEntry.page.soloCalibrationEntryAction(), '校准 ›');
+  for (const compensation of [0, 120]) {
+    soloEntry.page.latencyCalibrationMs = compensation;
+    soloEntry.page.btCalibrationTracksConnection = true;
+    assert.equal(soloEntry.page.soloCalibrationEntryLabel(), '蓝牙耳机已校准',
+      'A valid zero or positive compensation must display the calibrated state');
+    assert.equal(soloEntry.page.soloCalibrationEntryAction(), '重测 ›');
+  }
+  soloEntry.page.btCalibrationNeedsRemeasure = true;
+  assert.equal(soloEntry.page.soloCalibrationEntryLabel(), '蓝牙耳机已重连');
+  assert.match(soloEntry.page.soloCalibrationEntryHint(), /已保留原校准/);
+  soloEntry.page.btCalibrationTracksConnection = false;
+  assert.equal(soloEntry.page.soloCalibrationEntryLabel(), '蓝牙耳机校准',
+    'A saved value without a matching connection must not claim to be calibrated');
+  for (const rhythm of [0, 3]) {
+    soloEntry.page.rhythm = rhythm;
+    soloEntry.page.btAudioActive = false;
+    assert.equal(soloEntry.page.shouldShowSoloCalibrationEntry(), false,
+      'Disconnecting the headphone output hides the optional entry in either mode');
+    soloEntry.page.btAudioActive = true;
+    assert.equal(soloEntry.page.shouldShowSoloCalibrationEntry(), true);
+  }
+  soloEntry.page.soloTeam = false;
+  assert.equal(soloEntry.page.shouldShowSoloCalibrationEntry(), false,
+    'The compact settings entry is exclusive to solo practice');
 
   const hiddenWalk = mainHarness();
   const toggle = hiddenWalk.page.toggle();

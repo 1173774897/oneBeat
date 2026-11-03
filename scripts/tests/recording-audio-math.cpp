@@ -60,6 +60,12 @@ int main()
     assert(discontinuous.Append(pcmStartNs, 960));
     assert(discontinuous.Append(pcmStartNs + 800000000, 960));
     assert(discontinuous.FramesWritten() == 1920);
+    // An 800 ms silence gap (e.g. paused playback with no callbacks) is observed, not repaired.
+    assert(discontinuous.MaxDriftStepFrames() == 38400 - 960);
+    assert(pcm.MaxDriftStepFrames() < 48 && batchedHardwareClock.MaxDriftStepFrames() == 4800);
+    assert(discontinuous.MaxDriftStepAtFrame() == 960 && discontinuous.GapCount() == 1 &&
+        discontinuous.FirstGapAtFrame() == 960);
+    assert(pcm.GapCount() == 0 && pcm.MaxDriftStepAtFrame() >= 0);
     ContiguousPcmTimeline gradualClockSlope;
     for (int chunk = 0; chunk < 10000; chunk++) {
         assert(gradualClockSlope.Append(pcmStartNs + chunk * 20001000LL, 960));
@@ -200,6 +206,68 @@ int main()
     longUptime.Reset(longUs - 1000);
     assert(longUptime.Normalize(longUs * 1000 + 987, longUs + 10000, normalized));
     assert(normalized == longUs && longUptime.Divisor() == 1000);
+
+    // Limiter: exact identity while the bus stays at or below -1 dBFS;
+    // louder input is reduced smoothly and never exceeds that ceiling.
+    {
+        LookaheadPeakLimiter identity;
+        constexpr int latency = LookaheadPeakLimiter::Latency();
+        std::vector<double> input;
+        constexpr int ceiling = static_cast<int>(LookaheadPeakLimiter::CEILING);
+        for (int i = 0; i < 70000; i++) input.push_back(static_cast<double>((i * 7919) % (2 * ceiling + 1) - ceiling));
+        for (size_t i = 0; i < input.size() + latency; i++) {
+            const double in = i < input.size() ? input[i] : 0;
+            double left = 0, right = 0;
+            identity.Push(in, -in, left, right);
+            if (i >= static_cast<size_t>(latency)) {
+                const double expected = input[i - latency];
+                assert(left == expected);
+                assert(LimitedBusSample(left) == static_cast<int16_t>(expected));
+            }
+        }
+        assert(identity.LimitedFrames() == 0 && identity.MinGainApplied() == 1);
+
+        // Drum-like bursts summed with a sustained MIC tone, peaking ~+6 dBFS.
+        LookaheadPeakLimiter limiter;
+        const int frames = SAMPLE_RATE * 2;
+        std::vector<double> bus(frames);
+        for (int i = 0; i < frames; i++) {
+            const double hit = (i % 24000) < 2400 ? 30000 * std::exp(-(i % 24000) / 600.0) : 0;
+            bus[i] = hit * std::sin(i * 0.05) + 30000 * std::sin(i * 0.013);
+        }
+        for (int i = 0; i < frames + latency; i++) {
+            const double in = i < frames ? bus[i] : 0;
+            double left = 0, right = 0;
+            limiter.Push(in, in * 0.5, left, right);
+            if (i < latency) { assert(left == 0); continue; }
+            const double source = bus[i - latency];
+            assert(std::abs(left) <= LookaheadPeakLimiter::CEILING + 1e-6);
+            assert(std::abs(right) <= std::abs(left) * 0.5 + 1e-6);
+            // Gain only attenuates and never flips polarity.
+            if (std::abs(source) > 1) assert(left / source > 0 && left / source <= 1 + 1e-12);
+        }
+        assert(limiter.LimitedFrames() > 0 && limiter.MinGainApplied() < 0.7);
+
+        // A level step ramps over the lookahead window instead of jumping per sample.
+        LookaheadPeakLimiter ramp;
+        double previousGain = 1, maxStep = 0, maxOutput = 0;
+        for (int i = 0; i < 48000 + latency; i++) {
+            const double level = i < 1000 ? 20000 : i < 3000 ? 40000 : 20000;
+            double left = 0, right = 0;
+            ramp.Push(level, level, left, right);
+            if (i < latency) continue;
+            const int source = i - latency;
+            const double sourceLevel = source < 1000 ? 20000 : source < 3000 ? 40000 : 20000;
+            const double gain = left / sourceLevel;
+            maxStep = std::max(maxStep, std::abs(gain - previousGain));
+            maxOutput = std::max(maxOutput, left);
+            previousGain = gain;
+        }
+        // Attack spreads the ~2.7 dB reduction (40000 -> -1 dBFS) over 240 frames; release is a 60 ms curve.
+        assert(maxOutput <= LookaheadPeakLimiter::CEILING + 1e-6);
+        assert(maxStep < 0.002);
+        assert(previousGain == 1);
+    }
 
     std::cout << "PASS recording audio math: contiguous PCM, estimated cross-block speaker bleed, "
         "independent MIC gain, timestamp normalization and clock guards\n";

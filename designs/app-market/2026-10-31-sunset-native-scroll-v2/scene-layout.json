@@ -1,0 +1,180 @@
+{
+  "name": "oneBeat sunset — visible unique roadside entities and clustered vegetation",
+  "pageCount": 6,
+  "viewportVp": {
+    "width": 360,
+    "height": 640
+  },
+  "pixelsPerVp": 3,
+  "sun": {
+    "xVp": 680,
+    "yRatio": 0.24,
+    "widthRatio": 0.3
+  },
+  "entities": [
+    {
+      "id": "sign-01",
+      "asset": "sign",
+      "xVp": 323,
+      "foreground": false
+    },
+    {
+      "id": "cactus-01",
+      "asset": "cactus",
+      "xVp": 365,
+      "foreground": true
+    },
+    {
+      "id": "bench-01",
+      "asset": "bench",
+      "xVp": 480,
+      "foreground": true
+    },
+    {
+      "id": "billboardreck-01",
+      "asset": "billboardreck",
+      "xVp": 547,
+      "foreground": false
+    },
+    {
+      "id": "cable-01",
+      "asset": "cable",
+      "xVp": 1031,
+      "foreground": false
+    },
+    {
+      "id": "mailbox-01",
+      "asset": "mailbox",
+      "xVp": 1375,
+      "foreground": false
+    },
+    {
+      "id": "gaslight-01",
+      "asset": "gaslight",
+      "xVp": 1738,
+      "foreground": false
+    },
+    {
+      "id": "telescope-01",
+      "asset": "telescope",
+      "xVp": 2079,
+      "foreground": false
+    }
+  ],
+  "vegetationClusters": [
+    {
+      "id": "coastal-leaves",
+      "xVp": -8,
+      "foreground": true,
+      "plants": [
+        {
+          "asset": "plant_04",
+          "offsetVp": 0
+        },
+        {
+          "asset": "plant_08",
+          "offsetVp": 28
+        },
+        {
+          "asset": "plant_07",
+          "offsetVp": 56
+        }
+      ]
+    },
+    {
+      "id": "sunny-flowers",
+      "xVp": 630,
+      "foreground": true,
+      "plants": [
+        {
+          "asset": "plant_11",
+          "offsetVp": 0
+        },
+        {
+          "asset": "plant_10",
+          "offsetVp": 28
+        },
+        {
+          "asset": "plant_05",
+          "offsetVp": 57
+        }
+      ]
+    },
+    {
+      "id": "wire-side-shrubs",
+      "xVp": 1020,
+      "foreground": true,
+      "plants": [
+        {
+          "asset": "plant_01",
+          "offsetVp": 0
+        },
+        {
+          "asset": "plant_03",
+          "offsetVp": 29
+        },
+        {
+          "asset": "plant_12",
+          "offsetVp": 57
+        }
+      ]
+    },
+    {
+      "id": "mailbox-grasses",
+      "xVp": 1368,
+      "foreground": false,
+      "plants": [
+        {
+          "asset": "plant_02",
+          "offsetVp": 0
+        },
+        {
+          "asset": "plant_04",
+          "offsetVp": 26
+        },
+        {
+          "asset": "plant_06",
+          "offsetVp": 52
+        }
+      ]
+    },
+    {
+      "id": "lamp-side-foliage",
+      "xVp": 1740,
+      "foreground": true,
+      "plants": [
+        {
+          "asset": "plant_09",
+          "offsetVp": 0
+        },
+        {
+          "asset": "plant_07",
+          "offsetVp": 26
+        },
+        {
+          "asset": "plant_10",
+          "offsetVp": 52
+        }
+      ]
+    },
+    {
+      "id": "lookout-shrubs",
+      "xVp": 2084,
+      "foreground": false,
+      "plants": [
+        {
+          "asset": "plant_12",
+          "offsetVp": 0
+        },
+        {
+          "asset": "plant_01",
+          "offsetVp": 26
+        },
+        {
+          "asset": "plant_08",
+          "offsetVp": 52
+        }
+      ]
+    }
+  ]
+}

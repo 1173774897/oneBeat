@@ -1,0 +1,22 @@
+{
+  "status": "passed",
+  "checked": [
+    "offline file URL",
+    "five themes",
+    "full and fit geometry",
+    "local upload",
+    "pending upload download lock",
+    "contain and cover pixels",
+    "theme screenshot retention",
+    "character toggle",
+    "PNG export dimensions",
+    "reset"
+  ],
+  "export": {
+    "width": 1080,
+    "height": 1920
+  },
+  "pageErrors": [],
+  "networkRequests": [],
+  "screenshot": "/private/tmp/onebeat-phone-editor-qa/editor-browser.png"
+}

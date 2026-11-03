@@ -1,0 +1,22 @@
+[
+  {
+    "asset": "entry/src/main/resources/rawfile/calibration/time-card-v2/lever-crank.png",
+    "source": "/Users/lizhe/.codex/generated_images/01a187b9-ce55-7c72-a997-75f5c9b75372/exec-03c678a5-aed9-4a6a-b82b-5b0130f33ae1.png",
+    "size": [
+      1254,
+      1254
+    ],
+    "mode": "RGBA",
+    "sha256": "c5ce5145eb94f5b8ea7d1dc43f5555b66aa7ff625c8b62968dd85ea29e5d1db0"
+  },
+  {
+    "asset": "entry/src/main/resources/rawfile/calibration/time-card-v2/lever-bearing.png",
+    "source": "/Users/lizhe/.codex/generated_images/01a187b9-ce55-7c72-a997-75f5c9b75372/exec-97a85b25-7d20-4bf7-aa30-5423585d24cc.png",
+    "size": [
+      1254,
+      1254
+    ],
+    "mode": "RGBA",
+    "sha256": "a808418496892e6ff440e7715eb8b782140f0a9460782846d8a82eecd4c8e792"
+  }
+]

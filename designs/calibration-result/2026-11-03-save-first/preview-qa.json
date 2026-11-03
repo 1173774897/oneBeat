@@ -1,0 +1,50 @@
+{
+  "errors": [],
+  "metrics": {
+    "screen": {
+      "x": 0,
+      "y": 0,
+      "width": 440,
+      "height": 706.65625,
+      "bottom": 706.65625
+    },
+    "art": {
+      "x": 76,
+      "y": 101,
+      "width": 288,
+      "height": 344,
+      "bottom": 445
+    },
+    "status": {
+      "x": 18,
+      "y": 448,
+      "width": 404,
+      "height": 22,
+      "bottom": 470
+    },
+    "save": {
+      "x": 18,
+      "y": 482,
+      "width": 404,
+      "height": 54,
+      "bottom": 536
+    },
+    "listen": {
+      "x": 18,
+      "y": 552,
+      "width": 404,
+      "height": 44,
+      "bottom": 596
+    },
+    "details": {
+      "x": 18,
+      "y": 636,
+      "width": 404,
+      "height": 40,
+      "bottom": 676
+    },
+    "font": true,
+    "unwantedSentence": false
+  },
+  "applicationCodeModified": false
+}

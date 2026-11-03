@@ -22,6 +22,7 @@ import {
 import { ComicCharacter, PAPER, INK, CORAL, LILAC, WHITE, CONTROL_SHADOW } from '../components/ComicKit';
 import { TeamTicketBackdrop, TeamWifiFooter } from '../components/TeamEntryVisuals';
 import { ActionButton } from '../components/ActionButton';
+import { DrumPaper } from '../components/DrumPaper';
 
 const PLAYER_DISPLAY_NAME_KEY: string = 'playerDisplayName';
 const JOIN_PAGE_SIDE_INSET: number = 18;
@@ -33,12 +34,20 @@ const JOIN_HERO_ILLUSTRATION_X_OFFSET: number = 0;
 const JOIN_HERO_ART_WIDTH: number = 230;
 const JOIN_HERO_ART_HEIGHT: number = 276;
 const JOIN_HERO_ART_Y: number = -12;
-const JOIN_TICKET_HEIGHT: number = 360;
-const JOIN_SCAN_HEIGHT: number = 156;
-const JOIN_DIVIDER_HEIGHT: number = 24;
-const JOIN_CODE_HEIGHT: number = 180;
 const JOIN_CONTENT_INSET: number = 20;
 const JOIN_ACTION_HEIGHT: number = 46;
+const JOIN_SCAN_TOP_INSET: number = 32;
+const JOIN_SCAN_ACTION_GAP: number = 16;
+// Keep the ticket, tear line and lower method aligned when upper spacing changes.
+const JOIN_SCAN_HEIGHT: number = JOIN_SCAN_TOP_INSET + 44 + JOIN_SCAN_ACTION_GAP +
+  JOIN_ACTION_HEIGHT + 8 + 16 + 12;
+const JOIN_DIVIDER_HEIGHT: number = 24;
+const JOIN_CODE_HEIGHT: number = 180;
+const JOIN_TICKET_HEIGHT: number = JOIN_SCAN_HEIGHT + JOIN_DIVIDER_HEIGHT + JOIN_CODE_HEIGHT;
+const JOIN_NICKNAME_Y: number = -7;
+const JOIN_NICKNAME_HEIGHT: number = 24;
+const JOIN_NICKNAME_ROTATION: number = -3;
+const JOIN_NICKNAME_SHADOW_OFFSET: number = 2;
 
 @Entry
 @Component
@@ -256,11 +265,11 @@ struct MemberJoinPage {
       }.width('100%').height(44)
       Column() {
         this.joinAction(true)
-      }.width('100%').margin({ top: 12 })
+      }.width('100%').margin({ top: JOIN_SCAN_ACTION_GAP })
       Text('扫码需要相机和 Wi-Fi').fontSize(11).fontWeight(FontWeight.Bold).fontColor('#84868D')
         .width('100%').height(16).textAlign(TextAlign.Center).margin({ top: 8 })
     }.width('100%').height(JOIN_SCAN_HEIGHT)
-      .padding({ left: JOIN_CONTENT_INSET, right: JOIN_CONTENT_INSET, top: 18, bottom: 12 })
+      .padding({ left: JOIN_CONTENT_INSET, right: JOIN_CONTENT_INSET, top: JOIN_SCAN_TOP_INSET, bottom: 12 })
   }
 
   @Builder
@@ -298,9 +307,32 @@ struct MemberJoinPage {
   }
 
   @Builder
+  private nicknameTag() {
+    // A measured solid backing preserves intrinsic badge width and avoids the
+    // native radius-zero shadow that some devices omit, including after rotation.
+    Row() {
+      DrumPaper({ fill: '#EAE2F6', paperWidth: 'auto', cornerRadius: 3, paperLineWidth: 1.25,
+        offsetX: JOIN_NICKNAME_SHADOW_OFFSET, offsetY: JOIN_NICKNAME_SHADOW_OFFSET }) {
+        Row({ space: 9 }) {
+          Text('昵称').fontSize(11).fontWeight(FontWeight.Medium).fontColor(INK).width(22).maxLines(1)
+          Row().width(1).height(12).backgroundColor(INK).opacity(0.35).accessibilityLevel('no')
+          Text(this.displayName).fontSize(13).minFontSize(11).maxFontSize(13).fontWeight(900).fontColor(INK)
+            .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+            // Reserve the label, divider, gaps, padding and border so a long name
+            // cannot push this read-only tag outside the ticket on narrow phones.
+            .constraintSize({ maxWidth: Math.max(0, this.contentWidth - JOIN_CONTENT_INSET * 2 - 64) })
+        }.height(JOIN_NICKNAME_HEIGHT).padding({ left: 10, right: 10 })
+      }
+    }.rotate({ angle: JOIN_NICKNAME_ROTATION }).clip(false)
+      .position({ x: JOIN_CONTENT_INSET, y: JOIN_NICKNAME_Y }).zIndex(2)
+      .accessibilityGroup(true).accessibilityText(`昵称：${this.displayName}`)
+  }
+
+  @Builder
   private joinTicket() {
     Stack({ alignContent: Alignment.TopStart }) {
-      TeamTicketBackdrop({ ticketHeight: JOIN_TICKET_HEIGHT, firstNotchY: 96,
+      TeamTicketBackdrop({ ticketHeight: JOIN_TICKET_HEIGHT,
+        firstNotchY: JOIN_SCAN_TOP_INSET + 44 + JOIN_SCAN_ACTION_GAP + JOIN_ACTION_HEIGHT / 2,
         tearY: JOIN_SCAN_HEIGHT + JOIN_DIVIDER_HEIGHT / 2, fill: '#FFFFFF', halftone: 'join' })
       Column() {
         this.scanMethod()
@@ -310,6 +342,7 @@ struct MemberJoinPage {
         }.width('100%').height(JOIN_DIVIDER_HEIGHT).justifyContent(FlexAlign.Center).hitTestBehavior(HitTestMode.None)
         this.codeMethod()
       }.width('100%').height(JOIN_TICKET_HEIGHT)
+      this.nicknameTag()
     }.width('100%').height(JOIN_TICKET_HEIGHT).clip(false)
   }
 

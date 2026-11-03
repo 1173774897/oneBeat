@@ -1,0 +1,198 @@
+{
+  "errors": [],
+  "results": [
+    {
+      "design": "header",
+      "width": 390,
+      "height": 799.625,
+      "entryFont": "12px",
+      "entryColor": "rgb(109, 104, 94)",
+      "actionGap": 14,
+      "overflow": false
+    },
+    {
+      "design": "settings",
+      "width": 390,
+      "height": 861.8125,
+      "entryFont": "12px",
+      "entryColor": "rgb(109, 104, 94)",
+      "actionGap": 14,
+      "overflow": false
+    },
+    {
+      "design": "device",
+      "width": 390,
+      "height": 832.625,
+      "entryFont": "12px",
+      "entryColor": "rgb(109, 104, 94)",
+      "actionGap": 14,
+      "overflow": false
+    }
+  ],
+  "narrow": [
+    {
+      "design": "header",
+      "width": 288,
+      "height": 792.625,
+      "overflow": false
+    },
+    {
+      "design": "settings",
+      "width": 288,
+      "height": 854.8125,
+      "overflow": false
+    },
+    {
+      "design": "device",
+      "width": 288,
+      "height": 824.625,
+      "overflow": false
+    }
+  ],
+  "states": [
+    {
+      "design": "header",
+      "mode": "普通节拍",
+      "route": "未校准",
+      "visibleEntries": 1
+    },
+    {
+      "design": "settings",
+      "mode": "普通节拍",
+      "route": "未校准",
+      "visibleEntries": 1
+    },
+    {
+      "design": "device",
+      "mode": "普通节拍",
+      "route": "未校准",
+      "visibleEntries": 1
+    },
+    {
+      "design": "header",
+      "mode": "普通节拍",
+      "route": "已校准",
+      "visibleEntries": 1
+    },
+    {
+      "design": "settings",
+      "mode": "普通节拍",
+      "route": "已校准",
+      "visibleEntries": 1
+    },
+    {
+      "design": "device",
+      "mode": "普通节拍",
+      "route": "已校准",
+      "visibleEntries": 1
+    },
+    {
+      "design": "header",
+      "mode": "普通节拍",
+      "route": "重新连接",
+      "visibleEntries": 1
+    },
+    {
+      "design": "settings",
+      "mode": "普通节拍",
+      "route": "重新连接",
+      "visibleEntries": 1
+    },
+    {
+      "design": "device",
+      "mode": "普通节拍",
+      "route": "重新连接",
+      "visibleEntries": 1
+    },
+    {
+      "design": "header",
+      "mode": "普通节拍",
+      "route": "未连接",
+      "visibleEntries": 0
+    },
+    {
+      "design": "settings",
+      "mode": "普通节拍",
+      "route": "未连接",
+      "visibleEntries": 0
+    },
+    {
+      "design": "device",
+      "mode": "普通节拍",
+      "route": "未连接",
+      "visibleEntries": 0
+    },
+    {
+      "design": "header",
+      "mode": "已应用鼓机",
+      "route": "未校准",
+      "visibleEntries": 1
+    },
+    {
+      "design": "settings",
+      "mode": "已应用鼓机",
+      "route": "未校准",
+      "visibleEntries": 1
+    },
+    {
+      "design": "device",
+      "mode": "已应用鼓机",
+      "route": "未校准",
+      "visibleEntries": 1
+    },
+    {
+      "design": "header",
+      "mode": "已应用鼓机",
+      "route": "已校准",
+      "visibleEntries": 1
+    },
+    {
+      "design": "settings",
+      "mode": "已应用鼓机",
+      "route": "已校准",
+      "visibleEntries": 1
+    },
+    {
+      "design": "device",
+      "mode": "已应用鼓机",
+      "route": "已校准",
+      "visibleEntries": 1
+    },
+    {
+      "design": "header",
+      "mode": "已应用鼓机",
+      "route": "重新连接",
+      "visibleEntries": 1
+    },
+    {
+      "design": "settings",
+      "mode": "已应用鼓机",
+      "route": "重新连接",
+      "visibleEntries": 1
+    },
+    {
+      "design": "device",
+      "mode": "已应用鼓机",
+      "route": "重新连接",
+      "visibleEntries": 1
+    },
+    {
+      "design": "header",
+      "mode": "已应用鼓机",
+      "route": "未连接",
+      "visibleEntries": 0
+    },
+    {
+      "design": "settings",
+      "mode": "已应用鼓机",
+      "route": "未连接",
+      "visibleEntries": 0
+    },
+    {
+      "design": "device",
+      "mode": "已应用鼓机",
+      "route": "未连接",
+      "visibleEntries": 0
+    }
+  ]
+}

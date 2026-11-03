@@ -19,8 +19,18 @@ import {
   sectionFillStartBeat
 } from './DrumMachineCatalog';
 import { DrumSampleBank } from './DrumSampleBank';
+import { DrumBusLimitStats, DrumBusMix, limitDrumBus } from './DrumBusLimiter';
+
 import { BeatPointState, defaultBeatPointStates, normalizeBeatPointStates } from '../common/MeterModel';
 import { DEBUG } from 'BuildProfile';
+
+/**
+ * Fixed -3 dB for drum-kit voices only (accent/weak click tones keep unity).
+ * Kit voices are normalized near full scale and overlapping hits reach
+ * +2..+8 dBFS; this headroom keeps the bus limiter to the loudest hits and
+ * leaves room for the MIC in recordings. Changes live drum loudness, not timing.
+ */
+const DRUM_KIT_GAIN: number = Math.pow(10, -3 / 20);
 
 const SAMPLE_RATE: number = 44100;
 const BYTES_PER_SAMPLE: number = 2;
@@ -307,6 +317,13 @@ interface RenderedBar {
   beatsPerBar: number;
 }
 
+/** A bar before the drum bus limiter: voices are summed without clamping. */
+interface MixedBar extends DrumBusMix {
+  frameCount: number;
+  samplesPerBeat: number;
+  beatsPerBar: number;
+}
+
 interface DrumProgramPreparation {
   raw: string;
   looping: boolean;
@@ -549,6 +566,8 @@ export class MetronomeEngine {
   private pattern: SequencerPattern = BuiltInRhythmFactory.create(0, 4, this.beatPointStates);
   private customProgramRaw: string = '';
   private customProgram: DrumProgram | undefined = undefined;
+  /** Kit-voice gain; always DRUM_KIT_GAIN in production (tests may pin 1 to assert routing markers). */
+  private drumKitGain: number = DRUM_KIT_GAIN;
   private customProgramLooping: boolean = true;
   private configurationToken: number = 0;
   private drumProgramPreparation: DrumProgramPreparation | undefined = undefined;
@@ -2581,13 +2600,34 @@ export class MetronomeEngine {
 
   private renderSequence(patterns: SequencerPattern[], looping: boolean,
     bank: Map<string, ArrayBuffer>, program: DrumProgram | undefined): RenderedBar[] {
-    const sequence: RenderedBar[] = [];
+    const mixes: MixedBar[] = [];
     const styles = this.programBarStyleKeys(program);
     for (let i = 0; i < patterns.length; i++) {
-      sequence.push(this.renderBar(patterns[i], true, bank, program, styles[i]));
+      mixes.push(this.mixBar(patterns[i], true, bank, program, styles[i]));
     }
-    this.mixRideTails(patterns, sequence, looping, bank, program);
-    return sequence;
+    this.mixRideTails(patterns, mixes, looping, bank, program);
+    // Ride tails cross bar boundaries, so the whole sequence is limited at once.
+    return this.finishBars(mixes, looping);
+  }
+
+  private finishBars(mixes: MixedBar[], looping: boolean): RenderedBar[] {
+    const stats: DrumBusLimitStats = { overSamples: 0, limitedSamples: 0, peak: 0, minGain: 1 };
+    const samples = limitDrumBus(mixes, looping, stats);
+    if (stats.overSamples > 0) {
+      console.info(`[DrumBusDiag] bars=${mixes.length} overSamples=${stats.overSamples}` +
+        ` limitedSamples=${stats.limitedSamples} peakDbfs=${(20 * Math.log10(stats.peak / 32768)).toFixed(2)}` +
+        ` minGainDb=${(20 * Math.log10(stats.minGain)).toFixed(2)}`);
+    }
+    const bars: RenderedBar[] = [];
+    for (let i = 0; i < mixes.length; i++) {
+      bars.push({
+        samples: samples[i],
+        frameCount: mixes[i].frameCount,
+        samplesPerBeat: mixes[i].samplesPerBeat,
+        beatsPerBar: mixes[i].beatsPerBar
+      });
+    }
+    return bars;
   }
 
   private programBarStyleKeys(program: DrumProgram | undefined): string[] {
@@ -2610,7 +2650,7 @@ export class MetronomeEngine {
     return styled ?? bank.get(sampleKey);
   }
 
-  private mixRideTails(patterns: SequencerPattern[], sequence: RenderedBar[], looping: boolean,
+  private mixRideTails(patterns: SequencerPattern[], sequence: MixedBar[], looping: boolean,
     bank: Map<string, ArrayBuffer> = this.sampleBank,
     program: DrumProgram | undefined = this.customProgram): void {
     if (sequence.length === 0) {
@@ -2655,9 +2695,10 @@ export class MetronomeEngine {
           const target = sequence[targetBarIndex % sequence.length];
           const count = Math.min(sourceFrames - sourceFrame, target.frameCount);
           for (let frame = 0; frame < count; frame++) {
-            const mixed = target.samples[frame] +
-              source.getInt16((sourceFrame + frame) * BYTES_PER_SAMPLE, true) * event.velocity * pointGain;
-            target.samples[frame] = Math.max(-32768, Math.min(32767, Math.round(mixed)));
+            const mixed = target.mix[frame] + source.getInt16((sourceFrame + frame) * BYTES_PER_SAMPLE, true) *
+              event.velocity * pointGain * this.drumKitGain;
+            // Per-voice rounding is unchanged; range is enforced once by the drum bus limiter.
+            target.mix[frame] = Math.round(mixed);
           }
           sourceFrame += count;
           targetBarIndex++;
@@ -2669,11 +2710,21 @@ export class MetronomeEngine {
   private renderBar(pattern: SequencerPattern, applyBeatPointPattern: boolean = true,
     bank: Map<string, ArrayBuffer> = this.sampleBank,
     program: DrumProgram | undefined = this.customProgram, styleKey?: string): RenderedBar {
+    return this.finishBars([this.mixBar(pattern, applyBeatPointPattern, bank, program, styleKey)], false)[0];
+  }
+
+  private mixBar(pattern: SequencerPattern, applyBeatPointPattern: boolean = true,
+    bank: Map<string, ArrayBuffer> = this.sampleBank,
+    program: DrumProgram | undefined = this.customProgram, styleKey?: string): MixedBar {
     const samplesPerBeat = SAMPLE_RATE * 60 / Math.max(1, this.bpm);
     const frameCount = Math.max(1, Math.round(samplesPerBeat * pattern.beatsPerBar));
     const data = new ArrayBuffer(frameCount * BYTES_PER_SAMPLE);
-    const output = new DataView(data);
     applyDitherFloor(data);
+    const dither = new Int16Array(data);
+    const output = new Float32Array(frameCount);
+    for (let i = 0; i < frameCount; i++) {
+      output[i] = dither[i];
+    }
 
     for (let eventIndex = 0; eventIndex < pattern.events.length; eventIndex++) {
       const event = pattern.events[eventIndex];
@@ -2689,17 +2740,21 @@ export class MetronomeEngine {
       const sourceFrames = Math.floor(sourceData.byteLength / BYTES_PER_SAMPLE);
       const startFrame = Math.round(event.tick * samplesPerBeat / pattern.ticksPerBeat);
       const availableFrames = Math.min(sourceFrames, frameCount - startFrame);
+      // Click tones ('accent'/'weak', bundled or from a sound bank) keep unity; only kit voices get headroom.
+      const kitVoice = bankSample !== undefined && event.sampleKey !== 'accent' && event.sampleKey !== 'weak';
+      const voiceGain = kitVoice ? this.drumKitGain : 1;
       for (let frame = 0; frame < availableFrames; frame++) {
-        const targetOffset = (startFrame + frame) * BYTES_PER_SAMPLE;
+        const target = startFrame + frame;
         const pointGain = applyBeatPointPattern && program !== undefined && pointState === 'accent' ? 1.15 : 1;
-        const mixed = output.getInt16(targetOffset, true) +
-          source.getInt16(frame * BYTES_PER_SAMPLE, true) * event.velocity * pointGain;
-        output.setInt16(targetOffset, Math.max(-32768, Math.min(32767, Math.round(mixed))), true);
+        const mixed = output[target] +
+          source.getInt16(frame * BYTES_PER_SAMPLE, true) * event.velocity * pointGain * voiceGain;
+        // Per-voice rounding is unchanged; range is enforced once by the drum bus limiter.
+        output[target] = Math.round(mixed);
       }
     }
 
     return {
-      samples: new Int16Array(data),
+      mix: output,
       frameCount: frameCount,
       samplesPerBeat: samplesPerBeat,
       beatsPerBar: pattern.beatsPerBar

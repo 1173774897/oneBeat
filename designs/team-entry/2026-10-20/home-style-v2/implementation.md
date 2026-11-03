@@ -61,9 +61,13 @@
 | 邀请区 `JOIN_HERO_HEIGHT` | 180 | 调大把票券及底栏下推，植物随底边下移；小屏可滚动。 |
 | 云朵 `JOIN_HERO_ART_WIDTH` / `JOIN_HERO_ART_HEIGHT` | 230 / 276 | 调大放大；图片等比显示。插画区高度 180，刻意裁掉下半身。 |
 | 插画组 `JOIN_HERO_ILLUSTRATION_X_OFFSET` / 云朵 `JOIN_HERO_ART_Y` | 0 / -12 | 优先调整组的 X 偏移：调大整组右移，调小左移；Y 调大只将云朵下移。组本身在文字之外的剩余列居中。 |
-| 左侧文字 `JOIN_HERO_TEXT_WIDTH_RATIO` | 0.56 | 保持原 56% 文字占位。调大将插画组的居中基点右移，调小左移；不要用它代替整组 X 偏移微调。 |
-| 票券总高 `JOIN_TICKET_HEIGHT` | 360 | 与扫码 156、分隔 24、输入 180 三项之和保持一致；单改总高不会自动放大内容。 |
-| 扫码/分隔/加入码高度 | `JOIN_SCAN_HEIGHT=156` / `JOIN_DIVIDER_HEIGHT=24` / `JOIN_CODE_HEIGHT=180` | 调大前一区域会把后一区域下推，需同步总高；撕线跟随扫码区和分隔区中线。 |
+| 左侧文字 `JOIN_HERO_TEXT_WIDTH_RATIO` | 0.46 | 文字占内容宽的 46%。调大将插画组的居中基点右移，调小左移；不要用它代替整组 X 偏移微调。 |
+| 票券总高 `JOIN_TICKET_HEIGHT` | 378（计算值） | 自动等于扫码 174、分隔 24、输入 180 三项之和，不单独调整总高。 |
+| 扫码/分隔/加入码高度 | `JOIN_SCAN_HEIGHT=174`（计算值） / `JOIN_DIVIDER_HEIGHT=24` / `JOIN_CODE_HEIGHT=180` | 扫码高度随上边距、按钮间距和内部固定尺寸计算；调大扫码区会将撕线、加入码区和底栏一起下推。 |
+| 扫码上边距 `JOIN_SCAN_TOP_INSET` / 按钮前间距 `JOIN_SCAN_ACTION_GAP` | 32 / 16 | 优先调这两项：上边距增大下移整个扫码内容；按钮前间距增大拉开标题与按钮。扫码区、票券、撕线和缺口自动跟随，无需手动同步。 |
+| 昵称名签 `nicknameTag()` 的 X / `JOIN_NICKNAME_Y` / `JOIN_NICKNAME_HEIGHT` | 20 / −7 / 24 | X 跟随 `JOIN_CONTENT_INSET`，增大右移；Y 增大下移、减小上移。保持名签与扫码标题的留白，宽度受内容宽减两侧 20vp 限制。 |
+| 昵称名签倾斜 `JOIN_NICKNAME_ROTATION` | −3° | 负值逆时针（右侧抬高），正值顺时针；绝对值越大越斜，0 为水平。长昵称会扩大旋转后的占位，避免倾角过大贴近扫码标题。 |
+| 昵称名签阴影 `JOIN_NICKNAME_SHADOW_OFFSET` | 2vp | 通过 `DrumPaper` 的实心黑色底层绘制，随整个名签旋转。增大使阴影在名签局部坐标向右、下延伸得更明显，减小变薄；0 则无偏移。保留外层 `clip(false)`，避免裁掉底层。 |
 | 票内左右 `JOIN_CONTENT_INSET` | 20 | 调大输入及按钮向内收窄，左侧内容右移。 |
 | 按钮 `JOIN_ACTION_HEIGHT` | 46 | 调大增加点击高度，需同步预留区域高度避免挤压提示。 |
 
@@ -83,11 +87,15 @@
 
 - `TEAM_TICKET_SHADOW_X=4`、`TEAM_TICKET_SHADOW_Y=5`：分别调大使硬阴影向右、向下移动；注意页面边缘留白。
 - `TICKET_CORNER=9`：调大增加切角长度；`TICKET_NOTCH=8`：调大加深票券两侧缺口。
-- `firstNotchY` 默认 52；加入页传 96。调大向下移动第一组缺口。`tearY` 调大向下移动撕线及第二组缺口，页面已按操作区边界传入。
+- `firstNotchY` 默认 52；加入页按扫码按钮中心计算，当前 115。调大向下移动第一组缺口。`tearY` 调大向下移动撕线及第二组缺口，加入页当前为 186，随扫码区和分隔区边界计算。
 - Path 几何统一由 vp 转 px，避免两种屏幕密度下缺口和撕线错位。
 - `TeamWifiFooter` 总高 28，内部两块间距 10，Wi-Fi 素材 `entry/src/main/resources/rawfile/comic/icons/ticket-wifi.svg` 显示 22×19。调大间距让两块更分开，需考虑窄屏总宽。
 
 ## 验证与范围
+
+2026-10-31 昵称名签：按确认后的预览加入只读“昵称”标签，使用页面已有 `displayName`（上一页路由参数优先、本地昵称回退），不新增编辑或确认动作。名签浅紫底、−3° 倾斜；短名随内容收缩，长名在可用宽内以 11–13vp 自适应并保留单行省略和完整无障碍文案。扫码上半区比原版增加 18vp，内部加入码结构、原有昵称读取以及扫码/连接业务方法不变。
+
+本次 ArkTS 编译、昵称路由优先/本地回退/16 字昵称读取检查及漫画阴影策略检查通过。`member-join-session-reset.cjs` 在修改前页面源码上也会因测试替身缺少 `discardJoinPrefetch()` 失败；`member-join-critical-path.cjs` 及其生产 `AppSession.ets` 本次均未改动，原有首个连接断言仍失败。这两项未记为通过，也未在本次界面修改中修补。本次未安装真机；下列安装和真机记录属于此前入口界面改造。
 
 - `assembleHap --no-daemon` 成功，已安装到 Pura X 与 Pura 80 Pro。
 - 真机检查：两页完整显示、网点/原角色/植物、空昵称阻止跳转、随机昵称、整卡进入加入页、队长进入原大厅、五位码禁用/六位码启用、原生数字输入、系统扫码打开及取消返回。

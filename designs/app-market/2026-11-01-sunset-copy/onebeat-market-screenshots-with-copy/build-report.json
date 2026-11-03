@@ -1,0 +1,351 @@
+{
+  "canvas": {
+    "width": 1080,
+    "height": 1920,
+    "pages": 6
+  },
+  "palette": {
+    "ink": "#171B1F",
+    "paper": "#FFF9EE",
+    "teal": "#29B5AE"
+  },
+  "font": {
+    "family": "HarmonyOS Sans SC",
+    "path": "/Applications/DevEco-Studio.app/Contents/sdk/default/hms/previewer/resources/fonts/HarmonyOS_Sans_SC.ttf",
+    "sha256": "8978e05044e7089ad6a9de38c505c8148305607983487435a916d2610700a7ca"
+  },
+  "sourceHashes": [
+    {
+      "page": "01",
+      "source": "source/01.png",
+      "sha256": "5b4f0d00bbbeef065349d840fb14278c01f940bcc56d6248d90c3fc58806ebf8"
+    },
+    {
+      "page": "02",
+      "source": "source/02.png",
+      "sha256": "c6b76a5e3ae36e5dfee6cf6c9ac8d472bb67844bfc6471a4944f930bcfb38fa6"
+    },
+    {
+      "page": "03",
+      "source": "source/03.png",
+      "sha256": "b1f55dafc3bcebd32dbec2ceb0100b02f4cd4359119bf3bc4c2b862611e54290"
+    },
+    {
+      "page": "04",
+      "source": "source/04.png",
+      "sha256": "e0df9c3b194301d532f4c2ab98d0f2a7317ab25beb94af5530588da7278a2985"
+    },
+    {
+      "page": "05",
+      "source": "source/05.png",
+      "sha256": "2b7285e154c54f7c009f8367a39ecd9d2e2dab338290e5cfccba2c1ef9e1d50c"
+    },
+    {
+      "page": "06",
+      "source": "source/06.png",
+      "sha256": "04492054ea7b2df74aa2fd1bc9872bad20a60bd01b6ce19502708d61a320a474"
+    }
+  ],
+  "geometry": [
+    {
+      "page": "01",
+      "bounds": [
+        {
+          "role": "eyebrow",
+          "text": "ONEBEAT / 01",
+          "x": 96,
+          "y": 88,
+          "width": 212,
+          "height": 49
+        },
+        {
+          "role": "first-title",
+          "text": "一个人练习",
+          "x": 105.43,
+          "y": 163.824,
+          "width": 536.711,
+          "height": 105.3
+        },
+        {
+          "role": "second-title",
+          "text": "一群人同拍",
+          "x": 102.93,
+          "y": 292.944,
+          "width": 542.122,
+          "height": 108.68
+        },
+        {
+          "role": "second-title-shadow",
+          "text": "一群人同拍",
+          "x": 110.93,
+          "y": 301.944,
+          "width": 542.122,
+          "height": 108.68
+        },
+        {
+          "role": "subtitle",
+          "text": "从单人节拍，到组队一起行进",
+          "x": 96.804,
+          "y": 442.482,
+          "width": 388.224,
+          "height": 30.828
+        }
+      ],
+      "source": "source/01.png"
+    },
+    {
+      "page": "02",
+      "bounds": [
+        {
+          "role": "eyebrow",
+          "text": "ONEBEAT / 02",
+          "x": 724,
+          "y": 1394,
+          "width": 203,
+          "height": 49
+        },
+        {
+          "role": "first-title",
+          "text": "扫码入队",
+          "x": 728.05,
+          "y": 1461.288,
+          "width": 268.897,
+          "height": 63.308
+        },
+        {
+          "role": "second-title",
+          "text": "一起出发",
+          "x": 727.438,
+          "y": 1541.428,
+          "width": 276.389,
+          "height": 69.736
+        },
+        {
+          "role": "second-title-shadow",
+          "text": "一起出发",
+          "x": 735.438,
+          "y": 1550.428,
+          "width": 276.389,
+          "height": 69.736
+        },
+        {
+          "role": "subtitle",
+          "text": "也可输入 6 位加入码",
+          "x": 725.08,
+          "y": 1640.715,
+          "width": 225.765,
+          "height": 23.385
+        }
+      ],
+      "source": "source/02.png"
+    },
+    {
+      "page": "03",
+      "bounds": [
+        {
+          "role": "eyebrow",
+          "text": "ONEBEAT / 03",
+          "x": 96,
+          "y": 88,
+          "width": 203,
+          "height": 49
+        },
+        {
+          "role": "first-title",
+          "text": "角色与场景",
+          "x": 99.398,
+          "y": 164.58,
+          "width": 540.372,
+          "height": 104.544
+        },
+        {
+          "role": "second-title",
+          "text": "随心搭配",
+          "x": 98.372,
+          "y": 293.052,
+          "width": 440.554,
+          "height": 107.6
+        },
+        {
+          "role": "second-title-shadow",
+          "text": "随心搭配",
+          "x": 106.372,
+          "y": 302.052,
+          "width": 440.554,
+          "height": 107.6
+        },
+        {
+          "role": "subtitle",
+          "text": "随机选角，让每次练习都有新鲜感",
+          "x": 98.304,
+          "y": 442.224,
+          "width": 446.388,
+          "height": 31.086
+        },
+        {
+          "role": "access-note",
+          "text": "部分角色需解锁",
+          "x": 95.25,
+          "y": 497.25,
+          "width": 179.5,
+          "height": 37.5
+        }
+      ],
+      "source": "source/03.png"
+    },
+    {
+      "page": "04",
+      "bounds": [
+        {
+          "role": "eyebrow",
+          "text": "ONEBEAT / 04",
+          "x": 96,
+          "y": 88,
+          "width": 203,
+          "height": 49
+        },
+        {
+          "role": "first-title",
+          "text": "节奏听得见",
+          "x": 110.894,
+          "y": 165.984,
+          "width": 525.575,
+          "height": 104.004
+        },
+        {
+          "role": "second-title",
+          "text": "同拍看得见",
+          "x": 99.822,
+          "y": 293.484,
+          "width": 539.147,
+          "height": 108.248
+        },
+        {
+          "role": "second-title-shadow",
+          "text": "同拍看得见",
+          "x": 107.822,
+          "y": 302.484,
+          "width": 539.147,
+          "height": 108.248
+        },
+        {
+          "role": "subtitle",
+          "text": "节拍提示、角色行进、实时声波同屏呈现",
+          "x": 97.476,
+          "y": 442.224,
+          "width": 537.402,
+          "height": 28.602
+        }
+      ],
+      "source": "source/04.png"
+    },
+    {
+      "page": "05",
+      "bounds": [
+        {
+          "role": "eyebrow",
+          "text": "ONEBEAT / 05",
+          "x": 96,
+          "y": 88,
+          "width": 203,
+          "height": 49
+        },
+        {
+          "role": "first-title",
+          "text": "把这一拍",
+          "x": 101.653,
+          "y": 165.876,
+          "width": 432.398,
+          "height": 101.844
+        },
+        {
+          "role": "second-title",
+          "text": "留成作品",
+          "x": 105.011,
+          "y": 291.648,
+          "width": 426.793,
+          "height": 109.22
+        },
+        {
+          "role": "second-title-shadow",
+          "text": "留成作品",
+          "x": 113.011,
+          "y": 300.648,
+          "width": 426.793,
+          "height": 109.22
+        },
+        {
+          "role": "subtitle",
+          "text": "回看录制，微调 MIC 音量与时间对齐",
+          "x": 98.568,
+          "y": 442.356,
+          "width": 487.422,
+          "height": 30.954
+        }
+      ],
+      "source": "source/05.png"
+    },
+    {
+      "page": "06",
+      "bounds": [
+        {
+          "role": "eyebrow",
+          "text": "ONEBEAT / 06",
+          "x": 96,
+          "y": 88,
+          "width": 203,
+          "height": 49
+        },
+        {
+          "role": "first-title",
+          "text": "每一段节奏",
+          "x": 104.541,
+          "y": 165.336,
+          "width": 535.27,
+          "height": 104.652
+        },
+        {
+          "role": "second-title",
+          "text": "都由你来编",
+          "x": 100.553,
+          "y": 293.592,
+          "width": 545.762,
+          "height": 107.168
+        },
+        {
+          "role": "second-title-shadow",
+          "text": "都由你来编",
+          "x": 108.553,
+          "y": 302.592,
+          "width": 545.762,
+          "height": 107.168
+        },
+        {
+          "role": "subtitle",
+          "text": "分段编排节奏与加花，串成完整练习",
+          "x": 96.906,
+          "y": 442.218,
+          "width": 475.74,
+          "height": 31.092
+        },
+        {
+          "role": "access-note",
+          "text": "PRO 功能 · 支持月卡或分享试用",
+          "x": 95.25,
+          "y": 497.25,
+          "width": 342.5,
+          "height": 37.5
+        }
+      ],
+      "source": "source/06.png"
+    }
+  ],
+  "checks": {
+    "sixSlicesReconstructMaster": true,
+    "typographyWithinPage": true,
+    "opaqueSourcePixelsOutsideTypographyUnchanged": 11921961,
+    "sourceAlphaPixelsOutsideTypographyUnchanged": 11926823,
+    "firstTwoSeamTextFreePixels": 3840
+  },
+  "renderMode": "Exact existing PNGs plus native vector type outlines; no generative redrawing or source screenshot replacement."
+}

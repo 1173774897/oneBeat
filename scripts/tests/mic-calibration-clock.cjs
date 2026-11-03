@@ -64,6 +64,7 @@ function harness(sample = healthy) {
     '../common/MonotonicClock': { MonotonicClock: { nowMs: () => clock.now } },
     './RhythmTimeline': { BuiltInRhythmFactory: { create: () => ({ beatsPerBar: 4 }) } },
     './DrumMachineCatalog': {}, './DrumSampleBank': {},
+    './DrumBusLimiter': (() => { const e = {}; require('node:vm').runInNewContext(ts.transpileModule(require('node:fs').readFileSync(require('node:path').resolve(__dirname, '../../entry/src/main/ets/audio/DrumBusLimiter.ets'), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021 } }).outputText, { exports: e }); return e; })(),
     '../common/MeterModel': { defaultBeatPointStates: () => [] }, BuildProfile: { DEBUG: false }
   };
   const context = {

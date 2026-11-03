@@ -78,6 +78,7 @@ function fixture(version, route, micExact) {
     './RhythmTimeline': { BuiltInRhythmFactory: { create: () => ({ beatsPerBar: 4 }) } },
     './DrumMachineCatalog': {},
     './DrumSampleBank': {},
+    './DrumBusLimiter': (() => { const exports = {}; vm.runInNewContext(ts.transpileModule(fs.readFileSync('entry/src/main/ets/audio/DrumBusLimiter.ets', 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021 } }).outputText, { exports }); return exports; })(),
     '../common/MeterModel': { defaultBeatPointStates: () => [] },
     BuildProfile: { DEBUG: false }
   };

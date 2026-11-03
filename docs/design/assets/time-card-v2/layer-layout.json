@@ -69,20 +69,35 @@
       "role": "前盖、机口前唇与导纸夹，遮挡进入内部的纸"
     },
     {
-      "file": "lever.png",
+      "file": "lever-crank.png",
       "z": 6,
       "scale": 0.65,
       "pivotInAsset": {
-        "x": 690,
-        "y": 1030
+        "x": 700.1,
+        "y": 1063
       },
       "axisInScene": {
-        "x": 1144,
-        "y": 676
+        "x": 1159,
+        "y": 669
       },
       "restAngle": 0,
       "pressAngle": -32,
-      "role": "固定轴旋转的刚体扳手；黄色圆柱左端实心封闭；不换轴，不整体平移"
+      "role": "独立活动握杆与圆孔耳板；绕右侧共同轴旋转"
+    },
+    {
+      "file": "lever-bearing.png",
+      "z": 7,
+      "scale": 0.2,
+      "pivotInAsset": {
+        "x": 680.5,
+        "y": 640.3
+      },
+      "axisInScene": {
+        "x": 1159,
+        "y": 669
+      },
+      "rotates": false,
+      "role": "固定钢制轴座与银盖；连接机身，遮住活动耳板，不随握杆转动"
     }
   ],
   "holeGrid": {
@@ -108,8 +123,16 @@
     "y": 165,
     "width": 620,
     "gap": 10,
-    "lineHeights": [62, 116, 42],
-    "fontSizes": [48, 96, 32],
+    "lineHeights": [
+      62,
+      116,
+      42
+    ],
+    "fontSizes": [
+      48,
+      96,
+      32
+    ],
     "bottomY": 405,
     "holeGridTopY": 433
   },
@@ -141,5 +164,6 @@
     "punchPlaneY": 686,
     "paperProjection": "native scale + X rotation over upright texture; explicit shared pivot; CSS matrix3d in preview",
     "resultPaper": "upright"
-  }
+  },
+  "releasedPaperZ": 8
 }

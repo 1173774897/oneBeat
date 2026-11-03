@@ -235,7 +235,7 @@ async function begin(h) {
 function projectPaper(h, x, y) {
   const scale = h.page.paperScale();
   const rotation = h.page.paperRotation();
-  const unit = h.page.cardScale * h.page.sceneWidth / 1254 * h.pixelRatio;
+  const unit = h.page.cardScale * h.page.sceneDisplayWidth() / 1254 * h.pixelRatio;
   assert.equal(scale.centerX, rotation.centerX, 'Rotation and feed scale must share the same paper center');
   assert.equal(scale.centerY, rotation.centerY, 'Rotation and feed scale must share the same paper anchor');
   assert.ok(Number.isFinite(rotation.perspective) && rotation.perspective < 0,
@@ -300,7 +300,67 @@ async function saveWithFreshResultTouch(h) {
   assert.equal(await h.resultClick(), true, 'A fresh completed save gesture must be accepted');
 }
 
+function assertResultLayout() {
+  const layout = harness();
+  const page = layout.page;
+  const designAspect = numericConstant('SCENE_DESIGN_HEIGHT') / numericConstant('SCENE_DESIGN_SIZE');
+  const primaryContentHeight = 148;
+  // These are the measured space below the page header, not the full display
+  // height. Reserving the bottom inset keeps the save face above the system bar.
+  page.sceneWidth = 360;
+  page.resultViewportHeight = 605;
+  page.bottomSafeInset = 23;
+  for (const phase of ['intro', 'arming', 'listening', 'measuring', 'missed', 'changing']) {
+    page.phase = phase;
+    assert.equal(page.sceneDisplayWidth(), 360,
+      `${phase}: fitting the result must not resize the machine while tapping or replacing a card`);
+  }
+  page.phase = 'result';
+  page.resultSceneProgress = 0;
+  assert.equal(page.sceneDisplayWidth(), 360,
+    'Entering result must preserve the outgoing scene until the card-lift animation starts');
+  page.setResultPose();
+  const puraWidth = page.sceneDisplayWidth();
+  assert.equal(puraWidth, 288, 'The 440 × 706 Pura X result must use the approved compact scene width');
+  assert.ok(puraWidth * designAspect + primaryContentHeight + page.bottomSafeInset <= page.resultViewportHeight,
+    'The complete result art and primary save area must fit the Pura X first viewport');
+
+  page.resultSceneProgress = 0.5;
+  const transitionWidth = page.sceneDisplayWidth();
+  assert.ok(transitionWidth > puraWidth && transitionWidth < page.sceneWidth,
+    'The result scene must shrink between its original and compact widths during the lift');
+  page.resultSceneProgress = 1;
+  page.sceneWidth = 284;
+  page.resultViewportHeight = 539;
+  assert.equal(page.sceneDisplayWidth(), 284,
+    'A 320 vp narrow phone must keep the result inside the two 18 vp side margins');
+  assert.ok(page.sceneDisplayWidth() * designAspect + primaryContentHeight + page.bottomSafeInset <= page.resultViewportHeight,
+    'A narrow phone must still expose the primary save area without clipping the artwork');
+
+  page.sceneWidth = 360;
+  page.resultViewportHeight = 399;
+  const shortWidth = page.sceneDisplayWidth();
+  assert.ok(shortWidth > 180 && shortWidth < puraWidth,
+    'A shorter window must reduce the art further while retaining the readable minimum');
+  assert.ok(shortWidth * designAspect + primaryContentHeight + page.bottomSafeInset <= page.resultViewportHeight + 0.001,
+    'Height-constrained art must leave room for the complete save area');
+  page.bottomSafeInset = 0;
+  assert.ok(page.sceneDisplayWidth() > shortWidth,
+    'Removing a system bottom inset must return that space to the result illustration');
+
+  page.bottomSafeInset = 23;
+  page.resultViewportHeight = 239;
+  assert.equal(page.sceneDisplayWidth(), 180,
+    'An extremely short window must retain readable art and rely on the surrounding Scroll');
+  assert.ok(page.sceneDisplayWidth() * designAspect + primaryContentHeight + page.bottomSafeInset > page.resultViewportHeight,
+    'The minimum-size fallback intentionally allows scrolling rather than crushing result text');
+  page.sceneWidth = 164;
+  assert.equal(page.sceneDisplayWidth(), 164,
+    'Available horizontal space must take precedence over the preferred readable minimum');
+}
+
 (async () => {
+  assertResultLayout();
   const countdown = harness();
   await begin(countdown);
   const audioAt = countdown.page.audioStartAtMs;

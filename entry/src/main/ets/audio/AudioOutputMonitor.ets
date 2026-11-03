@@ -14,6 +14,7 @@ const METRONOME_RENDERER_INFO: audio.AudioRendererInfo = {
 interface OutputRouteSnapshot {
   wireless: boolean;
   builtInSpeaker: boolean;
+  headphone: boolean;
   signature: string;
 }
 
@@ -56,7 +57,7 @@ export class AudioOutputMonitor {
   private static readPreferredOutputRoute(): OutputRouteSnapshot {
     const routing = AudioOutputMonitor.ensureRouting();
     if (routing === undefined) {
-      return { wireless: false, builtInSpeaker: false, signature: 'unavailable' };
+      return { wireless: false, builtInSpeaker: false, headphone: false, signature: 'unavailable' };
     }
     try {
       // Query the preferred route for the same GAME usage as MetronomeEngine.
@@ -67,6 +68,7 @@ export class AudioOutputMonitor {
       const identities: string[] = [];
       let wireless = false;
       let builtInSpeaker = devices.length > 0;
+      let headphone = devices.length > 0;
       for (let i = 0; i < devices.length; i++) {
         const type = devices[i].deviceType;
         types.push(type);
@@ -79,18 +81,33 @@ export class AudioOutputMonitor {
         if (type !== audio.DeviceType.SPEAKER) {
           builtInSpeaker = false;
         }
+        if (!AudioOutputMonitor.isHeadphoneType(type)) {
+          headphone = false;
+        }
       }
       console.info(`[A2DP-DIAG] current output deviceTypes=[${types.join(',')}]`);
       identities.sort();
       return {
         wireless,
         builtInSpeaker,
+        headphone,
         signature: identities.length > 0 ? identities.join('|') : 'none'
       };
     } catch (e) {
       console.warn(`AudioOutputMonitor preferred output query failed: ${e}`);
-      return { wireless: false, builtInSpeaker: false, signature: 'unavailable' };
+      return { wireless: false, builtInSpeaker: false, headphone: false, signature: 'unavailable' };
     }
+  }
+
+  /**
+   * Ear-worn outputs where the accompaniment does not reach the phone MIC acoustically.
+   * A2DP cannot distinguish a Bluetooth speaker from headphones; that case is accepted
+   * as headphones (recording quality, not sync, depends on this choice).
+   */
+  private static isHeadphoneType(type: audio.DeviceType): boolean {
+    return type === audio.DeviceType.WIRED_HEADSET || type === audio.DeviceType.WIRED_HEADPHONES ||
+      type === audio.DeviceType.USB_HEADSET || type === audio.DeviceType.BLUETOOTH_A2DP ||
+      type === audio.DeviceType.BLUETOOTH_SCO || type === audio.DeviceType.NEARLINK;
   }
 
   static isBluetoothA2dpActive(): boolean {
@@ -100,6 +117,11 @@ export class AudioOutputMonitor {
   /** Input-side mic calibration is valid only against the phone's built-in loudspeaker. */
   static isBuiltInSpeakerActive(): boolean {
     return AudioOutputMonitor.readPreferredOutputRoute().builtInSpeaker;
+  }
+
+  /** True only when every preferred output is ear-worn; unknown/failed queries return false. */
+  static isHeadphoneOutputActive(): boolean {
+    return AudioOutputMonitor.readPreferredOutputRoute().headphone;
   }
 
   /** 开始监听输出设备切换；首次及每次切换都会回调当前是否为无线耳机。 */

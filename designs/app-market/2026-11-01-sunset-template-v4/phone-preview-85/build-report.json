@@ -1,0 +1,274 @@
+{
+  "status": "passed",
+  "canvas": {
+    "width": 1080,
+    "height": 1920
+  },
+  "pageCount": 6,
+  "master": {
+    "width": 6480,
+    "height": 1920
+  },
+  "background": {
+    "asset": "sunset-native-panorama.png",
+    "sha256": "871992483e0b8fc6ccfa37af54bd9cd44c968ab0d384d274ca9e41c631ea9c51",
+    "sourceUnmodified": true,
+    "untouchedBackgroundPixels": 5919720
+  },
+  "whiteScreenPixels": 5839129,
+  "whiteScreensContainOnlyConfiguredColor": true,
+  "overlayScreenHolesVerified": true,
+  "seam": {
+    "reconstructedPixelsEqual": true,
+    "comparedPixels": 12441600,
+    "cutXs": [
+      1080,
+      2160,
+      3240,
+      4320,
+      5400
+    ]
+  },
+  "pageDimensions": [
+    {
+      "page": 1,
+      "width": 1080,
+      "height": 1920
+    },
+    {
+      "page": 2,
+      "width": 1080,
+      "height": 1920
+    },
+    {
+      "page": 3,
+      "width": 1080,
+      "height": 1920
+    },
+    {
+      "page": 4,
+      "width": 1080,
+      "height": 1920
+    },
+    {
+      "page": 5,
+      "width": 1080,
+      "height": 1920
+    },
+    {
+      "page": 6,
+      "width": 1080,
+      "height": 1920
+    }
+  ],
+  "phones": [
+    {
+      "id": "A",
+      "x": 320,
+      "y": 780,
+      "width": 830,
+      "height": 1750,
+      "rotation": -10,
+      "scale": 1,
+      "screen": {
+        "x": 344,
+        "y": 804,
+        "width": 782,
+        "height": 1702,
+        "radius": 76
+      },
+      "screenQuad": [
+        {
+          "x": 202.165569,
+          "y": 884.82504
+        },
+        {
+          "x": 972.285232,
+          "y": 749.032165
+        },
+        {
+          "x": 1267.834431,
+          "y": 2425.17496
+        },
+        {
+          "x": 497.714768,
+          "y": 2560.967835
+        }
+      ]
+    },
+    {
+      "id": "B",
+      "x": 1080,
+      "y": -420,
+      "width": 830,
+      "height": 1750,
+      "rotation": -10,
+      "scale": 1,
+      "screen": {
+        "x": 1104,
+        "y": -396,
+        "width": 782,
+        "height": 1702,
+        "radius": 76
+      },
+      "screenQuad": [
+        {
+          "x": 962.165569,
+          "y": -315.17496
+        },
+        {
+          "x": 1732.285232,
+          "y": -450.967835
+        },
+        {
+          "x": 2027.834431,
+          "y": 1225.17496
+        },
+        {
+          "x": 1257.714768,
+          "y": 1360.967835
+        }
+      ]
+    },
+    {
+      "id": "C",
+      "page": 3,
+      "x": 2294,
+      "y": 580,
+      "width": 812,
+      "height": 1760,
+      "rotation": -2,
+      "scale": 1,
+      "screen": {
+        "x": 2318,
+        "y": 604,
+        "width": 764,
+        "height": 1712,
+        "radius": 76
+      },
+      "screenQuad": [
+        {
+          "x": 2288.358735,
+          "y": 617.85306
+        },
+        {
+          "x": 3051.893327,
+          "y": 591.189844
+        },
+        {
+          "x": 3111.641265,
+          "y": 2302.14694
+        },
+        {
+          "x": 2348.106673,
+          "y": 2328.810156
+        }
+      ]
+    },
+    {
+      "id": "D",
+      "page": 4,
+      "x": 3320,
+      "y": 96,
+      "width": 690.1999999999999,
+      "height": 1496,
+      "rotation": 2,
+      "scale": 0.85,
+      "screen": {
+        "x": 3340.4,
+        "y": 116.4,
+        "width": 649.4,
+        "height": 1455.2,
+        "radius": 64.6
+      },
+      "screenQuad": [
+        {
+          "x": 3365.990672,
+          "y": 105.511368
+        },
+        {
+          "x": 4014.995075,
+          "y": 128.175101
+        },
+        {
+          "x": 3964.209328,
+          "y": 1582.488632
+        },
+        {
+          "x": 3315.204925,
+          "y": 1559.824899
+        }
+      ]
+    },
+    {
+      "id": "E",
+      "page": 5,
+      "x": 4454,
+      "y": 580,
+      "width": 812,
+      "height": 1760,
+      "rotation": 0,
+      "scale": 1,
+      "screen": {
+        "x": 4478,
+        "y": 604,
+        "width": 764,
+        "height": 1712,
+        "radius": 76
+      },
+      "screenQuad": [
+        {
+          "x": 4478,
+          "y": 604
+        },
+        {
+          "x": 5242,
+          "y": 604
+        },
+        {
+          "x": 5242,
+          "y": 2316
+        },
+        {
+          "x": 4478,
+          "y": 2316
+        }
+      ]
+    },
+    {
+      "id": "F",
+      "page": 6,
+      "x": 5534,
+      "y": 580,
+      "width": 812,
+      "height": 1760,
+      "rotation": -1,
+      "scale": 1,
+      "screen": {
+        "x": 5558,
+        "y": 604,
+        "width": 764,
+        "height": 1712,
+        "radius": 76
+      },
+      "screenQuad": [
+        {
+          "x": 5543.118921,
+          "y": 610.797192
+        },
+        {
+          "x": 6307.00256,
+          "y": 597.463554
+        },
+        {
+          "x": 6336.881079,
+          "y": 2309.202808
+        },
+        {
+          "x": 5572.99744,
+          "y": 2322.536446
+        }
+      ]
+    }
+  ]
+}

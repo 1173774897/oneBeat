@@ -1,0 +1,368 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>同拍 · 上架模板置图</title>
+  <style>
+    :root { color-scheme: light; --paper:#f8f4eb; --ink:#292621; --muted:#79746c; --coral:#ff765f; --lilac:#ded3f3; --line:#ddd6ca; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--paper); color:var(--ink); font:15px/1.65 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif; }
+    button,input,select { font:inherit; }
+    button { cursor:pointer; }
+    button:disabled { opacity:.45; cursor:not-allowed; }
+    button:focus-visible,input:focus-visible,select:focus-visible { outline:3px solid #ab88de; outline-offset:3px; }
+    .workspace { display:grid; grid-template-columns:minmax(300px,400px) minmax(0,540px); align-items:start; gap:52px; max-width:1110px; margin:auto; padding:36px 32px 48px; }
+    .eyebrow { margin:0 0 7px; font-size:11px; letter-spacing:.16em; color:var(--muted); font-weight:700; }
+    h1 { margin:0; font-size:27px; line-height:1.3; letter-spacing:-.04em; }
+    .intro { margin:12px 0 25px; color:var(--muted); font-size:13px; }
+    .tabs { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:9px; margin-bottom:27px; }
+    .tab { border:1px solid var(--line); border-radius:12px; padding:11px 8px; background:#fffaf3; color:var(--ink); text-align:left; line-height:1.4; }
+    .tab[aria-selected="true"] { background:var(--lilac); border-color:#ab92cc; box-shadow:0 2px 0 #bba7d5; }
+    .tab strong { display:block; font-size:12px; margin-bottom:4px; }
+    .tab span { display:block; font-size:11px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .section { padding:21px 0; border-top:1px solid var(--line); }
+    h2 { margin:0 0 12px; font-size:14px; }
+    .upload { display:block; width:100%; border:1px dashed #b8aca0; border-radius:12px; padding:18px; background:#fffaf3; cursor:pointer; text-align:center; }
+    .upload strong { display:block; font-size:14px; }
+    .upload span { display:block; margin-top:4px; color:var(--muted); font-size:12px; }
+    .file-name { margin:9px 0 0; font-size:12px; color:var(--muted); overflow-wrap:anywhere; }
+    .hidden-input { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); }
+    .field { display:flex; align-items:center; justify-content:space-between; gap:15px; margin:12px 0; }
+    .field label { font-size:13px; }
+    select { width:204px; max-width:62%; padding:9px; color:var(--ink); border:1px solid var(--line); border-radius:8px; background:#fffaf3; }
+    input[type="color"] { width:58px; height:35px; padding:3px; border:1px solid var(--line); border-radius:7px; background:#fffaf3; cursor:pointer; }
+    .hint { margin:9px 0 0; color:var(--muted); font-size:12px; }
+    .buttons { display:flex; flex-wrap:wrap; gap:10px; margin-top:21px; }
+    .button { border:1px solid var(--line); border-radius:10px; padding:11px 15px; background:#fffaf3; color:var(--ink); font-size:13px; }
+    .primary { background:var(--coral); border-color:#e96c57; font-weight:700; flex:1; }
+    .status { min-height:44px; margin:13px 0 0; color:var(--muted); font-size:12px; overflow-wrap:anywhere; }
+    .status.error { color:#b33d31; }
+    details { margin-top:8px; color:var(--muted); font-size:12px; }
+    summary { cursor:pointer; }
+    .asset-picker { display:inline-block; margin-top:10px; cursor:pointer; border:1px solid var(--line); border-radius:8px; padding:7px 10px; background:#fffaf3; color:var(--ink); }
+    .preview-column { position:sticky; top:25px; display:flex; flex-direction:column; align-items:center; }
+    .preview-meta { width:100%; display:flex; justify-content:space-between; gap:12px; margin-bottom:10px; color:var(--muted); font-size:11px; }
+    .preview { width:min(540px,calc((100dvh - 108px) * .5625)); max-width:100%; aspect-ratio:9/16; border-radius:5px; overflow:hidden; background:#fff; box-shadow:0 12px 38px #42372c1c; }
+    canvas { display:block; width:100%; height:100%; }
+    .preview-note { max-width:540px; margin:12px 0 0; color:var(--muted); font-size:11px; text-align:center; }
+    @media(max-width:800px) { .workspace { grid-template-columns:minmax(0,1fr); max-width:580px; gap:26px; padding:25px 20px 35px; } .preview-column { position:static; } .preview { width:min(100%,420px); } }
+    @media(prefers-reduced-motion:no-preference) { button,.tab { transition:background .12s ease,opacity .12s ease; } }
+  </style>
+</head>
+<body>
+  <main class="workspace">
+    <section class="controls" aria-label="模板编辑设置">
+      <p class="eyebrow">ONEBEAT / OFFLINE EDITOR</p>
+      <h1>上架模板置图</h1>
+      <p class="intro">选择模板，放入本地截图。所有设置只在本机处理；编辑器提示不会进入导出图片。</p>
+      <nav id="tabs" class="tabs" role="tablist" aria-label="六张模板"></nav>
+      <section class="section">
+        <h2>屏幕截图</h2>
+        <label class="upload" for="screenshot-input">
+          <strong>选择本地截图</strong>
+          <span>PNG、JPG、WebP 等浏览器支持的图片</span>
+        </label>
+        <input id="screenshot-input" class="hidden-input" type="file" accept="image/*">
+        <p id="file-name" class="file-name">当前模板尚未放入截图</p>
+      </section>
+      <section class="section">
+        <h2>置入方式</h2>
+        <div class="field">
+          <label for="fit">截图适配</label>
+          <select id="fit">
+            <option value="contain">完整显示 · 保持原比例</option>
+            <option value="cover">铺满屏幕 · 会裁切边缘</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="fill">屏幕填充色</label>
+          <input id="fill" type="color" value="#ffffff">
+        </div>
+        <p id="fit-hint" class="hint">完整保留截图。宽高比例不同时，空余区域使用填充色。</p>
+        <p class="hint">六张模板分别保存本次打开期间的截图和设置。</p>
+        <div class="buttons">
+          <button id="reset" class="button" type="button" disabled>重置本张</button>
+          <button id="export" class="button primary" type="button" disabled>导出 1080 × 1920 PNG</button>
+        </div>
+        <p id="status" class="status" role="status" aria-live="polite">正在加载模板…</p>
+      </section>
+      <details id="local-help">
+        <summary>本地图片加载或导出遇到限制？</summary>
+        <p>部分浏览器会限制 file:// 页面读取同目录图片。选择本工具所在的「2026-10-29」文件夹，可从本地载入模板与覆盖层，不需要启动服务器。</p>
+        <label class="asset-picker" for="assets-input">选择本地模板文件夹</label>
+        <input id="assets-input" class="hidden-input" type="file" webkitdirectory directory multiple>
+      </details>
+    </section>
+    <section class="preview-column" aria-label="模板预览">
+      <div class="preview-meta"><span id="preview-name">模板预览</span><span>1080 × 1920 · 9:16</span></div>
+      <div class="preview"><canvas id="canvas" width="1080" height="1920" aria-label="当前模板图片预览"></canvas></div>
+      <p class="preview-note">以上仅显示导出画面；不自动添加文字。</p>
+    </section>
+  </main>
+
+  <!-- Optional embedded data URLs let file:// exports work without browser-specific local-file exceptions. -->
+  <script id="offline-assets" type="application/json">{"templates":{},"overlays":{}}</script>
+  <script>
+    'use strict';
+    const WIDTH = 1080;
+    const HEIGHT = 1920;
+    const DEFAULT_CONFIG = {
+      common: {
+        screen: { x:162, y:498, width:756, height:1344, radius:75 },
+        phone: { x:134, y:470, width:812, height:1400 }
+      },
+      items: [
+        { id:'01', name:'米白珊瑚' }, { id:'02', name:'浅紫纸片' },
+        { id:'03', name:'珊瑚圆环' }, { id:'04', name:'米白放射' },
+        { id:'05', name:'夕阳剪影' }, { id:'06', name:'浅紫弧线' }
+      ]
+    };
+    const el = Object.fromEntries(['tabs','screenshot-input','file-name','fit','fill','fit-hint','reset','export','status','preview-name','canvas','assets-input','local-help'].map(id => [id, document.getElementById(id)]));
+    const states = new Map(DEFAULT_CONFIG.items.map(item => [item.id, { image:null, filename:'', fit:'contain', fill:'#ffffff' }]));
+    const assetCache = new Map();
+    const localAssets = new Map();
+    let embedded = {};
+    try { embedded = JSON.parse(document.getElementById('offline-assets').textContent); } catch (_) { /* Relative files remain available when no embedded asset bundle exists. */ }
+    let config = DEFAULT_CONFIG;
+    let selectedId = '01';
+    let renderGeneration = 0;
+    let uploadGeneration = 0;
+    let exportReady = false;
+
+    function status(message, error = false) {
+      el.status.textContent = message;
+      el.status.classList.toggle('error', error);
+    }
+    function validConfig(value) {
+      const screen = value && value.common && value.common.screen;
+      if (!screen || !['x','y','width','height','radius'].every(key => Number.isFinite(screen[key]))) return DEFAULT_CONFIG;
+      if (screen.x < 0 || screen.y < 0 || screen.width <= 0 || screen.height <= 0 || screen.x + screen.width > WIDTH || screen.y + screen.height > HEIGHT) return DEFAULT_CONFIG;
+      const items = DEFAULT_CONFIG.items.map(fallback => {
+        const item = Array.isArray(value.items) && value.items.find(candidate => candidate.id === fallback.id);
+        return { id:fallback.id, name:item && typeof item.name === 'string' ? item.name : fallback.name };
+      });
+      return { common:{ screen:{ ...screen, radius:Math.max(0, Math.min(screen.radius, screen.width / 2, screen.height / 2)) }, phone:value.common.phone || DEFAULT_CONFIG.common.phone }, items };
+    }
+    async function loadConfig() {
+      if (embedded.config) return validConfig(embedded.config);
+      try {
+        const response = await fetch('./templates.json', { cache:'no-store' });
+        if (!response.ok) throw new Error('配置未找到');
+        return validConfig(await response.json());
+      } catch (_) {
+        // Local-file fetch is intentionally optional; geometry remains usable offline.
+        return DEFAULT_CONFIG;
+      }
+    }
+    function readFile(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(new Error('未能读取所选文件，请重新选择。'));
+        reader.readAsDataURL(file);
+      });
+    }
+    function decodeImage(source) {
+      return new Promise((resolve, reject) => {
+        const image = new Image();
+        image.onload = () => image.naturalWidth && image.naturalHeight ? resolve(image) : reject(new Error('图片尺寸无效。'));
+        image.onerror = () => reject(new Error('图片加载失败，请确认模板图片位于对应目录。'));
+        image.src = source;
+      });
+    }
+    function assetPath(kind, id) {
+      return kind === 'template' ? `png/${id}-template.png` : `layers/${id}-overlay.png`;
+    }
+    async function loadAsset(kind, id) {
+      const key = `${kind}:${id}`;
+      if (assetCache.has(key)) return assetCache.get(key);
+      const promise = (async () => {
+        const path = assetPath(kind, id);
+        const file = localAssets.get(path);
+        const bundled = embedded[kind === 'template' ? 'templates' : 'overlays'];
+        const source = file ? await readFile(file) : (bundled && bundled[id]) || path;
+        const image = await decodeImage(source);
+        if (image.naturalWidth !== WIDTH || image.naturalHeight !== HEIGHT) throw new Error(`${id} 模板尺寸应为 1080 × 1920。`);
+        return image;
+      })();
+      assetCache.set(key, promise);
+      try { return await promise; } catch (error) { assetCache.delete(key); throw error; }
+    }
+    function roundedScreen(context, screen) {
+      const { x, y, width:w, height:h, radius:r } = screen;
+      context.beginPath();
+      context.moveTo(x + r, y);
+      context.lineTo(x + w - r, y);
+      context.arcTo(x + w, y, x + w, y + r, r);
+      context.lineTo(x + w, y + h - r);
+      context.arcTo(x + w, y + h, x + w - r, y + h, r);
+      context.lineTo(x + r, y + h);
+      context.arcTo(x, y + h, x, y + h - r, r);
+      context.lineTo(x, y + r);
+      context.arcTo(x, y, x + r, y, r);
+      context.closePath();
+    }
+    function paintScreenshot(context, itemState) {
+      const screen = config.common.screen;
+      const image = itemState.image;
+      const scale = (itemState.fit === 'cover' ? Math.max : Math.min)(screen.width / image.naturalWidth, screen.height / image.naturalHeight);
+      const width = image.naturalWidth * scale;
+      const height = image.naturalHeight * scale;
+      context.save();
+      roundedScreen(context, screen);
+      context.clip();
+      context.fillStyle = itemState.fill;
+      context.fillRect(screen.x, screen.y, screen.width, screen.height);
+      context.drawImage(image, screen.x + (screen.width - width) / 2, screen.y + (screen.height - height) / 2, width, height);
+      context.restore();
+    }
+    function updateControls() {
+      const current = states.get(selectedId);
+      const item = config.items.find(item => item.id === selectedId);
+      el.fit.value = current.fit;
+      el.fill.value = current.fill;
+      el['file-name'].textContent = current.filename || '当前模板尚未放入截图';
+      el['preview-name'].textContent = `${item.id} · ${item.name}`;
+      el['fit-hint'].textContent = current.fit === 'cover' ? '铺满屏幕并保持原比例。超出屏幕的图片边缘会被裁切。' : '完整保留截图。宽高比例不同时，空余区域使用填充色。';
+      el.reset.disabled = !current.image && current.fit === 'contain' && current.fill === '#ffffff';
+      [...el.tabs.children].forEach(button => { button.setAttribute('aria-selected', String(button.dataset.id === selectedId)); });
+    }
+    async function render() {
+      const generation = ++renderGeneration;
+      const id = selectedId;
+      const current = { ...states.get(id) };
+      exportReady = false;
+      el.export.disabled = true;
+      updateControls();
+      status('正在加载并合成模板…');
+      try {
+        // Resolve the overlay before painting so an early export cannot omit the phone or decorations.
+        const artwork = await loadAsset(current.image ? 'overlay' : 'template', id);
+        if (generation !== renderGeneration) return;
+        const staging = document.createElement('canvas');
+        staging.width = WIDTH;
+        staging.height = HEIGHT;
+        const context = staging.getContext('2d');
+        context.imageSmoothingEnabled = true;
+        context.imageSmoothingQuality = 'high';
+        context.fillStyle = '#ffffff';
+        context.fillRect(0, 0, WIDTH, HEIGHT);
+        if (current.image) paintScreenshot(context, current);
+        context.drawImage(artwork, 0, 0, WIDTH, HEIGHT);
+        // Reset the visible canvas as local-path images may have tainted a previous preview.
+        el.canvas.width = WIDTH;
+        el.canvas.height = HEIGHT;
+        el.canvas.getContext('2d').drawImage(staging, 0, 0);
+        try {
+          staging.getContext('2d').getImageData(0, 0, 1, 1);
+        } catch (_) {
+          el['local-help'].open = true;
+          status('此浏览器限制本地路径图片导出。请在下方选择模板文件夹后继续。', true);
+          return;
+        }
+        exportReady = true;
+        el.export.disabled = false;
+        status(current.image ? '截图已置入，可以导出。' : '空白模板已就绪。选择截图后可置入手机屏幕。');
+      } catch (error) {
+        if (generation !== renderGeneration) return;
+        el['local-help'].open = true;
+        status(`${error.message} 也可在下方选择本地模板文件夹。`, true);
+      }
+    }
+    function buildTabs() {
+      el.tabs.replaceChildren();
+      config.items.forEach(item => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'tab';
+        button.dataset.id = item.id;
+        button.setAttribute('role', 'tab');
+        const number = document.createElement('strong');
+        number.textContent = item.id;
+        const name = document.createElement('span');
+        name.textContent = item.name;
+        button.append(number, name);
+        button.addEventListener('click', () => {
+          selectedId = item.id;
+          el['screenshot-input'].value = '';
+          void render();
+        });
+        el.tabs.append(button);
+      });
+    }
+    el['screenshot-input'].addEventListener('change', async event => {
+      const file = event.target.files[0];
+      if (!file) return;
+      const id = selectedId;
+      const upload = ++uploadGeneration;
+      ++renderGeneration;
+      exportReady = false;
+      el.export.disabled = true;
+      status('正在读取本地截图…');
+      try {
+        const image = await decodeImage(await readFile(file));
+        if (upload !== uploadGeneration) return;
+        Object.assign(states.get(id), { image, filename:file.name });
+        if (id === selectedId) await render();
+      } catch (error) {
+        if (id === selectedId) { await render(); status(error.message, true); }
+      }
+      event.target.value = '';
+    });
+    el.fit.addEventListener('change', () => { states.get(selectedId).fit = el.fit.value; void render(); });
+    el.fill.addEventListener('input', () => { states.get(selectedId).fill = el.fill.value; void render(); });
+    el.reset.addEventListener('click', () => {
+      ++uploadGeneration;
+      states.set(selectedId, { image:null, filename:'', fit:'contain', fill:'#ffffff' });
+      el['screenshot-input'].value = '';
+      void render();
+    });
+    el.export.addEventListener('click', async () => {
+      if (!exportReady) return;
+      const id = selectedId;
+      const generation = renderGeneration;
+      el.export.disabled = true;
+      status('正在生成 PNG…');
+      try {
+        const blob = await new Promise((resolve, reject) => {
+          el.canvas.toBlob(value => value ? resolve(value) : reject(new Error('PNG 生成失败，请重试。')), 'image/png');
+        });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `onebeat-${id}-1080x1920.png`;
+        document.body.append(link);
+        link.click();
+        link.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 10000);
+        if (generation === renderGeneration) status('PNG 已生成，请在浏览器下载记录中查看。');
+      } catch (error) {
+        if (generation === renderGeneration) status(error.message || '无法导出，请重新载入本地模板文件夹。', true);
+      } finally {
+        if (generation === renderGeneration) el.export.disabled = !exportReady;
+      }
+    });
+    el['assets-input'].addEventListener('change', async event => {
+      const files = [...event.target.files];
+      if (!files.length) return;
+      let found = 0;
+      let configFile;
+      files.forEach(file => {
+        const path = file.webkitRelativePath || file.name;
+        const match = path.match(/(?:^|\/)(png\/0[1-6]-template\.png|layers\/0[1-6]-overlay\.png)$/);
+        if (match) { localAssets.set(match[1], file); found++; }
+        if (/(?:^|\/)templates\.json$/.test(path)) configFile = file;
+      });
+      if (!found) { status('未找到模板图片。请选择含有 png 与 layers 子目录的模板文件夹。', true); return; }
+      if (configFile) {
+        try { config = validConfig(JSON.parse(await configFile.text())); buildTabs(); } catch (_) { /* Existing geometry remains valid if a local config cannot be parsed. */ }
+      }
+      assetCache.clear();
+      await render();
+      event.target.value = '';
+    });
+    (async () => { config = await loadConfig(); buildTabs(); await render(); })();
+  </script>
+</body>
+</html>

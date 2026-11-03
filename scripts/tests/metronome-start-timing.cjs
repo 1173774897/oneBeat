@@ -10,7 +10,7 @@ const ENGINE = path.resolve('entry/src/main/ets/audio/MetronomeEngine.ets');
 const AUDIO_STATE = { STATE_RUNNING: 2, STATE_STOPPED: 3, STATE_PAUSED: 5 };
 
 function fixture({ compensationMs = 300, queueMs = 280, timestampAvailable = true,
-  frameBiasFrames = 0, physicalLatencyMs = compensationMs, moduleMocks = {} } = {}) {
+  frameBiasFrames = 0, physicalLatencyMs = compensationMs, moduleMocks = {}, drumKitGain } = {}) {
   let savedCompensationMs = compensationMs;
   let queueFrames = Math.round(queueMs * RATE / 1000);
   let now = 100000;
@@ -84,6 +84,9 @@ function fixture({ compensationMs = 300, queueMs = 280, timestampAvailable = tru
     return exports;
   }
   const engine = new (load(ENGINE).MetronomeEngine)();
+  // Routing/placement suites pin unity so their PCM markers stay readable;
+  // production's -3 dB kit gain is asserted by metronome-drum-preview-seek.
+  if (drumKitGain !== undefined) engine.drumKitGain = drumKitGain;
   engine.configure(0, 0);
   engine.renderer = renderer;
   engine.rendererStarted = true;

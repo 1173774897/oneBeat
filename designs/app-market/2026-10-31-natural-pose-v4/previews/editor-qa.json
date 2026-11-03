@@ -1,0 +1,47 @@
+{
+  "status": "passed",
+  "offline": true,
+  "checked": [
+    {
+      "id": "01",
+      "protectedPixels": 1225679,
+      "changedScreenPixels": 847921,
+      "handsAndOutsideMaskUnchanged": true,
+      "reset": true
+    },
+    {
+      "id": "02",
+      "protectedPixels": 1140347,
+      "changedScreenPixels": 933253,
+      "handsAndOutsideMaskUnchanged": true,
+      "reset": true
+    },
+    {
+      "id": "03",
+      "protectedPixels": 1209650,
+      "changedScreenPixels": 863941,
+      "handsAndOutsideMaskUnchanged": true,
+      "reset": true
+    },
+    {
+      "id": "04",
+      "protectedPixels": 1118120,
+      "changedScreenPixels": 955384,
+      "handsAndOutsideMaskUnchanged": true,
+      "reset": true
+    },
+    {
+      "id": "05",
+      "protectedPixels": 1127835,
+      "changedScreenPixels": 945760,
+      "handsAndOutsideMaskUnchanged": true,
+      "reset": true
+    }
+  ],
+  "export": {
+    "width": 1080,
+    "height": 1920
+  },
+  "pageErrors": [],
+  "networkRequests": []
+}

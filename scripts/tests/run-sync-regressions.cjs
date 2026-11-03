@@ -70,6 +70,7 @@ const suites = [
   'time-card-calibration.cjs',
   'share-check-in.cjs',
   'share-calendar.cjs',
+  'drum-bus-limiter.cjs',
   'recording-native-audio.cjs',
   'recording-capture-lifecycle.cjs',
   'recording-playback-observer.cjs',

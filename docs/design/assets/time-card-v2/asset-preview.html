@@ -13,7 +13,7 @@
    pass in front of the machine without being captured by a transformed frame. */
 .frame{transform:none!important}
 .layer{transform-origin:0 0;transition:transform .08s ease,opacity .35s ease}
-.guide{z-index:4}.ram{z-index:3}.front{z-index:5}.lever{z-index:6}
+.guide{z-index:4}.ram{z-index:3}.front{z-index:5}.lever{z-index:6}.lever-bearing{z-index:7}
 .paper-window{transform-origin:0 0;transition:none}
 .paper-plane{position:absolute;inset:0;transform-origin:0 0;transition:transform .35s ease}
 .card-result{position:absolute;left:310px;top:165px;width:620px;display:flex;flex-direction:column;gap:10px;color:#08827b;font-weight:900;text-align:center;opacity:0;transition:opacity .15s ease}
@@ -41,7 +41,8 @@
 <img class="layer guide" id="guide" src="../../../../entry/src/main/resources/rawfile/calibration/time-card-v2/punch-guide-topdown-60.png" alt="俯视冲头导向座与底模">
 <img class="layer ram" id="ram" src="../../../../entry/src/main/resources/rawfile/calibration/time-card-v2/punch-ram-topdown-60.png" alt="俯视独立冲头">
 <img class="layer front" src="../../../../entry/src/main/resources/rawfile/calibration/time-card-v2/machine-front.png" alt="机身前盖与导纸夹">
-<img class="layer lever" id="lever" src="../../../../entry/src/main/resources/rawfile/calibration/time-card-v2/lever.png" alt="独立扳手">
+<img class="layer lever" id="lever" src="../../../../entry/src/main/resources/rawfile/calibration/time-card-v2/lever-crank.png" alt="独立旋转握杆">
+<img class="layer lever-bearing" id="lever-bearing" src="../../../../entry/src/main/resources/rawfile/calibration/time-card-v2/lever-bearing.png" alt="固定在机身上的轴承座与银盖">
 </div></div><div class="countdown" id="countdown" aria-hidden="true"></div></div>
 <div class="message" role="status"><strong id="error-title">刚才没接上</strong><p id="error-detail"></p><p>本次不计算、不保存，已保存的校准不会被覆盖。</p></div>
 <button class="tap" id="tap">敲一下</button>
@@ -49,11 +50,12 @@
 <div class="listen-tip" id="tip">预览中可自由点击，不按点击间隔判定。</div>
 </section>
 <section class="side">
-<h2>六张透明素材 · 1254 × 1254</h2>
+<h2>七张透明素材 · 1254 × 1254</h2>
 <div class="assets">
 <figure class="asset"><img src="../../../../entry/src/main/resources/rawfile/calibration/time-card-v2/machine-rear.png" alt="背层"><figcaption>机身背层</figcaption><small>底座、后导轨、托纸台、固定轴座</small></figure>
 <figure class="asset"><img src="../../../../entry/src/main/resources/rawfile/calibration/time-card-v2/machine-front.png" alt="前盖"><figcaption>机身前盖</figcaption><small>遮住进入机口的纸与导纸夹</small></figure>
-<figure class="asset"><img src="../../../../entry/src/main/resources/rawfile/calibration/time-card-v2/lever.png" alt="扳手"><figcaption>独立扳手</figcaption><small>围绕固定轴旋转，不整体平移</small></figure>
+<figure class="asset"><img src="../../../../entry/src/main/resources/rawfile/calibration/time-card-v2/lever-crank.png" alt="握杆"><figcaption>活动握杆与耳板</figcaption><small>沿固定轴旋转；不带固定座</small></figure>
+<figure class="asset"><img src="../../../../entry/src/main/resources/rawfile/calibration/time-card-v2/lever-bearing.png" alt="固定轴承座"><figcaption>固定轴承座与银盖</figcaption><small>连接蓝色机身，遮住活动耳板轴心</small></figure>
 <figure class="asset"><img src="../../../../entry/src/main/resources/rawfile/calibration/time-card-v2/punch-ram-topdown-60.png" alt="俯视冲头"><figcaption>独立冲头 · 约60°</figcaption><small>顶面与导向座保持相同俯视角度</small></figure>
 <figure class="asset"><img src="../../../../entry/src/main/resources/rawfile/calibration/time-card-v2/punch-guide-topdown-60.png" alt="俯视导向座"><figcaption>导向座与底模 · 约60°</figcaption><small>前侧灰支撑臂，顶面更明显</small></figure>
 <figure class="asset"><img src="../../../../entry/src/main/resources/rawfile/calibration/time-card-v2/blank-time-card.png" alt="原始竖直纸卡"><figcaption>空白时间卡 · 竖直原图</figcaption><small>打孔时由代码透视投影；取出后恢复原图比例</small></figure>
@@ -76,6 +78,7 @@ const phone=document.querySelector('#phone'), world=document.querySelector('#wor
   paperWindow=document.querySelector('#paper-window'),
   rear=document.querySelector('.rear'), front=document.querySelector('.front'),
   ram=document.querySelector('#ram'), guide=document.querySelector('#guide'), lever=document.querySelector('#lever'),
+  leverBearing=document.querySelector('#lever-bearing'),
   holeBox=document.querySelector('#holes'), countEl=document.querySelector('#count'),
   phase=document.querySelector('#phase'), tap=document.querySelector('#tap'),
   retryButton=document.querySelector('#retry'), tip=document.querySelector('#tip'),
@@ -87,7 +90,8 @@ const assetLayout={
   punchPlaneY:686,
   front:{scale:.88,x:50,y:110},
   card:{scale:.68,x:170,y:-7.6,clipBottom:785,depth:.966,anchorY:1020,centerX:628,perspective:.0003},
-  lever:{scale:.65,pivotX:690,pivotY:1030,axisX:1144,axisY:676,pressAngle:-32},
+  lever:{scale:.65,pivotX:700.1,pivotY:1063,axisX:1159,axisY:669,pressAngle:-32},
+  leverBearing:{scale:.2,pivotX:680.5,pivotY:640.3},
   ram:{scale:.4,centerX:626.5,tipY:781,y:361.6,stroke:12},
   guide:{scale:.166,centerX:627,dieY:505,y:602.17},
   hole:{firstX:420,pitchX:150,firstY:1020,pitchY:-82,diameter:26},
@@ -98,7 +102,7 @@ assetLayout.card.y=assetLayout.punchPlaneY-assetLayout.card.anchorY*assetLayout.
 assetLayout.guide.y=assetLayout.punchPlaneY-assetLayout.guide.dieY*assetLayout.guide.scale;
 assetLayout.ram.y=assetLayout.punchPlaneY-assetLayout.ram.tipY*assetLayout.ram.scale-assetLayout.ram.stroke;
 const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
-const machineLayers=[rear,front,guide,ram,lever];
+const machineLayers=[rear,front,guide,ram,lever,leverBearing];
 function initialPose(){const c=assetLayout.card;return {cardX:c.x,cardY:c.y,cardScale:c.scale,
   depth:c.depth,perspective:c.perspective,widthScale:1,frameY:0,machineScale:1,machineOpacity:1,clipTop:0,released:false,opacity:1};}
 let pose=initialPose();
@@ -108,6 +112,8 @@ function holeWorldX(col){const c=assetLayout.card,h=assetLayout.hole;
   return c.x+(h.firstX+col*h.pitchX)*c.scale;}
 function leverTransform(angle){const l=assetLayout.lever,s=pose.machineScale;
   return `translate(${machineX()+l.axisX*s}px,${pose.frameY+l.axisY*s}px) rotate(${angle}deg) scale(${l.scale*s}) translate(${-l.pivotX}px,${-l.pivotY}px)`;}
+function leverBearingTransform(){const b=assetLayout.leverBearing,l=assetLayout.lever,s=pose.machineScale;
+  return `translate(${machineX()+(l.axisX-b.pivotX*b.scale)*s}px,${pose.frameY+(l.axisY-b.pivotY*b.scale)*s}px) scale(${b.scale*s})`;}
 function cardTransform(){return `translate(${pose.cardX}px,${pose.cardY}px) scale(${pose.cardScale})`;}
 function paperDivisor(sourceY){return 1+pose.perspective*(assetLayout.card.anchorY-sourceY);}
 function paperY(sourceY){const anchor=assetLayout.card.anchorY;
@@ -130,12 +136,13 @@ function applyPose(pressed=false){const s=pose.machineScale,f=assetLayout.front,
   front.style.transform=`translate(${machineX()+f.x*s}px,${pose.frameY+f.y*s}px) scale(${f.scale*s})`;
   ram.style.transform=ramTransform(col,pressed);guide.style.transform=guideTransform(col);
   lever.style.transform=leverTransform(pressed?assetLayout.lever.pressAngle:0);
+  leverBearing.style.transform=leverBearingTransform();
   machineLayers.forEach(layer=>layer.style.opacity=String(pose.machineOpacity));
   card.style.transform=cardTransform();card.style.opacity=String(pose.opacity);
   paperPlane.style.transform=paperTransform();
   paperWindow.style.transform=pose.released?'none':`translateY(${pose.frameY}px)`;
   paperWindow.style.clipPath=pose.released?'none':`inset(${pose.clipTop}px 0 ${1450-assetLayout.card.clipBottom}px 0)`;
-  paperWindow.style.zIndex=pose.released?'7':'2';
+  paperWindow.style.zIndex=pose.released?'8':'2';
 }
 function setMotionDuration(ms){const duration=`${ms}ms ease`;
   card.style.transition=`transform ${duration},opacity ${duration}`;

@@ -2,7 +2,7 @@ import { COMIC_CARD_INK_OFFSET, COMIC_CONTROL_INK_OFFSET } from '../components/C
 import { common } from '@kit.AbilityKit';
 import { access } from '@kit.ConnectivityKit';
 import { router } from '@kit.ArkUI';
-import { navigateToHome } from '../app/HomeNavigation';
+import { navigateToHome, navigateToTeam } from '../app/HomeNavigation';
 import { AppSession } from '../app/AppSession';
 import { SessionController } from '../session/SessionController';
 import { SessionMember } from '../protocol/messages';
@@ -143,7 +143,13 @@ const CALIBRATION_CARD_ICON_SIZE: number = 36;
 const CALIBRATION_CARD_HEADPHONE_SIZE: number = 32;
 const CALIBRATION_ENTRY_VERTICAL_MARGIN: number = 10;
 const SOLO_CALIBRATION_FONT_SIZE: number = 12;
+const SOLO_CALIBRATION_HINT_SIZE: number = 11;
+const SOLO_CALIBRATION_ICON_SIZE: number = 16;
+const SOLO_CALIBRATION_CONTENT_GAP: number = 8;
+const SOLO_CALIBRATION_DIVIDER_GAP: number = 8;
+const SOLO_CALIBRATION_MIN_HEIGHT: number = 48;
 const SOLO_CALIBRATION_VERTICAL_PADDING: number = 6;
+const SOLO_CALIBRATION_TEXT_COLOR: string = '#6D685E';
 const BLUETOOTH_ROUTE_CONFIRM_WIDTH: number = 318;
 const BLUETOOTH_ROUTE_PROBE_BUTTON_HEIGHT: number = 48;
 const INVITE_NOTICE_GAP: number = 8;
@@ -502,18 +508,54 @@ struct LeaderLobbyPage {
 
   private soloCalibrationEntryLabel(): string {
     if (this.hasBluetoothCalibration()) {
-      return this.btCalibrationNeedsRemeasure ? '耳机已重连 · 校准 ›' : '耳机已校准';
+      return this.btCalibrationNeedsRemeasure ? '蓝牙耳机已重连' : '蓝牙耳机已校准';
     }
-    return '耳机设置 ›';
+    return '蓝牙耳机校准';
+  }
+
+  private soloCalibrationEntryHint(): string {
+    if (!this.hasBluetoothCalibration()) {
+      return '声音与画面不同步时使用';
+    }
+    return this.btCalibrationNeedsRemeasure ? '已保留原校准，可按需重测' : '保持当前连接，需要时可重测';
+  }
+
+  private soloCalibrationEntryAction(): string {
+    return this.hasBluetoothCalibration() ? '重测 ›' : '校准 ›';
+  }
+
+  private shouldShowSoloCalibrationEntry(): boolean {
+    return this.soloTeam && this.btAudioActive;
   }
 
   @Builder
   private soloLatencyCalibrationEntry() {
-    Text(this.soloCalibrationEntryLabel())
-      .fontSize(SOLO_CALIBRATION_FONT_SIZE).fontWeight(500).fontColor('#625B53')
-      .width('100%').textAlign(TextAlign.Center)
+    Column({ space: SOLO_CALIBRATION_DIVIDER_GAP }) {
+      Divider().width('100%').strokeWidth(1).color('#DED6C8')
+      Row({ space: SOLO_CALIBRATION_CONTENT_GAP }) {
+        Image($rawfile('comic/icons/headphones-calibration.svg'))
+          .width(SOLO_CALIBRATION_ICON_SIZE).height(SOLO_CALIBRATION_ICON_SIZE)
+          .objectFit(ImageFit.Contain).accessibilityLevel('no')
+        Column({ space: 3 }) {
+          Text(this.soloCalibrationEntryLabel())
+            .fontSize(SOLO_CALIBRATION_FONT_SIZE).fontWeight(500)
+            .fontColor(SOLO_CALIBRATION_TEXT_COLOR).width('100%')
+          Text(this.soloCalibrationEntryHint())
+            .fontSize(SOLO_CALIBRATION_HINT_SIZE).fontWeight(400)
+            .fontColor(SOLO_CALIBRATION_TEXT_COLOR).width('100%')
+        }.layoutWeight(1).alignItems(HorizontalAlign.Start)
+        Text(this.soloCalibrationEntryAction())
+          .fontSize(SOLO_CALIBRATION_FONT_SIZE).fontWeight(500)
+          .fontColor(SOLO_CALIBRATION_TEXT_COLOR)
+      }
+      .width('100%').constraintSize({ minHeight: SOLO_CALIBRATION_MIN_HEIGHT })
       .padding({ top: SOLO_CALIBRATION_VERTICAL_PADDING, bottom: SOLO_CALIBRATION_VERTICAL_PADDING })
+      .alignItems(VerticalAlign.Center)
+      .id('solo-lobby-calibration-entry')
+      .accessibilityGroup(true)
+      .accessibilityText(`${this.soloCalibrationEntryLabel()}，${this.soloCalibrationEntryHint()}，${this.soloCalibrationEntryAction()}`)
       .onClick(() => this.requestBluetoothCalibration())
+    }.width('100%')
   }
 
   @Builder
@@ -970,6 +1012,11 @@ struct LeaderLobbyPage {
       this.dismissBluetoothRouteConfirmation();
     }
     this.leavingLobby = true;
+    // Captured before reset: the session that knows the mode is torn down below.
+    // Solo practice is entered from Index and has no 多人练习 page to return to.
+    // The route param covers an exit before initialization has set soloTeam.
+    const params = router.getParams() as Record<string, string> | undefined;
+    const soloTeam = this.soloTeam || params?.['solo'] === '1';
     const request = this.beginAction('lobby-exit', false);
     this.status = '正在退出队伍…';
     try {
@@ -978,7 +1025,11 @@ struct LeaderLobbyPage {
         this.leavingLobby = false;
         return;
       }
-      await navigateToHome();
+      if (soloTeam) {
+        await navigateToHome();
+      } else {
+        await navigateToTeam();
+      }
     } catch (error) {
       this.reportActionFailure('lobby-exit', request, error, '退出队伍失败，请重试');
       this.leavingLobby = false;
@@ -2390,6 +2441,9 @@ struct LeaderLobbyPage {
                 })
               }.width('100%')
               Text(`每分钟 ${this.bpm} 个${beatUnitLabel(this.unit)}音符拍点`).fontSize(11).fontColor('#66615A').width('100%')
+              if (this.shouldShowSoloCalibrationEntry()) {
+                this.soloLatencyCalibrationEntry()
+              }
             }.width('100%').padding(12).backgroundColor(WHITE)
               .border({ width: 1, color: INK }).borderRadius(7)
               .clip(false)
@@ -2531,6 +2585,11 @@ struct LeaderLobbyPage {
               } else {
                 Text('队长已启用定制鼓机，出发时会自动同步。').fontSize(11).fontColor('#5D574F').width('100%')
               }
+              // Switching to a drum program replaces the basic settings card,
+              // but the optional local-output calibration must remain reachable.
+              if (this.shouldShowSoloCalibrationEntry()) {
+                this.soloLatencyCalibrationEntry()
+              }
             }
             .width('100%').padding(DRUM_CARD_PADDING).backgroundColor('#EDE6FF')
             .border({ width: 2, color: INK }).borderRadius(DRUM_CARD_RADIUS)
@@ -2552,12 +2611,8 @@ struct LeaderLobbyPage {
               }
             })
         }
-        if (this.btAudioActive) {
-          if (this.soloTeam) {
-            this.soloLatencyCalibrationEntry()
-          } else {
-            this.latencyCalibrationEntry()
-          }
+        if (this.btAudioActive && !this.soloTeam) {
+          this.latencyCalibrationEntry()
         }
         ComicButton({
           label: this.primaryLobbyLabel(),

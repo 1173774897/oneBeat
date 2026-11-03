@@ -33,6 +33,7 @@
 #include "recording_echo_filter.h"
 #include "recording_system_mic.h"
 #include "recording_mic_level.h"
+#include "recording_residual_lag.h"
 
 namespace {
 constexpr int RATE = 48000;
@@ -121,6 +122,8 @@ public:
     int64_t firstVideoPtsUs = -1, lastVideoPtsUs = 0;
     int64_t micOffsetUs = 0, innerOffsetUs = 0, durationMs = 0;
     int64_t micFirstPtsUs = -1, innerFirstPtsUs = -1;
+    /** Timestamp-vs-written-frames observations; diagnostics only, never used to edit PCM. */
+    onebeat_recording::ContiguousPcmTimeline innerTimelineStats, micTimelineStats;
     int videoTimestampDivisor = 0;
     bool syncValid = true;
     bool systemAecMic = false;
@@ -253,6 +256,8 @@ public:
         }
         if (window != nullptr) { OH_NativeWindow_DestroyNativeWindow(window); window = nullptr; }
         videoFile.reset(); innerFile.reset(); micFile.reset();
+        innerTimelineStats = innerWriter.timeline;
+        micTimelineStats = micWriter.timeline;
         if (firstVideoPtsUs >= 0) {
             durationMs = std::max<int64_t>(1, (lastVideoPtsUs - firstVideoPtsUs + 33333) / 1000);
             if (micWriter.firstTimestampNs >= 0) {
@@ -699,7 +704,18 @@ struct MixOptions {
     double gain = 1;
     double speakerBleedCancel = 0;
     bool normalizeSystemMic = false;
+    /** Speaker + system AEC: measure the lag of MIC content locked to the accompaniment and advance the MIC. */
+    bool estimateResidualLag = false;
+    /**
+     * Baseline upgrade of a user-tuned take: keep its audible alignment by rebasing the
+     * manual edit onto the new automatic baseline (manual' = manual + previous - new).
+     */
+    bool preserveEffectiveMicShift = false;
+    int64_t previousAutoMicShiftUs = 0;
 };
+// Automatic MIC baselines: legacy FIR alignment stays within 30 ms; the speaker AEC
+// lag (device takes 62-141 ms) needs up to 250 ms. Manual edits add +/-300 ms.
+constexpr int64_t MAX_AUTO_MIC_SHIFT_US = 250000;
 class AudioEncoderQueue {
 public:
     OH_AVCodec *codec = nullptr;
@@ -775,6 +791,27 @@ struct ProcessedMicInfo {
     double confidence = 0;
     bool known = false;
     bool reliable = false;
+    /** Manual edit actually applied (rebased when preserving an upgraded take's alignment). */
+    int64_t manualMicShiftUs = 0;
+};
+/** Level/encoder observations for device logs only; never fed back into the mix. */
+struct MixDiagnostics {
+    bool cacheBuilt = false;
+    double micLevelGain = 1;
+    int64_t micKneeSamples = 0;
+    double innerPeak = 0, innerSquareSum = 0;
+    double micPeak = 0, micSquareSum = 0;
+    double busPeak = 0;
+    int64_t overFrames = 0;
+    int64_t limitedFrames = 0;
+    double minLimiterGain = 1;
+    int64_t aacInputFrames = 0;
+    int64_t aacOutputPackets = 0;
+    int64_t aacFirstOutputPtsUs = -1;
+    int64_t aacLastOutputPtsUs = -1;
+    int64_t residualLagUs = -1;
+    double residualLagShare = -1;
+    double residualLagExplained = -1;
 };
 void CollectAlignmentSamples(const onebeat_recording::StereoEchoFirEstimate &estimate,
     std::vector<onebeat_recording::EchoAlignmentSample> &samples)
@@ -837,7 +874,8 @@ double SystemMicLevelGain(int fd)
  * Persist its floating-point MIC residual once so gain/alignment edits avoid the
  * expensive per-second FIR solve while retaining final-mix-only clipping.
  */
-ProcessedMicInfo EnsureProcessedMic(const MixOptions &options, int innerFd, int micFd, int64_t totalFrames)
+ProcessedMicInfo EnsureProcessedMic(const MixOptions &options, int innerFd, int micFd, int64_t totalFrames,
+    MixDiagnostics &diagnostics)
 {
     constexpr int PROCESSED_FRAME_BYTES = CHANNELS * sizeof(float);
     const int64_t expectedBytes = totalFrames * PROCESSED_FRAME_BYTES;
@@ -851,6 +889,7 @@ ProcessedMicInfo EnsureProcessedMic(const MixOptions &options, int innerFd, int 
 
     const std::string temporaryPath = options.processedMicPath + ".tmp";
     std::vector<onebeat_recording::EchoAlignmentSample> alignmentSamples;
+    onebeat_recording::ResidualLagEstimate residualEstimate;
     try {
         {
             Fd output(temporaryPath, true);
@@ -858,6 +897,9 @@ ProcessedMicInfo EnsureProcessedMic(const MixOptions &options, int innerFd, int 
             // The normalized cache is independent of the user's gain and manual
             // alignment. Analyze raw frames, not offset-induced leading silence.
             const double micLevelGain = options.normalizeSystemMic ? SystemMicLevelGain(micFd) : 1;
+            onebeat_recording::ResidualLagEstimator residualLag;
+            diagnostics.cacheBuilt = true;
+            diagnostics.micLevelGain = micLevelGain;
             constexpr int64_t ECHO_HOP_FRAMES = RATE;
             constexpr int PROCESS_BLOCK_FRAMES = 4096;
             int64_t echoAnchor = 0;
@@ -879,8 +921,10 @@ ProcessedMicInfo EnsureProcessedMic(const MixOptions &options, int innerFd, int 
                 const int frames = static_cast<int>(std::min<int64_t>(
                     PROCESS_BLOCK_FRAMES, totalFrames - framePosition));
                 ReadAligned(micFd, framePosition, options.micOffsetUs, frames, microphone);
-                if (speakerMix)
+                if (speakerMix || options.estimateResidualLag)
                     ReadAligned(innerFd, framePosition, options.innerOffsetUs, frames, inner);
+                // Raw (pre-level) MIC: the lag is independent of the fixed level gain.
+                if (options.estimateResidualLag) residualLag.Append(inner.data(), microphone.data(), frames);
                 residual.resize(frames * CHANNELS);
                 int processed = 0;
                 while (processed < frames) {
@@ -933,6 +977,9 @@ ProcessedMicInfo EnsureProcessedMic(const MixOptions &options, int innerFd, int 
                             // Only quiet system-AEC stems use the static peak guard;
                             // legacy FIR residuals and unity-gain captures stay unchanged.
                             const double sample = static_cast<double>(microphone[index]) - echo;
+                            // Count samples entering ApplySystemMicLevel's soft knee (> .25 FS after gain).
+                            if (options.normalizeSystemMic && micLevelGain > 1 &&
+                                std::abs(sample * micLevelGain) > 0.25 * 32768.0) ++diagnostics.micKneeSamples;
                             residual[index] = static_cast<float>(options.normalizeSystemMic ?
                                 onebeat_recording::ApplySystemMicLevel(sample, micLevelGain) : sample);
                         }
@@ -943,12 +990,24 @@ ProcessedMicInfo EnsureProcessedMic(const MixOptions &options, int innerFd, int 
                 framePosition += frames;
             }
             Check(fsync(output.value) == 0, "净化麦克风音轨保存失败");
+            if (options.estimateResidualLag) residualEstimate = residualLag.Estimate();
         }
         Check(rename(temporaryPath.c_str(), options.processedMicPath.c_str()) == 0,
             "净化麦克风音轨发布失败");
     } catch (...) {
         unlink(temporaryPath.c_str());
         throw;
+    }
+    if (options.estimateResidualLag) {
+        diagnostics.residualLagUs = residualEstimate.lagUs;
+        diagnostics.residualLagShare = residualEstimate.share;
+        diagnostics.residualLagExplained = residualEstimate.explained;
+        // The baseline advances the MIC (negative delays it less) so the content locked to
+        // the accompaniment lands on it: the audible residual, or the performance when the
+        // residual is gone. A take too weak to measure keeps a zero baseline.
+        if (residualEstimate.reliable && residualEstimate.lagUs <= MAX_AUTO_MIC_SHIFT_US)
+            return {-residualEstimate.lagUs, residualEstimate.share, true, true};
+        return {0, residualEstimate.share, true, false};
     }
     const auto alignment = onebeat_recording::EstimateAutoMicAlignment(alignmentSamples);
     if (alignment.reliable) {
@@ -961,11 +1020,13 @@ ProcessedMicInfo EnsureProcessedMic(const MixOptions &options, int innerFd, int 
     return options.autoMicShiftKnown ? retained : ProcessedMicInfo{0, 0, true};
 }
 
-ProcessedMicInfo MixFile(const MixOptions &options)
+ProcessedMicInfo MixFile(const MixOptions &options, MixDiagnostics &diagnostics)
 {
-    Check(std::isfinite(options.gain) && options.gain >= 0 && options.gain <= 2, "麦克风音量无效");
+    // Mirrors RecordingMixer.MAX_MIC_GAIN (400%); the bus limiter absorbs resulting peaks.
+    Check(std::isfinite(options.gain) && options.gain >= 0 && options.gain <= 4, "麦克风音量无效");
     Check(std::abs(options.micShiftUs) <= 300000, "人声对齐范围无效");
-    Check(std::abs(options.autoMicShiftUs) <= 30000 &&
+    Check(std::abs(options.autoMicShiftUs) <= MAX_AUTO_MIC_SHIFT_US &&
+        std::abs(options.previousAutoMicShiftUs) <= MAX_AUTO_MIC_SHIFT_US &&
         std::isfinite(options.autoMicShiftConfidence) &&
         options.autoMicShiftConfidence >= 0 && options.autoMicShiftConfidence <= 1,
         "自动人声对齐参数无效");
@@ -987,10 +1048,17 @@ ProcessedMicInfo MixFile(const MixOptions &options)
     Check(fstat(micFile.value, &micStat) == 0 && S_ISREG(micStat.st_mode) &&
         micStat.st_size % FRAME_BYTES == 0, "麦克风原轨格式无效");
     const int64_t totalFrames = options.durationMs * RATE / 1000;
-    const ProcessedMicInfo processedInfo =
-        EnsureProcessedMic(options, innerFile.value, micFile.value, totalFrames);
-    const int64_t effectiveMicShiftUs = options.micShiftUs + processedInfo.autoMicShiftUs;
-    Check(std::abs(effectiveMicShiftUs) <= 330000, "自动与手工人声对齐范围无效");
+    ProcessedMicInfo processedInfo =
+        EnsureProcessedMic(options, innerFile.value, micFile.value, totalFrames, diagnostics);
+    processedInfo.manualMicShiftUs = options.micShiftUs;
+    if (options.preserveEffectiveMicShift) {
+        // Whole milliseconds, within the editable +/-300 ms range of the MIC alignment control.
+        const int64_t rebased = options.micShiftUs + options.previousAutoMicShiftUs - processedInfo.autoMicShiftUs;
+        processedInfo.manualMicShiftUs = std::clamp<int64_t>(
+            static_cast<int64_t>(std::llround(rebased / 1000.0)) * 1000, -300000, 300000);
+    }
+    const int64_t effectiveMicShiftUs = processedInfo.manualMicShiftUs + processedInfo.autoMicShiftUs;
+    Check(std::abs(effectiveMicShiftUs) <= MAX_AUTO_MIC_SHIFT_US + 300000, "自动与手工人声对齐范围无效");
     Fd processedMicFile(options.processedMicPath);
     struct stat processedStat{};
     constexpr int PROCESSED_FRAME_BYTES = CHANNELS * sizeof(float);
@@ -1048,6 +1116,46 @@ ProcessedMicInfo MixFile(const MixOptions &options)
         bool sentEos = false, receivedEos = false;
         std::vector<int16_t> inner;
         std::vector<float> processedMic;
+        // The bus is summed in double and limited to -1 dBFS, never hard clamped.
+        // The limiter is exactly transparent while the sum stays below that ceiling.
+        onebeat_recording::LookaheadPeakLimiter limiter;
+        constexpr int LIMITER_LATENCY = onebeat_recording::LookaheadPeakLimiter::Latency();
+        int64_t lookaheadPosition = 0;
+        auto pushBus = [&](int frames, int16_t *output) {
+            ReadAligned(innerFile.value, lookaheadPosition, options.innerOffsetUs, frames, inner);
+            ReadAlignedProcessedMic(processedMicFile.value, lookaheadPosition,
+                effectiveMicShiftUs, frames, processedMic);
+            for (int frame = 0; frame < frames; ++frame) {
+                // Lookahead past the video end sees silence, not stem data beyond the take.
+                const bool inside = lookaheadPosition + frame < totalFrames;
+                double bus[CHANNELS];
+                for (int channel = 0; channel < CHANNELS; ++channel) {
+                    const int index = frame * CHANNELS + channel;
+                    const double app = inside ? inner[index] : 0;
+                    const double mic = inside && options.gain != 0 ?
+                        options.gain * static_cast<double>(processedMic[index]) : 0;
+                    bus[channel] = app + mic;
+                    if (inside) {
+                        diagnostics.innerPeak = std::max(diagnostics.innerPeak, std::abs(app));
+                        diagnostics.innerSquareSum += app * app;
+                        diagnostics.micPeak = std::max(diagnostics.micPeak, std::abs(mic));
+                        diagnostics.micSquareSum += mic * mic;
+                        diagnostics.busPeak = std::max(diagnostics.busPeak, std::abs(bus[channel]));
+                    }
+                }
+                // Frames the old hard clamp would have clipped (beyond S16), not merely limited.
+                if (inside && (bus[0] > 32767 || bus[0] < -32768 || bus[1] > 32767 || bus[1] < -32768))
+                    ++diagnostics.overFrames;
+                double left = 0, right = 0;
+                limiter.Push(bus[0], bus[1], left, right);
+                if (output != nullptr) {
+                    output[frame * CHANNELS] = onebeat_recording::LimitedBusSample(left);
+                    output[frame * CHANNELS + 1] = onebeat_recording::LimitedBusSample(right);
+                }
+            }
+            lookaheadPosition += frames;
+        };
+        pushBus(LIMITER_LATENCY, nullptr);
         while (!receivedEos) {
             CodecBuffer input{}, output{};
             bool hasInput = false, hasOutput = false;
@@ -1064,8 +1172,13 @@ ProcessedMicInfo MixFile(const MixOptions &options)
                 OH_AVCodecBufferAttr attr{}; OH_AVBuffer_GetBufferAttr(output.buffer, &attr);
                 receivedEos = (attr.flags & AVCODEC_BUFFER_FLAGS_EOS) != 0;
                 OH_AVErrCode result = AV_ERR_OK;
-                if (attr.size > 0 && !(attr.flags & AVCODEC_BUFFER_FLAGS_CODEC_DATA))
+                if (attr.size > 0 && !(attr.flags & AVCODEC_BUFFER_FLAGS_CODEC_DATA)) {
+                    // Packet count vs input frames reveals encoder priming the MP4 may not trim.
+                    if (diagnostics.aacFirstOutputPtsUs < 0) diagnostics.aacFirstOutputPtsUs = attr.pts;
+                    diagnostics.aacLastOutputPtsUs = attr.pts;
+                    ++diagnostics.aacOutputPackets;
                     result = OH_AVMuxer_WriteSampleBuffer(muxer, audioTrack, output.buffer);
+                }
                 OH_AudioCodec_FreeOutputBuffer(encoder.codec, output.index);
                 AvCheck(result, "混音写入失败");
             }
@@ -1076,15 +1189,11 @@ ProcessedMicInfo MixFile(const MixOptions &options)
                 attr.pts = framePosition * 1000000 / RATE;
                 if (frames <= 0) { attr.flags = AVCODEC_BUFFER_FLAGS_EOS; sentEos = true; }
                 else {
-                    ReadAligned(innerFile.value, framePosition, options.innerOffsetUs, frames, inner);
-                    ReadAlignedProcessedMic(processedMicFile.value, framePosition,
-                        effectiveMicShiftUs, frames, processedMic);
                     auto *samples = reinterpret_cast<int16_t *>(OH_AVBuffer_GetAddr(input.buffer));
                     Check(samples != nullptr, "混音缓冲区不可用");
-                    for (int index = 0; index < frames * CHANNELS; ++index) {
-                        samples[index] = onebeat_recording::MixProcessedMicSample(
-                            inner[index], processedMic[index], options.gain);
-                    }
+                    // Pushes [framePosition + latency, +frames) and receives [framePosition, +frames).
+                    pushBus(frames, samples);
+                    diagnostics.aacInputFrames += frames;
                     attr.size = frames * FRAME_BYTES;
                     framePosition += frames;
                 }
@@ -1101,6 +1210,8 @@ ProcessedMicInfo MixFile(const MixOptions &options)
             if (attr.flags & AVCODEC_BUFFER_FLAGS_EOS) break;
             AvCheck(OH_AVMuxer_WriteSampleBuffer(muxer, videoTrack, buffer.value), "复制视频帧失败");
         }
+        diagnostics.limitedFrames = limiter.LimitedFrames();
+        diagnostics.minLimiterGain = limiter.MinGainApplied();
         AvCheck(OH_AVMuxer_Stop(muxer), "导出视频收尾失败");
         OH_AVMuxer_Destroy(muxer); muxer = nullptr;
         OH_AVDemuxer_Destroy(demuxer); demuxer = nullptr;
@@ -1144,6 +1255,7 @@ struct AsyncJob {
     std::shared_ptr<CaptureSession> capture;
     MixOptions mix;
     ProcessedMicInfo mixResult;
+    MixDiagnostics mixDiagnostics;
     int kind = 0;
     std::string error;
 };
@@ -1153,7 +1265,7 @@ void Execute(napi_env, void *data)
     try {
         if (job->kind == 0) job->capture->Start();
         else if (job->kind == 1) { if (job->capture != nullptr) job->capture->Stop(); }
-        else job->mixResult = MixFile(job->mix);
+        else job->mixResult = MixFile(job->mix, job->mixDiagnostics);
     } catch (const std::exception &err) {
         job->error = err.what();
         // The global session also owns this object, so a rejected Start job
@@ -1198,6 +1310,22 @@ void Complete(napi_env env, napi_status status, void *data)
                 capture->micHardwareTimestampKnown.load(), &micAecApplied);
             Set(env, value, "micAecApplied", micAecApplied);
             Set(env, value, "micInputChannels", Number(env, capture == nullptr ? CHANNELS : capture->micInputChannels));
+            if (capture != nullptr) {
+                auto timeline = [env](const onebeat_recording::ContiguousPcmTimeline &t) {
+                    napi_value stats; napi_create_object(env, &stats);
+                    Set(env, stats, "framesWritten", Number(env, static_cast<double>(t.FramesWritten())));
+                    Set(env, stats, "lastDriftFrames", Number(env, static_cast<double>(t.LastDriftFrames())));
+                    Set(env, stats, "minDriftFrames", Number(env, static_cast<double>(t.MinDriftFrames())));
+                    Set(env, stats, "maxDriftFrames", Number(env, static_cast<double>(t.MaxDriftFrames())));
+                    Set(env, stats, "maxDriftStepFrames", Number(env, static_cast<double>(t.MaxDriftStepFrames())));
+                    Set(env, stats, "maxDriftStepAtFrame", Number(env, static_cast<double>(t.MaxDriftStepAtFrame())));
+                    Set(env, stats, "gapCount", Number(env, static_cast<double>(t.GapCount())));
+                    Set(env, stats, "firstGapAtFrame", Number(env, static_cast<double>(t.FirstGapAtFrame())));
+                    return stats;
+                };
+                Set(env, value, "innerTimeline", timeline(capture->innerTimelineStats));
+                Set(env, value, "micTimeline", timeline(capture->micTimelineStats));
+            }
             napi_value micHardwareTimestampKnown;
             napi_get_boolean(env, capture != nullptr && capture->micHardwareTimestampKnown.load(),
                 &micHardwareTimestampKnown);
@@ -1210,6 +1338,30 @@ void Complete(napi_env env, napi_status status, void *data)
             Set(env, value, "autoMicShiftConfidence", Number(env, job->mixResult.confidence));
             napi_value reliable; napi_get_boolean(env, job->mixResult.reliable, &reliable);
             Set(env, value, "autoMicShiftReliable", reliable);
+            Set(env, value, "micShiftUs", Number(env, static_cast<double>(job->mixResult.manualMicShiftUs)));
+            const auto &d = job->mixDiagnostics;
+            const double samples = std::max<double>(1, static_cast<double>(d.aacInputFrames) * CHANNELS);
+            auto dbfs = [](double pcm) { return pcm > 0 ? 20 * std::log10(pcm / 32768.0) : -200.0; };
+            napi_value diagnostics; napi_create_object(env, &diagnostics);
+            Set(env, diagnostics, "cacheBuilt", Number(env, d.cacheBuilt ? 1 : 0));
+            Set(env, diagnostics, "micLevelGainDb", Number(env, 20 * std::log10(std::max(1e-9, d.micLevelGain))));
+            Set(env, diagnostics, "micKneeSamples", Number(env, static_cast<double>(d.micKneeSamples)));
+            Set(env, diagnostics, "innerPeakDbfs", Number(env, dbfs(d.innerPeak)));
+            Set(env, diagnostics, "innerRmsDbfs", Number(env, dbfs(std::sqrt(d.innerSquareSum / samples))));
+            Set(env, diagnostics, "micPeakDbfs", Number(env, dbfs(d.micPeak)));
+            Set(env, diagnostics, "micRmsDbfs", Number(env, dbfs(std::sqrt(d.micSquareSum / samples))));
+            Set(env, diagnostics, "busPeakDbfs", Number(env, dbfs(d.busPeak)));
+            Set(env, diagnostics, "overFrames", Number(env, static_cast<double>(d.overFrames)));
+            Set(env, diagnostics, "limitedFrames", Number(env, static_cast<double>(d.limitedFrames)));
+            Set(env, diagnostics, "minLimiterGainDb", Number(env, 20 * std::log10(std::max(1e-9, d.minLimiterGain))));
+            Set(env, diagnostics, "aacInputFrames", Number(env, static_cast<double>(d.aacInputFrames)));
+            Set(env, diagnostics, "aacOutputPackets", Number(env, static_cast<double>(d.aacOutputPackets)));
+            Set(env, diagnostics, "aacFirstOutputPtsUs", Number(env, static_cast<double>(d.aacFirstOutputPtsUs)));
+            Set(env, diagnostics, "aacLastOutputPtsUs", Number(env, static_cast<double>(d.aacLastOutputPtsUs)));
+            Set(env, diagnostics, "residualLagUs", Number(env, static_cast<double>(d.residualLagUs)));
+            Set(env, diagnostics, "residualLagShare", Number(env, d.residualLagShare));
+            Set(env, diagnostics, "residualLagExplained", Number(env, d.residualLagExplained));
+            Set(env, value, "diagnostics", diagnostics);
         } else napi_get_undefined(env, &value);
         napi_resolve_deferred(env, job->deferred, value);
     }
@@ -1270,6 +1422,9 @@ napi_value Mix(napi_env env, napi_callback_info info)
     job->mix.gain = GetNumber(env, args[0], "gain");
     job->mix.speakerBleedCancel = GetNumber(env, args[0], "speakerBleedCancel");
     job->mix.normalizeSystemMic = GetBoolean(env, args[0], "normalizeSystemMic");
+    job->mix.estimateResidualLag = GetBoolean(env, args[0], "estimateResidualLag");
+    job->mix.preserveEffectiveMicShift = GetBoolean(env, args[0], "preserveEffectiveMicShift");
+    job->mix.previousAutoMicShiftUs = static_cast<int64_t>(GetNumber(env, args[0], "previousAutoMicShiftUs"));
     return Queue(env, job);
 }
 napi_value Chmod(napi_env env, napi_callback_info info)

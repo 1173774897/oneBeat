@@ -2,6 +2,8 @@
 
 当前保存、任意平台分享和今日打卡交互见 [2026-10-19 链路更新](flow-2026-10-19.md)。该说明优先于下方早期交互记录。
 
+混音音质（耳机不用 LIVE AEC、总线限幅、诊断日志、踩坑清单）见 [2026-10-31 混音音质复盘](mix-quality-review-2026-10-31.md)。下文“仅在最终相加时限幅”已改为前瞻峰值限幅。
+
 2026-10-18：使用内置 imagegen 生成的正式透明 PNG，已用于应用作品分享页。没有将设计草案的线稿当作产品页面。
 
 - 素材：`entry/src/main/resources/rawfile/comic/decor/recording_share_hero.png`

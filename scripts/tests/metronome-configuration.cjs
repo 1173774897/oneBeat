@@ -20,7 +20,9 @@ const mocks = {
   './DrumMachineCatalog': { parseDrumProgram: raw => ({ styleKey: raw, sections: [] }),
     drumProgramStyleKeys: program => [program.styleKey], buildProgramSequence: () => [{}] },
   './DrumSampleBank': { DrumSampleBank: { loadStyle: () => new Promise(resolve => loads.push(resolve)) } },
-  '../common/MeterModel': { defaultBeatPointStates: () => [] }
+  '../common/MeterModel': { defaultBeatPointStates: () => [] },
+  // The production limiter keeps this mix-free fixture's PCM exact.
+  './DrumBusLimiter': (() => { const exports = {}; vm.runInNewContext(ts.transpileModule(fs.readFileSync('entry/src/main/ets/audio/DrumBusLimiter.ets', 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021 } }).outputText, { exports }); return exports; })()
 };
 // Neutralize the sub-audible dither so nonzero counts measure click content.
 const deterministicMath = Object.create(Math);
@@ -32,6 +34,8 @@ vm.runInNewContext(ts.transpileModule(source, { compilerOptions: { module: ts.Mo
 function engine() {
   const e = new context.exports.MetronomeEngine();
   e.renderBar = () => ({ samples: new Int16Array([120, 0]), frameCount: 2, samplesPerBeat: 0.5, beatsPerBar: 4 });
+  // Sequences are mixed unclamped first, then limited; stub that seam with the same PCM.
+  e.mixBar = () => ({ mix: new Float32Array([120, 0]), frameCount: 2, samplesPerBeat: 0.5, beatsPerBar: 4 });
   e.configure(0, 0);
   return e;
 }

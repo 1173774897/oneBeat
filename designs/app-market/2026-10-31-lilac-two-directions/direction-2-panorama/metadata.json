@@ -1,0 +1,338 @@
+{
+  "id": "direction-2-panorama",
+  "name": "方向二 · 六屏连续长卷",
+  "pageDimensions": [
+    {
+      "page": 1,
+      "width": 1080,
+      "height": 1920
+    },
+    {
+      "page": 2,
+      "width": 1080,
+      "height": 1920
+    },
+    {
+      "page": 3,
+      "width": 1080,
+      "height": 1920
+    },
+    {
+      "page": 4,
+      "width": 1080,
+      "height": 1920
+    },
+    {
+      "page": 5,
+      "width": 1080,
+      "height": 1920
+    },
+    {
+      "page": 6,
+      "width": 1080,
+      "height": 1920
+    }
+  ],
+  "seam": {
+    "reconstructedPixelsEqual": true,
+    "comparedPixels": 12441600,
+    "cutXs": [
+      1080,
+      2160,
+      3240,
+      4320,
+      5400
+    ]
+  },
+  "screens": [
+    {
+      "phone": "A",
+      "point": {
+        "x": 735,
+        "y": 1655
+      },
+      "alpha": 0,
+      "screenColor": "#FFFDF8"
+    },
+    {
+      "phone": "B",
+      "point": {
+        "x": 1495,
+        "y": 455
+      },
+      "alpha": 0,
+      "screenColor": "#FFFDF8"
+    },
+    {
+      "phone": "C",
+      "point": {
+        "x": 2700,
+        "y": 1460
+      },
+      "alpha": 0,
+      "screenColor": "#FFFDF8"
+    },
+    {
+      "phone": "D",
+      "point": {
+        "x": 3780,
+        "y": 1460
+      },
+      "alpha": 0,
+      "screenColor": "#FFFDF8"
+    },
+    {
+      "phone": "E",
+      "point": {
+        "x": 4860,
+        "y": 1460
+      },
+      "alpha": 0,
+      "screenColor": "#FFFDF8"
+    },
+    {
+      "phone": "F",
+      "point": {
+        "x": 5940,
+        "y": 1460
+      },
+      "alpha": 0,
+      "screenColor": "#FFFDF8"
+    }
+  ],
+  "phones": [
+    {
+      "id": "A",
+      "x": 320,
+      "y": 780,
+      "width": 830,
+      "height": 1750,
+      "rotation": -10,
+      "screen": {
+        "x": 344,
+        "y": 804,
+        "width": 782,
+        "height": 1702,
+        "radius": 76
+      },
+      "screenQuad": [
+        {
+          "x": 202.165569,
+          "y": 884.82504
+        },
+        {
+          "x": 972.285232,
+          "y": 749.032165
+        },
+        {
+          "x": 1267.834431,
+          "y": 2425.17496
+        },
+        {
+          "x": 497.714768,
+          "y": 2560.967835
+        }
+      ]
+    },
+    {
+      "id": "B",
+      "x": 1080,
+      "y": -420,
+      "width": 830,
+      "height": 1750,
+      "rotation": -10,
+      "screen": {
+        "x": 1104,
+        "y": -396,
+        "width": 782,
+        "height": 1702,
+        "radius": 76
+      },
+      "screenQuad": [
+        {
+          "x": 962.165569,
+          "y": -315.17496
+        },
+        {
+          "x": 1732.285232,
+          "y": -450.967835
+        },
+        {
+          "x": 2027.834431,
+          "y": 1225.17496
+        },
+        {
+          "x": 1257.714768,
+          "y": 1360.967835
+        }
+      ]
+    },
+    {
+      "id": "C",
+      "page": 3,
+      "x": 2294,
+      "y": 580,
+      "width": 812,
+      "height": 1760,
+      "rotation": -2,
+      "screen": {
+        "x": 2318,
+        "y": 604,
+        "width": 764,
+        "height": 1712,
+        "radius": 76
+      },
+      "screenQuad": [
+        {
+          "x": 2288.358735,
+          "y": 617.85306
+        },
+        {
+          "x": 3051.893327,
+          "y": 591.189844
+        },
+        {
+          "x": 3111.641265,
+          "y": 2302.14694
+        },
+        {
+          "x": 2348.106673,
+          "y": 2328.810156
+        }
+      ]
+    },
+    {
+      "id": "D",
+      "page": 4,
+      "x": 3374,
+      "y": 580,
+      "width": 812,
+      "height": 1760,
+      "rotation": 2,
+      "screen": {
+        "x": 3398,
+        "y": 604,
+        "width": 764,
+        "height": 1712,
+        "radius": 76
+      },
+      "screenQuad": [
+        {
+          "x": 3428.106673,
+          "y": 591.189844
+        },
+        {
+          "x": 4191.641265,
+          "y": 617.85306
+        },
+        {
+          "x": 4131.893327,
+          "y": 2328.810156
+        },
+        {
+          "x": 3368.358735,
+          "y": 2302.14694
+        }
+      ]
+    },
+    {
+      "id": "E",
+      "page": 5,
+      "x": 4454,
+      "y": 580,
+      "width": 812,
+      "height": 1760,
+      "rotation": 0,
+      "screen": {
+        "x": 4478,
+        "y": 604,
+        "width": 764,
+        "height": 1712,
+        "radius": 76
+      },
+      "screenQuad": [
+        {
+          "x": 4478,
+          "y": 604
+        },
+        {
+          "x": 5242,
+          "y": 604
+        },
+        {
+          "x": 5242,
+          "y": 2316
+        },
+        {
+          "x": 4478,
+          "y": 2316
+        }
+      ]
+    },
+    {
+      "id": "F",
+      "page": 6,
+      "x": 5534,
+      "y": 580,
+      "width": 812,
+      "height": 1760,
+      "rotation": -1,
+      "screen": {
+        "x": 5558,
+        "y": 604,
+        "width": 764,
+        "height": 1712,
+        "radius": 76
+      },
+      "screenQuad": [
+        {
+          "x": 5543.118921,
+          "y": 610.797192
+        },
+        {
+          "x": 6307.00256,
+          "y": 597.463554
+        },
+        {
+          "x": 6336.881079,
+          "y": 2309.202808
+        },
+        {
+          "x": 5572.99744,
+          "y": 2322.536446
+        }
+      ]
+    }
+  ],
+  "illustrations": [],
+  "backgroundSeam": {
+    "reconstructedPixelsEqual": true,
+    "comparedPixels": 12441600,
+    "cutXs": [
+      1080,
+      2160,
+      3240,
+      4320,
+      5400
+    ]
+  },
+  "panorama": {
+    "asset": "assets/panorama-background.png",
+    "x": 0,
+    "y": 0,
+    "width": 6480,
+    "height": 1920,
+    "fit": "cover",
+    "opacity": 1,
+    "sourceDimensions": {
+      "width": 2059,
+      "height": 764
+    },
+    "coverPlacement": {
+      "x": 0,
+      "y": -242.21466731423016,
+      "width": 6480,
+      "height": 2404.4293346284603
+    }
+  }
+}

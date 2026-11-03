@@ -1,0 +1,249 @@
+{
+  "original": "/Users/lizhe/Downloads/onebeatprocessing/screenshottemplet/transparent-screens/editing/02.psd",
+  "additions": "/Users/lizhe/work/oneBeat/designs/app-market/2026-11-02-editable-psd/.build/02-additions.psd",
+  "output": "/Users/lizhe/work/oneBeat/designs/app-market/2026-11-02-editable-psd/psd/02.psd",
+  "original_sha256": "b4ad85ff51ddbe13b4b8c950021c8f69b502c54f6d19a7b5319e9ac6ce9d7828",
+  "additions_sha256": "cab003cd5b14267782d4a46c5a0c9afa3914cf10f016c9b722224992000dc68d",
+  "output_sha256": "24e507d891bf49fef1f2791e2c82151af8435b238938d46f61877847898931d2",
+  "original_layer_count": 4,
+  "added_layer_count": 5,
+  "output_layer_count": 9,
+  "stored_layer_order": "original bottom-to-top records followed by additions bottom-to-top records",
+  "composite_source": "explicit RGBA cache encoded to original channel count",
+  "removed_global_text_caches": [],
+  "replaced_thumbnails": [
+    {
+      "resource_id": 1036,
+      "old_length": 13542,
+      "new_length": 15555,
+      "width": 144,
+      "height": 256,
+      "old_sha256": "4593fdaadea48a68dc8e4af715faee2f4f06d2ac3040ddea86e035f2ecf77dec",
+      "new_sha256": "0e207fb17f06cf9ca0f3fcd9df05f42f166f3394d844e5f68b750a0494263a31"
+    }
+  ],
+  "original_layers": [
+    {
+      "index": 0,
+      "name": "微信图片_20261031134124_181_312",
+      "layer_id": 5,
+      "record_sha256": "cad5926ed721f9433ee071e375c601d69c9b08755c7a487e6268265d723022f8",
+      "record_equal": true,
+      "channels": [
+        {
+          "id": -1,
+          "length": 49591,
+          "sha256": "0a443593000a4e914dde9d1b7b720415c87dd05045d9f885c9803ab3e93750d2",
+          "equal": true
+        },
+        {
+          "id": 0,
+          "length": 322517,
+          "sha256": "6a500d2c13d72e2cf8e38b8aaf1105940811236a4938704f6c4fc62e226721b5",
+          "equal": true
+        },
+        {
+          "id": 1,
+          "length": 325979,
+          "sha256": "512394237695ebaa3a2cd8911f5ed02110e8aafd97944ae6ed572c73f1b87421",
+          "equal": true
+        },
+        {
+          "id": 2,
+          "length": 345331,
+          "sha256": "b53dc8c93675ba2d5636711e4e7409505f67ac2c9941bc984404f75710cf658b",
+          "equal": true
+        }
+      ]
+    },
+    {
+      "index": 1,
+      "name": "微信图片_20261031133839_180_312",
+      "layer_id": 6,
+      "record_sha256": "1bd4294ddeeb4e1cb6422a0363ae5094441c12b8856be9e151e98bf46ab33e61",
+      "record_equal": true,
+      "channels": [
+        {
+          "id": -1,
+          "length": 48510,
+          "sha256": "833d4f8bbd97b6722e7d5e3898a8522d95e4659c6c74d9f0faa59f197786dbdb",
+          "equal": true
+        },
+        {
+          "id": 0,
+          "length": 398506,
+          "sha256": "8ff78cdc2247b39c104b5ebe25e0e134b0bfa0ff6cb51e91e4f90bde0dab1441",
+          "equal": true
+        },
+        {
+          "id": 1,
+          "length": 401080,
+          "sha256": "f771eccc297c8b6650e2c569f57cf95b32479e8d5e0e1b1fa1acca97896ea5dd",
+          "equal": true
+        },
+        {
+          "id": 2,
+          "length": 420021,
+          "sha256": "ecb270ed2699ca39177616538b6b2bc34cb79213432d53341924b987fffd072d",
+          "equal": true
+        }
+      ]
+    },
+    {
+      "index": 2,
+      "name": "Background",
+      "layer_id": 1,
+      "record_sha256": "756e76576200312b950be9729f5b17588812d3f8ff3c739d0b5a8350578c1871",
+      "record_equal": true,
+      "channels": [
+        {
+          "id": -1,
+          "length": 48619,
+          "sha256": "66d0cf19c3f8f277fa306e19f36b917af3b92eeed3153af42f4d8512ad925ca0",
+          "equal": true
+        },
+        {
+          "id": 0,
+          "length": 713631,
+          "sha256": "53f2fddf165ac4917758288435f65d86931f431fb44559e01dec7d3143f34560",
+          "equal": true
+        },
+        {
+          "id": 1,
+          "length": 860880,
+          "sha256": "d12152a8653946f8988479b55ed106ecfbe4b468e5c4269bf0dbd2af04db0e54",
+          "equal": true
+        },
+        {
+          "id": 2,
+          "length": 853854,
+          "sha256": "7108f20614b94286487bde52a47c70041a8fe7c864d8b7fca4f856b126d27841",
+          "equal": true
+        }
+      ]
+    },
+    {
+      "index": 3,
+      "name": "02-text",
+      "layer_id": 3,
+      "record_sha256": "7f0d2b51348188f67ce93b4f9c8d95a655ad5fd5a36864a2fe6c99c24fb21ee6",
+      "record_equal": true,
+      "channels": [
+        {
+          "id": -1,
+          "length": 364,
+          "sha256": "516b37f06ed7b59e4d7d793a6aafa555b7b48e6f3000b4205dc55a5a7e2ef3ca",
+          "equal": true
+        },
+        {
+          "id": 0,
+          "length": 2338,
+          "sha256": "e52644202c11deaa778d9b985e95d463c31902ed6a95f474335484d166759d39",
+          "equal": true
+        },
+        {
+          "id": 1,
+          "length": 2346,
+          "sha256": "173e83d24bd5f3b15b33922d03c945ba861cf279edfc1ac9d109080b2183c7ab",
+          "equal": true
+        },
+        {
+          "id": 2,
+          "length": 2340,
+          "sha256": "5de55f480245b87e1749caa3f4ec2ecbdce827ab8e51c85250ecdc8a08301e9b",
+          "equal": true
+        }
+      ]
+    }
+  ],
+  "original_global_blocks": [
+    {
+      "key": "lnk2",
+      "length": 1848200,
+      "sha256": "30fd4cc66aeafb36496e5b5fe6121eb62318fc7dab953332d8fd4db7f91f0341",
+      "equal": true
+    }
+  ],
+  "original_resources": [
+    {
+      "id": 1005,
+      "length": 16,
+      "sha256": "c31afe2593499fdd5f1a958b70f3cd8b6f529cc9e1fe867c0deeaedd67ec4936",
+      "equal": true,
+      "thumbnail_replaced": false
+    },
+    {
+      "id": 1032,
+      "length": 16,
+      "sha256": "0c8fd02b505326a47d941a442e556487d61d00f10158eb4973e75290a502435e",
+      "equal": true,
+      "thumbnail_replaced": false
+    },
+    {
+      "id": 1036,
+      "length": 13542,
+      "sha256": "4593fdaadea48a68dc8e4af715faee2f4f06d2ac3040ddea86e035f2ecf77dec",
+      "equal": false,
+      "thumbnail_replaced": true
+    },
+    {
+      "id": 1044,
+      "length": 4,
+      "sha256": "64f5fc43bc077eee5aa08445311bbbc9dd1fdfc644e8c19c51d609f1f74e59b8",
+      "equal": true,
+      "thumbnail_replaced": false
+    },
+    {
+      "id": 1045,
+      "length": 30,
+      "sha256": "be435be16c5266fbc550fea816c4feb4ce7c4f864bec45a4c3e08f531b1cb2a2",
+      "equal": true,
+      "thumbnail_replaced": false
+    },
+    {
+      "id": 1050,
+      "length": 170,
+      "sha256": "712d07a622d319e5fff3eb4d4f7153194da3d9227d6149f15553e6816f431fb1",
+      "equal": true,
+      "thumbnail_replaced": false
+    },
+    {
+      "id": 1065,
+      "length": 42,
+      "sha256": "39cd6b44f427268df97a2fa0c49455a9c83d0ca1b94d9be548bd7520c34476e6",
+      "equal": true,
+      "thumbnail_replaced": false
+    },
+    {
+      "id": 1069,
+      "length": 6,
+      "sha256": "1ecd30e7d06c653bd3715995e43f4a1f42ab1a6b097c7369c344e910cb8e1f34",
+      "equal": true,
+      "thumbnail_replaced": false
+    },
+    {
+      "id": 1076,
+      "length": 390,
+      "sha256": "2b3772b674a13ebfa9b8d187b0f52dfc56d59b42ad192c9d1a427deb340dffd7",
+      "equal": true,
+      "thumbnail_replaced": false
+    },
+    {
+      "id": 1077,
+      "length": 17,
+      "sha256": "90280541ad5f79c7af0e081d385c1c5039f1c8369e181dec63d7576f0e838be1",
+      "equal": true,
+      "thumbnail_replaced": false
+    }
+  ],
+  "checks": {
+    "header_byte_identical": true,
+    "all_original_layer_records_byte_identical": true,
+    "all_original_channel_streams_byte_identical": true,
+    "all_retained_global_blocks_byte_identical": true,
+    "global_mask_byte_identical": true,
+    "non_thumbnail_resources_byte_identical": true,
+    "layer_count_sign_preserved": true,
+    "layer_info_even_padded": true
+  }
+}

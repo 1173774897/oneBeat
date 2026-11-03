@@ -95,6 +95,7 @@ function fixture() {
       BuiltInRhythmFactory: { create: () => ({ ticksPerBeat: 480, beatsPerBar: 4, events: [] }) }
     },
     './DrumMachineCatalog': {}, './DrumSampleBank': {},
+    './DrumBusLimiter': (() => { const e = {}; require('node:vm').runInNewContext(ts.transpileModule(require('node:fs').readFileSync(require('node:path').resolve(__dirname, '../../entry/src/main/ets/audio/DrumBusLimiter.ets'), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021 } }).outputText, { exports: e }); return e; })(),
     '../common/MeterModel': { defaultBeatPointStates: () => [] }, BuildProfile: { DEBUG: false }
   };
   const context = {

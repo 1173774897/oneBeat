@@ -6,7 +6,7 @@ import { fileUri } from '@kit.CoreFileKit';
 import { AppSession } from '../app/AppSession';
 import { RecordingClip, RecordingScope } from '../recording/RecordingModels';
 import { RecordingRepository } from '../recording/RecordingRepository';
-import { MAX_MIC_SHIFT_US, RecordingMixer } from '../recording/RecordingMixer';
+import { MAX_MIC_GAIN, MAX_MIC_SHIFT_US, RecordingMixer } from '../recording/RecordingMixer';
 import { RecordingShareService } from '../sharing/RecordingShareService';
 import { logUserFailure, showUserNotice, userErrorMessage } from '../common/UserFeedback';
 import { ComicButton, PAPER, INK, CORAL, LILAC, WHITE } from '../components/ComicKit';
@@ -464,7 +464,7 @@ struct RecordingLibraryPage {
     const clip = this.selectedClip();
     if (clip === undefined || !this.active || this.managing || this.busy || this.renderingAudio || this.practicePlaying() ||
       !this.hasSeparateAudio() ||
-      (clip.renderedMixVersion ?? 0) >= RecordingMixer.mixVersion(clip)) { return; }
+      RecordingMixer.isRenderCurrent(clip)) { return; }
     void this.renderSelectedAudio();
   }
 
@@ -486,7 +486,7 @@ struct RecordingLibraryPage {
   }
 
   private desiredMicGain(): number {
-    return Math.max(0, Math.min(2, Math.round(this.micGain * 100) / 100));
+    return Math.max(0, Math.min(MAX_MIC_GAIN, Math.round(this.micGain * 100) / 100));
   }
 
   private desiredMicShiftUs(): number {
@@ -501,7 +501,7 @@ struct RecordingLibraryPage {
   private renderMatches(clip: RecordingClip, gain: number, micShiftUs: number): boolean {
     return Math.abs((clip.renderedGain ?? 1) - gain) < 0.001 &&
       (clip.renderedMicShiftUs ?? 0) === micShiftUs &&
-      ((clip.renderedMixVersion ?? 0) >= RecordingMixer.mixVersion(clip) || !this.clipHasSeparateAudio(clip));
+      (RecordingMixer.isRenderCurrent(clip) || !this.clipHasSeparateAudio(clip));
   }
 
   private renderSelectedAudio(): Promise<RecordingClip | undefined> {
@@ -566,6 +566,13 @@ struct RecordingLibraryPage {
         return updated;
       }
       current = updated;
+      // A DSP upgrade can rebase the manual edit to keep a tuned take's audible alignment.
+      // Adopt it unless the user moved the control meanwhile; otherwise it would be undone.
+      const renderedShiftUs = updated.renderedMicShiftUs ?? 0;
+      if (renderedShiftUs !== micShiftUs && this.requestedMicShiftUs === micShiftUs) {
+        this.micShiftMs = Math.round(renderedShiftUs / 1000);
+        this.requestedMicShiftUs = this.desiredMicShiftUs();
+      }
       if (this.renderMatches(updated, this.requestedMicGain, this.requestedMicShiftUs)) {
         this.applyRenderedClip(updated, gain, micShiftUs);
         return updated;
@@ -601,7 +608,7 @@ struct RecordingLibraryPage {
 
   private changeMicGain(value: number, mode: SliderChangeMode): void {
     if (!this.canAdjustMic()) { return; }
-    this.micGain = Math.max(0, Math.min(2, value));
+    this.micGain = Math.max(0, Math.min(MAX_MIC_GAIN, value));
     if (mode === SliderChangeMode.End || mode === SliderChangeMode.Click) { void this.renderSelectedAudio(); }
   }
 
@@ -623,12 +630,12 @@ struct RecordingLibraryPage {
     const automatic = clip?.autoMicShiftUs ?? 0;
     const reliable = clip?.autoMicShiftReliable === true;
     if (this.micShiftMs < 0) {
-      return `${reliable ? '自动基准上' : '人声'}提前 ${Math.abs(this.micShiftMs)} 毫秒`;
+      return `${reliable ? '在自动对齐基础上' : ''}提前 ${Math.abs(this.micShiftMs)} 毫秒`;
     }
     if (this.micShiftMs > 0) {
-      return `${reliable ? '自动基准上' : '人声'}延后 ${this.micShiftMs} 毫秒`;
+      return `${reliable ? '在自动对齐基础上' : ''}延后 ${this.micShiftMs} 毫秒`;
     }
-    if (!reliable) { return '人声不提前或延后'; }
+    if (!reliable) { return '无时间偏移'; }
     if (automatic < 0) { return `已自动提前 ${Math.round(Math.abs(automatic) / 1000)} 毫秒`; }
     if (automatic > 0) { return `已自动延后 ${Math.round(automatic / 1000)} 毫秒`; }
     return '已自动对齐，可继续微调';
@@ -1148,20 +1155,20 @@ struct RecordingLibraryPage {
                     Blank()
                     Text(`${Math.round(this.micGain * 100)}%`).fontSize(13).fontWeight(900).fontColor(INK)
                   }.width('100%')
-                  Slider({ value: this.micGain, min: 0, max: 2, step: 0.05, style: SliderStyle.OutSet })
+                  Slider({ value: this.micGain, min: 0, max: MAX_MIC_GAIN, step: 0.05, style: SliderStyle.OutSet })
                     .width('100%').height(28).trackThickness(4).selectedColor('#29B5AE').trackColor('#BED8D1')
                     .blockColor(INK).enabled(this.canAdjustMic())
                     .onChange((value: number, mode: SliderChangeMode) => this.changeMicGain(value, mode))
                   Row() {
                     Text('0%').fontSize(9).fontColor('#625C54')
                     Blank()
-                    Text('应用内节奏声固定 100%').fontSize(10).fontWeight(FontWeight.Bold).fontColor('#467A70')
+                    Text('节奏声音量固定 100%').fontSize(10).fontWeight(FontWeight.Bold).fontColor('#467A70')
                     Blank()
-                    Text('200%').fontSize(9).fontColor('#625C54')
+                    Text(`${MAX_MIC_GAIN * 100}%`).fontSize(9).fontColor('#625C54')
                   }.width('100%')
                   Divider().strokeWidth(1).color('#B9CCC6').margin({ top: 7, bottom: 5 })
                   Row() {
-                    Text('人声对齐').fontSize(12).fontWeight(900).fontColor(INK)
+                    Text('时间对齐').fontSize(12).fontWeight(900).fontColor(INK)
                     Blank()
                     Text('范围 ±300ms').fontSize(9).fontWeight(FontWeight.Bold).fontColor('#625C54')
                   }.width('100%')
@@ -1171,7 +1178,7 @@ struct RecordingLibraryPage {
                       controlHeight: LIBRARY_MIC_NUDGE_SIZE, fill: '#D4DDDA',
                       cornerRadius: 7, lineWidth: 1, lineColor: INK,
                       hardShadow: { offsetX: COMIC_CONTROL_INK_OFFSET, offsetY: COMIC_CONTROL_INK_OFFSET, color: INK },
-                      accessibilityLabel: '人声提前 10 毫秒', action: () => this.nudgeMicShift(-MIC_SHIFT_STEP_MS)
+                      accessibilityLabel: 'MIC 音轨提前 10 毫秒', action: () => this.nudgeMicShift(-MIC_SHIFT_STEP_MS)
                     }) {
                       Text('‹').fontSize(27).fontWeight(900).fontColor(INK)
                     }
@@ -1199,7 +1206,7 @@ struct RecordingLibraryPage {
                       controlHeight: LIBRARY_MIC_NUDGE_SIZE, fill: '#D4DDDA',
                       cornerRadius: 7, lineWidth: 1, lineColor: INK,
                       hardShadow: { offsetX: COMIC_CONTROL_INK_OFFSET, offsetY: COMIC_CONTROL_INK_OFFSET, color: INK },
-                      accessibilityLabel: '人声延后 10 毫秒', action: () => this.nudgeMicShift(MIC_SHIFT_STEP_MS)
+                      accessibilityLabel: 'MIC 音轨延后 10 毫秒', action: () => this.nudgeMicShift(MIC_SHIFT_STEP_MS)
                     }) {
                       Text('›').fontSize(27).fontWeight(900).fontColor(INK)
                     }
@@ -1212,8 +1219,8 @@ struct RecordingLibraryPage {
                       .fontSize(10).fontColor('#777065').lineHeight(17).width('100%')
                   } else {
                     Text(this.renderingAudio ?
-                      '正在应用声音设置；可继续调节，将自动合并到最后一次，完成后从当前位置续播…' :
-                      '松开后应用音量与对齐。首次会准备快速 MIC 轨，之后调整更快；保存与分享使用当前设置。')
+                      '正在更新声音…' :
+                      '松手后更新预览，保存与分享使用当前设置。')
                       .fontSize(10).fontColor('#625C54').lineHeight(17).width('100%')
                   }
                   }.width('100%').padding(12)

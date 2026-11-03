@@ -1,0 +1,47 @@
+{
+  "generation": "built-in imagegen; original RGBA output copied byte-for-byte",
+  "assets": [
+    {
+      "role": "cloud",
+      "source": "/Users/lizhe/.codex/generated_images/01a187b9-ce55-7c72-a997-75f5c9b75372/exec-cc186ab2-8c8a-48fe-afac-b6952fb449dc.png",
+      "asset": "entry/src/main/resources/rawfile/comic/store/cloud.png",
+      "size": [
+        1024,
+        1536
+      ],
+      "mode": "RGBA",
+      "alphaRange": [
+        0,
+        254
+      ],
+      "visibleBoundsAlpha128": [
+        51,
+        32,
+        963,
+        1504
+      ],
+      "sha256": "833afaf02aef672711c40012ec675b3a7b146f5b9a4047ede6a880233ea5ba2d"
+    },
+    {
+      "role": "teapot",
+      "source": "/Users/lizhe/.codex/generated_images/01a187b9-ce55-7c72-a997-75f5c9b75372/exec-11d5f701-f83c-4688-9df5-58b2cf2347fd.png",
+      "asset": "entry/src/main/resources/rawfile/comic/store/teapot.png",
+      "size": [
+        1024,
+        1536
+      ],
+      "mode": "RGBA",
+      "alphaRange": [
+        0,
+        254
+      ],
+      "visibleBoundsAlpha128": [
+        47,
+        59,
+        983,
+        1505
+      ],
+      "sha256": "5a34b2395368ba568fc4c0abe5078f4730c34c4601fdf6d5f4721ed69ceae12f"
+    }
+  ]
+}

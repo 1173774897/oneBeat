@@ -4,7 +4,7 @@ import { AppSession } from '../app/AppSession';
 import { MonotonicClock } from '../common/MonotonicClock';
 import { logUserFailure, showUserNotice } from '../common/UserFeedback';
 import { saveCalibrationMs } from '../store/AudioLatencyPersistence';
-import { BLUE, CARD_SHADOW, CONTROL_SHADOW, CORAL, INK, LILAC, PAPER, TEAL, WHITE } from '../components/ComicKit';
+import { CARD_SHADOW, CONTROL_SHADOW, CORAL, INK, PAPER, TEAL, WHITE } from '../components/ComicKit';
 
 type CalibrationPhase = 'intro' | 'changing' | 'arming' | 'listening' | 'measuring' | 'missed' | 'result';
 type ResultAction = 'save' | 'retry';
@@ -41,6 +41,13 @@ const SCENE_MAX_WIDTH: number = 360;
 const PAGE_SIDE_PADDING: number = 18;
 const TAP_PAD_HEIGHT: number = 132;
 const CONTENT_ACTIONS_GAP: number = 12;
+const RESULT_SCENE_MAX_WIDTH: number = 288;
+const RESULT_SCENE_MIN_WIDTH: number = 180;
+// Reserve the status (including a wrapped warning), save control and safe
+// bottom clearance before sizing the illustration in a short result viewport.
+const RESULT_PRIMARY_CONTENT_HEIGHT: number = 148;
+const RESULT_SAVE_GAP: number = 12;
+const RESULT_PREVIEW_GAP: number = 16;
 const CARD_SCALE: number = 0.68;
 const CARD_X: number = 170;
 const PAPER_DEPTH_SCALE: number = 0.966;
@@ -70,10 +77,15 @@ const GUIDE_CENTER_X: number = 627;
 const GUIDE_DIE_Y: number = 505;
 const GUIDE_Y: number = PUNCH_PLANE_Y - GUIDE_DIE_Y * GUIDE_SCALE;
 const LEVER_SCALE: number = 0.65;
-const LEVER_PIVOT_X: number = 690;
-const LEVER_PIVOT_Y: number = 1030;
-const LEVER_AXIS_X: number = 1144;
-const LEVER_AXIS_Y: number = 676;
+// Register the crank's actual bore and the fixed cap to the same frame shaft.
+// Their source centers differ; rotating the bearing housing would detach it.
+const LEVER_PIVOT_X: number = 700.1;
+const LEVER_PIVOT_Y: number = 1063;
+const LEVER_AXIS_X: number = 1159;
+const LEVER_AXIS_Y: number = 669;
+const LEVER_BEARING_SCALE: number = 0.2;
+const LEVER_BEARING_PIVOT_X: number = 680.5;
+const LEVER_BEARING_PIVOT_Y: number = 640.3;
 const LEVER_PRESS_ANGLE: number = -32;
 const HOLE_FIRST_X: number = 420;
 const HOLE_STEP_X: number = 150;
@@ -113,6 +125,8 @@ struct TimeCardCalibrationPage {
   @State jitterMs: number = 0;
   @State missReason: string = '';
   @State sceneWidth: number = 320;
+  @State resultViewportHeight: number = 0;
+  @State resultSceneProgress: number = 0;
   @State cardScale: number = CARD_SCALE;
   @State cardX: number = CARD_X;
   @State cardY: number = CARD_START_Y;
@@ -400,6 +414,7 @@ struct TimeCardCalibrationPage {
   }
 
   private resetMachine(): void {
+    this.resultSceneProgress = 0;
     this.visualTapCount = 0;
     this.carriageColumn = 0;
     this.leverAngle = 0;
@@ -732,6 +747,9 @@ struct TimeCardCalibrationPage {
   }
 
   private setResultPose(): void {
+    // Compact with the existing card-lift animation, rather than jumping in
+    // size as soon as the last tap changes the phase to result.
+    this.resultSceneProgress = 1;
     this.paperReleased = true;
     this.cardScale = RESULT_CARD_SCALE;
     this.cardX = RESULT_CARD_X;
@@ -906,7 +924,19 @@ struct TimeCardCalibrationPage {
     return this.jitterMs <= 20 ? '节拍很稳' : this.jitterMs <= 38 ? '稳定度良好' : '波动较大，建议再测一次';
   }
 
-  private q(): number { return this.sceneWidth / SCENE_DESIGN_SIZE; }
+  private sceneDisplayWidth(): number {
+    if (this.phase !== 'result') {
+      return this.sceneWidth;
+    }
+    const heightLimitedWidth = this.resultViewportHeight > 0 ?
+      Math.max(RESULT_SCENE_MIN_WIDTH,
+        (this.resultViewportHeight - RESULT_PRIMARY_CONTENT_HEIGHT - this.bottomSafeInset) *
+        SCENE_DESIGN_SIZE / SCENE_DESIGN_HEIGHT) : RESULT_SCENE_MAX_WIDTH;
+    const targetWidth = Math.min(this.sceneWidth, RESULT_SCENE_MAX_WIDTH, heightLimitedWidth);
+    return this.sceneWidth + (targetWidth - this.sceneWidth) * this.resultSceneProgress;
+  }
+
+  private q(): number { return this.sceneDisplayWidth() / SCENE_DESIGN_SIZE; }
   private machineX(): number { return (1 - this.machineScale) * SCENE_DESIGN_SIZE / 2; }
   private holeWorldX(): number { return CARD_X + (HOLE_FIRST_X + this.carriageColumn * HOLE_STEP_X) * CARD_SCALE; }
 
@@ -980,10 +1010,11 @@ struct TimeCardCalibrationPage {
       }.width(SCENE_DESIGN_SIZE * this.cardScale * this.q())
         .height(SCENE_DESIGN_SIZE * this.cardScale * this.q())
         .position({ x: this.cardX * this.q(), y: (this.cardY - this.paperClipTop) * this.q() })
-    }.width(this.sceneWidth)
+    }.width(this.sceneDisplayWidth())
       .height((this.paperReleased ? SCENE_DESIGN_HEIGHT : PAPER_WINDOW_BOTTOM - this.paperClipTop) * this.q())
       .position({ x: 0, y: ((this.paperReleased ? 0 : this.frameY) + this.paperClipTop) * this.q() })
-      .clip(!this.paperReleased).zIndex(this.paperReleased ? 7 : 2)
+      // Released paper clears the entire machine, including its fixed axle cap.
+      .clip(!this.paperReleased).zIndex(this.paperReleased ? 8 : 2)
   }
 
   @Builder
@@ -997,7 +1028,7 @@ struct TimeCardCalibrationPage {
 
   @Builder
   private leverLayer() {
-    Image($rawfile('calibration/time-card-v2/lever.png'))
+    Image($rawfile('calibration/time-card-v2/lever-crank.png'))
       .width(SCENE_DESIGN_SIZE * LEVER_SCALE * this.machineScale * this.q())
       .height(SCENE_DESIGN_SIZE * LEVER_SCALE * this.machineScale * this.q()).objectFit(ImageFit.Contain)
       .rotate({ angle: this.leverAngle,
@@ -1009,10 +1040,20 @@ struct TimeCardCalibrationPage {
   }
 
   @Builder
+  private leverBearingLayer() {
+    Image($rawfile('calibration/time-card-v2/lever-bearing.png'))
+      .width(SCENE_DESIGN_SIZE * LEVER_BEARING_SCALE * this.machineScale * this.q())
+      .height(SCENE_DESIGN_SIZE * LEVER_BEARING_SCALE * this.machineScale * this.q()).objectFit(ImageFit.Contain)
+      .position({ x: (this.machineX() + (LEVER_AXIS_X - LEVER_BEARING_PIVOT_X * LEVER_BEARING_SCALE) * this.machineScale) * this.q(),
+        y: (this.frameY + (LEVER_AXIS_Y - LEVER_BEARING_PIVOT_Y * LEVER_BEARING_SCALE) * this.machineScale) * this.q() })
+      .opacity(this.machineOpacity).zIndex(7)
+  }
+
+  @Builder
   private timeCardScene() {
     Stack({ alignContent: Alignment.TopStart }) {
       Image($rawfile('calibration/time-card-v2/machine-rear.png'))
-        .width(this.sceneWidth * this.machineScale).height(this.sceneWidth * this.machineScale)
+        .width(this.sceneDisplayWidth() * this.machineScale).height(this.sceneDisplayWidth() * this.machineScale)
         .objectFit(ImageFit.Contain)
         .position({ x: this.machineX() * this.q(), y: this.frameY * this.q() }).opacity(this.machineOpacity).zIndex(1)
       this.clippedPaper()
@@ -1030,8 +1071,9 @@ struct TimeCardCalibrationPage {
           y: (this.frameY + (RAM_Y + this.ramDrop) * this.machineScale) * this.q() }).opacity(this.machineOpacity).zIndex(3)
       this.machineFront()
       this.leverLayer()
+      this.leverBearingLayer()
       this.countdownOverlay()
-    }.width(this.sceneWidth).height(SCENE_DESIGN_HEIGHT * this.q()).clip(false)
+    }.width(this.sceneDisplayWidth()).height(SCENE_DESIGN_HEIGHT * this.q()).clip(false)
   }
 
   @Builder
@@ -1044,7 +1086,7 @@ struct TimeCardCalibrationPage {
           .rotate({ angle: -4 }).scale({ x: this.countdownScale, y: this.countdownScale })
           .translate({ y: COUNTDOWN_CENTER_Y_OFFSET }).opacity(this.countdownOpacity)
       }
-    }.width(this.sceneWidth).height(SCENE_DESIGN_HEIGHT * this.q())
+    }.width(this.sceneDisplayWidth()).height(SCENE_DESIGN_HEIGHT * this.q())
       .position({ x: 0, y: 0 }).hitTestBehavior(HitTestMode.None).zIndex(40)
   }
 
@@ -1072,10 +1114,17 @@ struct TimeCardCalibrationPage {
   }
 
   @Builder
+  private resultStatus() {
+    Text() {
+      Span(this.stabilityLabel()).fontColor(this.jitterMs > 38 ? CORAL : '#08827B')
+      Span('  ·  ').fontColor('#B2A99B')
+      Span(this.saving ? '保存中…' : '待保存').fontColor('#8D4A35')
+    }.fontSize(13).fontWeight(900).lineHeight(22).textAlign(TextAlign.Center).width('100%')
+  }
+
+  @Builder
   private resultDetails() {
-    Column({ space: 12 }) {
-      Text(this.stabilityLabel()).fontSize(13).fontWeight(900)
-        .fontColor(this.jitterMs > 38 ? CORAL : '#08827B')
+    Column({ space: 10 }) {
       Row({ space: 9 }) {
         ActionButton({
           label: '校准前试听', active: !this.saving && this.btAudioActive, controlHeight: 44,
@@ -1093,23 +1142,31 @@ struct TimeCardCalibrationPage {
         Text(this.previewLabel.length > 0 ? `${this.previewLabel}试听中` : '试听时，对比声音与亮灯是否同步')
           .fontSize(11).fontWeight(800).fontColor('#625B53').layoutWeight(1)
       }.width('100%')
-      Text('本次跟拍测得的本机补偿').fontSize(11).fontColor('#625B53')
-      Button(this.measurementDetailsExpanded ? '收起测量说明 ∧' : '测量说明 ∨', { type: ButtonType.Normal })
-        .fontSize(12).fontWeight(800).fontColor(INK).backgroundColor(Color.Transparent)
-        .height(32).onClick(() => { this.measurementDetailsExpanded = !this.measurementDetailsExpanded; })
+      Column() {
+        Row({ space: 12 }) {
+          Button(this.measurementDetailsExpanded ? '收起测量说明 ∧' : '测量说明 ∨', { type: ButtonType.Normal })
+            .fontSize(12).fontWeight(800).fontColor(INK).backgroundColor(Color.Transparent)
+            .padding(0).height(40)
+            .onClick(() => { this.measurementDetailsExpanded = !this.measurementDetailsExpanded; })
+          Blank()
+          ActionButton({
+            label: '重新测量 ›', active: this.resultActionsReady && !this.saving && this.btAudioActive,
+            controlWidth: 92, controlHeight: 40, labelSize: 12, labelWeight: 800,
+            fill: Color.Transparent,
+            touchAction: (event: TouchEvent) => { this.onResultActionTouch(event, 'retry'); },
+            action: (event: ClickEvent) => {
+              if (this.consumeResultActionClick('retry', event)) { this.retryMeasurement(); }
+            }
+          })
+        }.width('100%').padding({ top: 7 })
+      }.width('100%').border({ width: { top: 1 }, color: '#DED6C8' })
       if (this.measurementDetailsExpanded) {
         Text('这个数值包含耳机播放链路和你的跟拍触摸差值，保存后作为本机播放补偿。保持当前耳机连接；断开、重连或切换后推荐重测。')
           .fontSize(11).lineHeight(18).fontColor('#625B53').width('100%')
           .padding(11).backgroundColor('#FFF0B8').borderRadius(7)
       }
-      if (!this.btAudioActive && this.operationError.length === 0) {
-        Text('耳机已断开，请重新连接并测量。').fontSize(12).lineHeight(19).fontWeight(800)
-          .fontColor(CORAL).width('100%')
-      }
-      if (this.operationError.length > 0) {
-        Text(this.operationError).fontSize(12).lineHeight(19).fontColor(CORAL).width('100%')
-      }
-    }.width('100%')
+    }.width('100%').padding({ left: PAGE_SIDE_PADDING, right: PAGE_SIDE_PADDING,
+      top: RESULT_PREVIEW_GAP, bottom: 18 + this.bottomSafeInset })
   }
 
   @Builder
@@ -1128,8 +1185,8 @@ struct TimeCardCalibrationPage {
   }
 
   @Builder
-  private resultActions() {
-    Column({ space: 10 }) {
+  private resultSaveAction() {
+    Column({ space: 8 }) {
       ActionButton({
         label: this.saving ? '正在保存…' : this.resultActionsReady ? '保存并生效' : '请先查看结果',
         active: this.resultActionsReady && !this.saving && this.btAudioActive, controlHeight: 54,
@@ -1139,18 +1196,29 @@ struct TimeCardCalibrationPage {
         action: (event: ClickEvent) => {
           if (this.consumeResultActionClick('save', event)) { void this.finishAndSave(); }
         }
-      })
-      ActionButton({
-        label: '重新测量', active: this.resultActionsReady && !this.saving && this.btAudioActive,
-        controlHeight: 40, labelSize: 14, labelWeight: 900, fill: LILAC,
-        lineWidth: 1.2, cornerRadius: 7,
-        touchAction: (event: TouchEvent) => { this.onResultActionTouch(event, 'retry'); },
-        action: (event: ClickEvent) => {
-          if (this.consumeResultActionClick('retry', event)) { this.retryMeasurement(); }
-        }
-      })
+      }) {
+        Stack({ alignContent: Alignment.Center }) {
+          Text(this.saving ? '正在保存…' : this.resultActionsReady ? '保存并生效' : '请先查看结果')
+            .fontSize(19).fontWeight(900).fontColor(INK).textAlign(TextAlign.Center)
+            .width('100%').padding({ left: 44, right: 44 }).maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+          // Stack centers its children; use a full-width row to anchor the
+          // decorative arrow independently without shifting the label.
+          Row() {
+            Text('›').fontSize(25).fontColor(INK)
+          }.width('100%').height(54).justifyContent(FlexAlign.End).padding({ right: 16 })
+            .hitTestBehavior(HitTestMode.None)
+        }.width('100%').height(54)
+      }
+      if (!this.btAudioActive && this.operationError.length === 0) {
+        Text('耳机已断开，请重新连接并测量。').fontSize(12).lineHeight(19).fontWeight(800)
+          .fontColor(CORAL).width('100%')
+      }
+      if (this.operationError.length > 0) {
+        Text(this.operationError).fontSize(12).lineHeight(19).fontColor(CORAL).width('100%')
+      }
     }.width('100%').padding({ left: PAGE_SIDE_PADDING, right: PAGE_SIDE_PADDING,
-      top: CONTENT_ACTIONS_GAP, bottom: 18 + this.bottomSafeInset })
+      top: RESULT_SAVE_GAP })
   }
 
   @Builder
@@ -1205,17 +1273,24 @@ struct TimeCardCalibrationPage {
             if (this.phase === 'missed') {
               this.missedExplanation()
             } else if (this.phase === 'result') {
-              this.resultDetails()
+              this.resultStatus()
             }
           }.width('100%').padding({ left: PAGE_SIDE_PADDING, right: PAGE_SIDE_PADDING,
             bottom: this.phase === 'result' || this.phase === 'missed' || this.phase === 'changing' ? 0 : 10 })
           if (this.phase === 'result') {
-            this.resultActions()
+            this.resultSaveAction()
+            this.resultDetails()
           } else if (this.phase === 'missed' || this.phase === 'changing') {
             this.startOrRetryActions()
           }
         }.width('100%')
       }.layoutWeight(1).width('100%').scrollBar(BarState.Off).edgeEffect(EdgeEffect.Spring)
+        .onAreaChange((_old: Area, area: Area) => {
+          const height = typeof area.height === 'number' ? area.height : parseFloat(area.height.toString());
+          if (Number.isFinite(height) && height > 0 && height !== this.resultViewportHeight) {
+            this.resultViewportHeight = height;
+          }
+        })
       if (this.phaseIsActive()) {
         this.tapPad()
       } else if (this.phase === 'intro') {

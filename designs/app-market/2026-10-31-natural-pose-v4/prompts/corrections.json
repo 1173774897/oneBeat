@@ -1,0 +1,44 @@
+{
+  "mode": "built-in image_gen",
+  "assets": [
+    {
+      "id": "01",
+      "character": "lilroll",
+      "prompt": "Use case: precise-object-edit. Image1 is the edit target. Image2 is a POSE-ANATOMY reference only, showing the corrected Wave single-hand steadying pose; mirror that arm logic for a character on the LEFT. Do not copy Wave's identity. Image3 is the original exact Lilroll identity. Keep image1's face, lime helmet, purple hoodie, large front-facing phone, clean cream/coral background and blank white screen.\nCorrect the arms by removing the entire lower supporting palm and forearm from beneath the phone. Restore clean coral background under the phone. The phone's base is ON THE GROUND, with a very subtle soft contact shadow directly beneath it. Lilroll is steadying the phone, not lifting it. His far arm relaxes down along the outside of his body; its hand is tucked casually in hoodie pocket or cropped naturally by the left/bottom edge.\nDraw one coherent near arm with shoulder, elbow, forearm and wrist: upper arm drops naturally alongside his torso, elbow is at waist level and visibly outside the phone, forearm angles upward toward the left phone edge, wrist is nearly straight. The arm is covered by purple hoodie; indicate the elbow with a clear natural sleeve fold, not a balloon lump. At the phone's LEFT bezel, palm and four fingers are BEHIND the device and largely occluded. Only one modest purple thumb rests gently on the FRONT rim and a small part of knuckle/wrist shows. DO NOT show a stack of four large fingers on the front glass. Do not draw an upturned supporting hand. Thumb is anatomically attached to a believable hand and forearm, no sharp backward-bent wrist, no mitten shape, no detached arms. Exactly two arms total, one hand at bezel, other hand at pocket/body. Hand size roughly 1/4 head width, not giant gloves.\nPreserve the 2D oneBeat clean black ink contour and cel shading. Keep the smartphone huge and planar, screen completely white and free of content, no text, logos or UI. Change the limb construction and grounding only.",
+      "references": [
+        "/Users/lizhe/work/oneBeat/designs/app-market/2026-10-31-editorial-v3/artwork/01.png",
+        "/Users/lizhe/work/oneBeat/designs/app-market/2026-10-31-natural-pose-v4/artwork/02.png",
+        "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/comic/poses/lilroll.png"
+      ]
+    },
+    {
+      "id": "03",
+      "character": "cloud",
+      "prompt": "Use case: precise-object-edit. Image1 is the edit target; image2 is the original Cloud Walker identity reference. Correct the pose and simplify the anatomy while retaining the original one-eyed blue character, fluffy white cloud hair, small white wings, cream/lilac composition and giant blank front-facing phone. Keep no words, UI or logos.\nRedraw the upper-body pose as a relaxed LEANING-ON-A-RAILING pose: Cloud Walker stands behind the phone and rests one elbow on its TOP bezel, forearm rises naturally to a small blue palm gently cupping ONE side of the cheek. This is an elbow-supported resting pose, not holding/lifting the phone. The supported elbow visibly touches the black top rim; a continuous anatomically coherent upper arm connects it to the shoulder behind the phone. Forearm and wrist form a natural straight gentle line toward the cheek, with no backward flexion. Fingers at cheek are small and relaxed. His single large eye and pleasant smile remain visible. The other arm hangs relaxed behind the phone and does NOT sprout another visible hand. Remove both of the old blue claw/gripping hands at the top corners, reconstruct the bezel and white screen there. Exactly two arms total, only the leaning forearm/hand clearly visible.\nInclude enough upper torso/shoulder silhouette behind the phone to understand where the supported arm comes from. Do not confuse white feather wings with blue arms. Keep wings small and behind the body. No floating detached fists or extra hands. He should feel casually resting on the phone like a person leaning on a counter, natural weight, small contact shadow at elbow. Keep phone base on ground; retain the big readable completely white screen. Original OneBeat 2D ink illustration, clean cel shading and sparse cloth-like hatching only. No 3D plastic, no invented instruments, no extra props.",
+      "references": [
+        "/Users/lizhe/work/oneBeat/designs/app-market/2026-10-31-editorial-v3/artwork/03.png",
+        "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/comic/poses/cloud.png"
+      ]
+    },
+    {
+      "id": "04",
+      "character": "mismatch",
+      "prompt": "Use case: precise-object-edit. Image1 is the edit target. Image2 is the corrected Wave POSE and anatomical construction reference ONLY. Image3 is original Mismatch identity. Preserve the cyan skin, cyan knitted beanie, dark green short hair, striped shirt and elbow pads of Mismatch, existing clean ivory/apricot background and huge front-facing blank-screen phone. Do not turn him into Wave.\nRemove the hand and arm stretched under the phone. Restore apricot background beneath its base; the phone STANDS ON THE GROUND with a soft tiny contact shadow. Character stands at right and only steadies phone with one hand. Far hand rests naturally at hip/alongside body, outside or near right crop. The visible near arm must have a coherent shoulder->upper arm->waist-height elbow->forearm->wrist->hand chain. Upper arm drops alongside torso, elbow remains visible, forearm rises diagonally toward right phone edge, wrist straight rather than kinked. Stripe pattern and elbow pad follow the actual bent limb, no split tubes, extra elbows or missing segments.\nNatural simple grip: palm and four fingers BEHIND phone, mostly hidden by frame; one small cyan thumb lightly on FRONT rim, plus a little knuckle/wrist. Remove the old four large front-facing stacked fingers. No palm under the phone, no twisted wrist, no mitten glove, no disembodied hand. Exactly two arms and two hands total; only the single steadying hand near bezel needs visibility. Hand around 1/4 head width, normal chibi human proportions rather than giant gloves.\nKeep relaxed friendly expression and existing body/face identity. Preserve huge uniform empty white screen, no text, no UI/status bars, no reflection, no logos. Original clean 2D black-ink cel-shaded OneBeat style. Only correct anatomy and grounding.",
+      "references": [
+        "/Users/lizhe/work/oneBeat/designs/app-market/2026-10-31-editorial-v3/artwork/04.png",
+        "/Users/lizhe/work/oneBeat/designs/app-market/2026-10-31-natural-pose-v4/artwork/02.png",
+        "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/comic/poses/mismatch.png"
+      ]
+    },
+    {
+      "id": "05",
+      "character": "lamp",
+      "prompt": "Use case: precise-object-edit. Image1 is the edit target; image2 is the corrected Wave single-hand steadying pose as ANATOMY reference only and should be mirrored for character standing on LEFT. Image3 is exact Lamp Walker identity. Preserve the golden lampshade head, cream sleepy face, striped stem neck, sky-blue pajamas with cream piping, the clean ivory/ink-blue composition and big front-facing phone.\nReplace the arm pose with a simple natural single-hand steadying gesture. Remove the upturned hand and forearm under the phone completely and restore ink-blue background there. Phone rests ON THE GROUND with a small soft contact shadow under the actual base, character is not lifting it. Far arm relaxes along body and its hand sits naturally by hip or in pajama pocket, partly cropped at outer left edge.\nNear arm is one readable connected limb: shoulder outside phone, upper arm descends alongside torso to a clear waist-height elbow, forearm comes diagonally upward toward the phone's left edge, wrist remains almost straight. Pajama sleeve follows elbow and forearm, no balloon cuffs, no missing upper arm. Palm and four fingers lie BEHIND phone, hidden; only ONE cream thumb rests gently on front black rim and small side knuckle/wrist is visible. Remove the old three oversized claw fingers. Modest hand about 1/4 face width. No backward wrist bend, no disconnected fingers, no extra arms or glove. Exactly two arms total.\nKeep character's original 2D ink/clean cel-shaded style, warm cream face under lampshade, sleepy relaxed expression. Full central phone screen is entirely plain white, no UI or text. Fix limb anatomy and ground contact without adding props or background clutter.",
+      "references": [
+        "/Users/lizhe/work/oneBeat/designs/app-market/2026-10-31-editorial-v3/artwork/05.png",
+        "/Users/lizhe/work/oneBeat/designs/app-market/2026-10-31-natural-pose-v4/artwork/02.png",
+        "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/comic/poses/lamp.png"
+      ]
+    }
+  ]
+}

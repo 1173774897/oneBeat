@@ -58,6 +58,8 @@ function harness() {
     async teardown() { await cleanup('new:p2p'); }
   }
   class MockBle {
+    setJoinRequestListener(listener) { this.joinRequestListener = listener; }
+    setStaleDialogListener(listener) { this.staleDialogListener = listener; }
     async stopLeaderAdvertising() { await cleanup('new:ble'); }
   }
   const mocks = {
@@ -112,7 +114,11 @@ function harness() {
       getRemoteSessionEndReason() { return 'leader_exit'; }
     },
     metronome: { async stopEngine() { await cleanup('old:audio'); } },
-    bleDiscovery: { async stopLeaderAdvertising() { await cleanup('old:ble'); } },
+    bleDiscovery: {
+      setJoinRequestListener() {},
+      setStaleDialogListener() {},
+      async stopLeaderAdvertising() { await cleanup('old:ble'); }
+    },
     p2p: { async teardown() { await cleanup('old:p2p'); } }
   });
   AppSession.instance = old;

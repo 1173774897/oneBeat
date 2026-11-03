@@ -7,7 +7,7 @@ import { util } from '@kit.ArkTS';
 import { readOptional, writeAtomic } from '../common/AtomicTextFile';
 import { RecordingCoverService } from './RecordingCoverService';
 import { PendingRecordingCapture, RecordingClip, RecordingScope } from './RecordingModels';
-import { MAX_MIC_SHIFT_US, RecordingMixer } from './RecordingMixer';
+import { MAX_MIC_GAIN, MAX_MIC_SHIFT_US, RecordingMixer } from './RecordingMixer';
 
 const LIBRARY_PREFERENCES: string = 'onebeat_recording_library';
 const LIBRARY_KEY: string = 'recordingLibraryV1';
@@ -49,6 +49,12 @@ export class RecordingRepository {
       await fs.mkdir(RecordingRepository.directory, true);
     }
     RecordingRepository.indexPath = `${RecordingRepository.directory}/library-v1.json`;
+    // The per-device round-trip memory was removed (the lag belongs to each take's content);
+    // its files are derived data, so a failed delete only leaves an unused file behind.
+    for (const name of ['acoustic-round-trip-v1.json', 'acoustic-round-trip-v2.json']) {
+      const path = `${RecordingRepository.directory}/${name}`;
+      try { if (await fs.access(path)) { await fs.unlink(path); } } catch (_error) {}
+    }
     let raw = await readOptional(RecordingRepository.indexPath);
     const migratePreferences = raw.length === 0;
     if (migratePreferences) {
@@ -242,11 +248,11 @@ export class RecordingRepository {
   static render(clip: RecordingClip, gain: number,
     micShiftUs: number = clip.renderedMicShiftUs ?? 0): Promise<RecordingClip> {
     const task = RecordingRepository.operation.then(async (): Promise<RecordingClip> => {
-      if (!Number.isFinite(gain) || gain < 0 || gain > 2) {
+      if (!Number.isFinite(gain) || gain < 0 || gain > MAX_MIC_GAIN) {
         throw new Error('麦克风音量无效，请重新调整');
       }
       if (!Number.isFinite(micShiftUs) || Math.abs(micShiftUs) > MAX_MIC_SHIFT_US) {
-        throw new Error('人声对齐需在提前或延后 300 毫秒以内');
+        throw new Error('时间偏移需在提前或延后 300 毫秒以内');
       }
       const stored = RecordingRepository.get(clip.id);
       if (stored === undefined) { throw new Error('视频文件不存在，请重新录制'); }
@@ -256,7 +262,7 @@ export class RecordingRepository {
         stored.autoMicShiftConfidence !== undefined && stored.autoMicShiftReliable !== undefined;
       if (Math.abs((stored.renderedGain ?? 1) - desired) < 0.001 &&
         (stored.renderedMicShiftUs ?? 0) === desiredShiftUs &&
-        (((stored.renderedMixVersion ?? 0) >= RecordingMixer.mixVersion(stored) && autoAlignmentKnown) ||
+        ((RecordingMixer.isRenderCurrent(stored) && autoAlignmentKnown) ||
           stored.sourcePath === undefined ||
           stored.innerPath === undefined || stored.micPath === undefined)) { return stored; }
       if (stored.sourcePath === undefined || stored.micPath === undefined || stored.innerPath === undefined) {
@@ -274,7 +280,8 @@ export class RecordingRepository {
         const updated = RecordingRepository.copy(stored);
         updated.path = output;
         updated.renderedGain = desired;
-        updated.renderedMicShiftUs = desiredShiftUs;
+        // Normally the request; an upgrade may rebase it to keep a tuned take's alignment.
+        updated.renderedMicShiftUs = mixResult.micShiftUs;
         updated.autoMicShiftUs = mixResult.autoMicShiftUs;
         updated.autoMicShiftConfidence = mixResult.autoMicShiftConfidence;
         updated.autoMicShiftReliable = mixResult.autoMicShiftReliable;
@@ -415,7 +422,7 @@ export class RecordingRepository {
       if (clip.micCaptureMode === 'system-aec' && clip.micPath !== undefined) {
         // Derived caches from earlier level algorithms can coexist after an
         // upgrade; deleting a take must remove those obsolete copies too.
-        for (const version of [1, 2]) {
+        for (const version of [1, 2, 3, 4]) {
           paths.push(`${clip.micPath}.system-aec-v${version}.f32`, `${clip.micPath}.system-aec-v${version}.f32.tmp`);
         }
       }

@@ -1,0 +1,849 @@
+{
+  "canvas": {
+    "width": 1080,
+    "height": 1920
+  },
+  "palette": {
+    "ink": "#171B1F",
+    "paper": "#FFF9EE",
+    "teal": "#29B5AE"
+  },
+  "fontFiles": [
+    {
+      "weight": 900,
+      "path": "/Users/lizhe/work/oneBeat/designs/app-market/2026-11-02-editable-psd/fonts/HarmonyOS_Sans_SC_Black.ttf",
+      "sha256": "5de9560908e88820df2e0a5ed9465bc44644ae2ce1cd6c194b76f2ed8e8f186e",
+      "postScriptName": "HarmonyOS_Sans_SC_Black"
+    }
+  ],
+  "editableTextCount": 26,
+  "pages": [
+    {
+      "page": "01",
+      "layers": [
+        {
+          "role": "eyebrow",
+          "name": "01 · 编号 · ONEBEAT / 01",
+          "text": "ONEBEAT / 01",
+          "font": "HarmonyOS_Sans_SC_Black",
+          "fontSize": 23,
+          "slantDegrees": 9,
+          "x": 110,
+          "baseline": 118,
+          "id": 10001
+        },
+        {
+          "role": "first",
+          "name": "01 · 主标题 · 一个人练习",
+          "text": "一个人练习",
+          "font": "HarmonyOS_Sans_SC_Black",
+          "fontSize": 108,
+          "slantDegrees": 9,
+          "x": 96,
+          "baseline": 258,
+          "effects": {
+            "scale": 1,
+            "dropShadow": [
+              {
+                "enabled": true,
+                "present": true,
+                "showInDialog": true,
+                "color": {
+                  "r": 255,
+                  "g": 249,
+                  "b": 238
+                },
+                "opacity": 1,
+                "blendMode": "normal",
+                "useGlobalLight": false,
+                "angle": 131.6335393365702,
+                "distance": {
+                  "units": "Pixels",
+                  "value": 12.041594578792296
+                },
+                "size": {
+                  "units": "Pixels",
+                  "value": 0
+                },
+                "choke": {
+                  "units": "Pixels",
+                  "value": 0
+                },
+                "layerConceals": true
+              }
+            ]
+          },
+          "id": 10002
+        },
+        {
+          "role": "second",
+          "name": "01 · 副标题 · 一群人同拍",
+          "text": "一群人同拍",
+          "font": "HarmonyOS_Sans_SC_Black",
+          "fontSize": 108,
+          "slantDegrees": 9,
+          "x": 96,
+          "baseline": 388,
+          "effects": {
+            "scale": 1,
+            "stroke": [
+              {
+                "enabled": true,
+                "present": true,
+                "showInDialog": true,
+                "color": {
+                  "r": 23,
+                  "g": 27,
+                  "b": 31
+                },
+                "size": {
+                  "units": "Pixels",
+                  "value": 5
+                },
+                "position": "center",
+                "fillType": "color",
+                "blendMode": "normal",
+                "opacity": 1
+              }
+            ],
+            "dropShadow": [
+              {
+                "enabled": true,
+                "present": true,
+                "showInDialog": true,
+                "color": {
+                  "r": 41,
+                  "g": 181,
+                  "b": 174
+                },
+                "opacity": 1,
+                "blendMode": "normal",
+                "useGlobalLight": false,
+                "angle": 131.6335393365702,
+                "distance": {
+                  "units": "Pixels",
+                  "value": 12.041594578792296
+                },
+                "size": {
+                  "units": "Pixels",
+                  "value": 0
+                },
+                "choke": {
+                  "units": "Pixels",
+                  "value": 0
+                },
+                "layerConceals": true
+              }
+            ]
+          },
+          "id": 10003
+        },
+        {
+          "role": "subtitle",
+          "name": "01 · 说明 · 从单人节拍，到组队一起行进",
+          "text": "从单人节拍，到组队一起行进",
+          "font": "HarmonyOS_Sans_SC_Black",
+          "fontSize": 30,
+          "slantDegrees": 9,
+          "x": 96,
+          "baseline": 468,
+          "id": 10004
+        }
+      ],
+      "output": "psd/01.psd"
+    },
+    {
+      "page": "02",
+      "layers": [
+        {
+          "role": "eyebrow",
+          "name": "02 · 编号 · ONEBEAT / 02",
+          "text": "ONEBEAT / 02",
+          "font": "HarmonyOS_Sans_SC_Black",
+          "fontSize": 23,
+          "slantDegrees": 9,
+          "x": 738,
+          "baseline": 1424,
+          "id": 10101
+        },
+        {
+          "role": "first",
+          "name": "02 · 主标题 · 扫码入队",
+          "text": "扫码入队",
+          "font": "HarmonyOS_Sans_SC_Black",
+          "fontSize": 68,
+          "slantDegrees": 9,
+          "x": 724,
+          "baseline": 1518,
+          "effects": {
+            "scale": 1,
+            "dropShadow": [
+              {
+                "enabled": true,
+                "present": true,
+                "showInDialog": true,
+                "color": {
+                  "r": 255,
+                  "g": 249,
+                  "b": 238
+                },
+                "opacity": 1,
+                "blendMode": "normal",
+                "useGlobalLight": false,
+                "angle": 131.6335393365702,
+                "distance": {
+                  "units": "Pixels",
+                  "value": 12.041594578792296
+                },
+                "size": {
+                  "units": "Pixels",
+                  "value": 0
+                },
+                "choke": {
+                  "units": "Pixels",
+                  "value": 0
+                },
+                "layerConceals": true
+              }
+            ]
+          },
+          "id": 10102
+        },
+        {
+          "role": "second",
+          "name": "02 · 副标题 · 一起出发",
+          "text": "一起出发",
+          "font": "HarmonyOS_Sans_SC_Black",
+          "fontSize": 68,
+          "slantDegrees": 9,
+          "x": 724,
+          "baseline": 1602,
+          "effects": {
+            "scale": 1,
+            "stroke": [
+              {
+                "enabled": true,
+                "present": true,
+                "showInDialog": true,
+                "color": {
+                  "r": 23,
+                  "g": 27,
+                  "b": 31
+                },
+                "size": {
+                  "units": "Pixels",
+                  "value": 5
+                },
+                "position": "center",
+                "fillType": "color",
+                "blendMode": "normal",
+                "opacity": 1
+              }
+            ],
+            "dropShadow": [
+              {
+                "enabled": true,
+                "present": true,
+                "showInDialog": true,
+                "color": {
+                  "r": 41,
+                  "g": 181,
+                  "b": 174
+                },
+                "opacity": 1,
+                "blendMode": "normal",
+                "useGlobalLight": false,
+                "angle": 131.6335393365702,
+                "distance": {
+                  "units": "Pixels",
+                  "value": 12.041594578792296
+                },
+                "size": {
+                  "units": "Pixels",
+                  "value": 0
+                },
+                "choke": {
+                  "units": "Pixels",
+                  "value": 0
+                },
+                "layerConceals": true
+              }
+            ]
+          },
+          "id": 10103
+        },
+        {
+          "role": "subtitle",
+          "name": "02 · 说明 · 也可输入 6 位加入码",
+          "text": "也可输入 6 位加入码",
+          "font": "HarmonyOS_Sans_SC_Black",
+          "fontSize": 25,
+          "slantDegrees": 9,
+          "x": 724,
+          "baseline": 1662,
+          "id": 10104
+        }
+      ],
+      "output": "psd/02.psd"
+    },
+    {
+      "page": "03",
+      "layers": [
+        {
+          "role": "eyebrow",
+          "name": "03 · 编号 · ONEBEAT / 03",
+          "text": "ONEBEAT / 03",
+          "font": "HarmonyOS_Sans_SC_Black",
+          "fontSize": 23,
+          "slantDegrees": 9,
+          "x": 110,
+          "baseline": 118,
+          "id": 10201
+        },
+        {
+          "role": "first",
+          "name": "03 · 主标题 · 角色与场景",
+          "text": "角色与场景",
+          "font": "HarmonyOS_Sans_SC_Black",
+          "fontSize": 108,
+          "slantDegrees": 9,
+          "x": 96,
+          "baseline": 258,
+          "effects": {
+            "scale": 1,
+            "dropShadow": [
+              {
+                "enabled": true,
+                "present": true,
+                "showInDialog": true,
+                "color": {
+                  "r": 255,
+                  "g": 249,
+                  "b": 238
+                },
+                "opacity": 1,
+                "blendMode": "normal",
+                "useGlobalLight": false,
+                "angle": 131.6335393365702,
+                "distance": {
+                  "units": "Pixels",
+                  "value": 12.041594578792296
+                },
+                "size": {
+                  "units": "Pixels",
+                  "value": 0
+                },
+                "choke": {
+                  "units": "Pixels",
+                  "value": 0
+                },
+                "layerConceals": true
+              }
+            ]
+          },
+          "id": 10202
+        },
+        {
+          "role": "second",
+          "name": "03 · 副标题 · 随心搭配",
+          "text": "随心搭配",
+          "font": "HarmonyOS_Sans_SC_Black",
+          "fontSize": 108,
+          "slantDegrees": 9,
+          "x": 96,
+          "baseline": 388,
+          "effects": {
+            "scale": 1,
+            "stroke": [
+              {
+                "enabled": true,
+                "present": true,
+                "showInDialog": true,
+                "color": {
+                  "r": 23,
+                  "g": 27,
+                  "b": 31
+                },
+                "size": {
+                  "units": "Pixels",
+                  "value": 5
+                },
+                "position": "center",
+                "fillType": "color",
+                "blendMode": "normal",
+                "opacity": 1
+              }
+            ],
+            "dropShadow": [
+              {
+                "enabled": true,
+                "present": true,
+                "showInDialog": true,
+                "color": {
+                  "r": 41,
+                  "g": 181,
+                  "b": 174
+                },
+                "opacity": 1,
+                "blendMode": "normal",
+                "useGlobalLight": false,
+                "angle": 131.6335393365702,
+                "distance": {
+                  "units": "Pixels",
+                  "value": 12.041594578792296
+                },
+                "size": {
+                  "units": "Pixels",
+                  "value": 0
+                },
+                "choke": {
+                  "units": "Pixels",
+                  "value": 0
+                },
+                "layerConceals": true
+              }
+            ]
+          },
+          "id": 10203
+        },
+        {
+          "role": "subtitle",
+          "name": "03 · 说明 · 随机选角，让每次练习都有新鲜感",
+          "text": "随机选角，让每次练习都有新鲜感",
+          "font": "HarmonyOS_Sans_SC_Black",
+          "fontSize": 30,
+          "slantDegrees": 9,
+          "x": 96,
+          "baseline": 468,
+          "id": 10204
+        },
+        {
+          "role": "note",
+          "name": "03 · 功能提示 · 部分角色需解锁",
+          "text": "部分角色需解锁",
+          "font": "HarmonyOS_Sans_SC_Black",
+          "fontSize": 22,
+          "slantDegrees": 9,
+          "x": 108,
+          "baseline": 523,
+          "id": 10206
+        }
+      ],
+      "output": "psd/03.psd"
+    },
+    {
+      "page": "04",
+      "layers": [
+        {
+          "role": "eyebrow",
+          "name": "04 · 编号 · ONEBEAT / 04",
+          "text": "ONEBEAT / 04",
+          "font": "HarmonyOS_Sans_SC_Black",
+          "fontSize": 23,
+          "slantDegrees": 9,
+          "x": 314,
+          "baseline": 1654,
+          "id": 10301
+        },
+        {
+          "role": "first",
+          "name": "04 · 主标题 · 节奏听得见",
+          "text": "节奏听得见",
+          "font": "HarmonyOS_Sans_SC_Black",
+          "fontSize": 82,
+          "slantDegrees": 9,
+          "x": 300,
+          "baseline": 1750,
+          "effects": {
+            "scale": 1,
+            "dropShadow": [
+              {
+                "enabled": true,
+                "present": true,
+                "showInDialog": true,
+                "color": {
+                  "r": 255,
+                  "g": 249,
+                  "b": 238
+                },
+                "opacity": 1,
+                "blendMode": "normal",
+                "useGlobalLight": false,
+                "angle": 131.6335393365702,
+                "distance": {
+                  "units": "Pixels",
+                  "value": 12.041594578792296
+                },
+                "size": {
+                  "units": "Pixels",
+                  "value": 0
+                },
+                "choke": {
+                  "units": "Pixels",
+                  "value": 0
+                },
+                "layerConceals": true
+              }
+            ]
+          },
+          "id": 10302
+        },
+        {
+          "role": "second",
+          "name": "04 · 副标题 · 同拍看得见",
+          "text": "同拍看得见",
+          "font": "HarmonyOS_Sans_SC_Black",
+          "fontSize": 82,
+          "slantDegrees": 9,
+          "x": 300,
+          "baseline": 1848,
+          "effects": {
+            "scale": 1,
+            "stroke": [
+              {
+                "enabled": true,
+                "present": true,
+                "showInDialog": true,
+                "color": {
+                  "r": 23,
+                  "g": 27,
+                  "b": 31
+                },
+                "size": {
+                  "units": "Pixels",
+                  "value": 5
+                },
+                "position": "center",
+                "fillType": "color",
+                "blendMode": "normal",
+                "opacity": 1
+              }
+            ],
+            "dropShadow": [
+              {
+                "enabled": true,
+                "present": true,
+                "showInDialog": true,
+                "color": {
+                  "r": 41,
+                  "g": 181,
+                  "b": 174
+                },
+                "opacity": 1,
+                "blendMode": "normal",
+                "useGlobalLight": false,
+                "angle": 131.6335393365702,
+                "distance": {
+                  "units": "Pixels",
+                  "value": 12.041594578792296
+                },
+                "size": {
+                  "units": "Pixels",
+                  "value": 0
+                },
+                "choke": {
+                  "units": "Pixels",
+                  "value": 0
+                },
+                "layerConceals": true
+              }
+            ]
+          },
+          "id": 10303
+        },
+        {
+          "role": "subtitle",
+          "name": "04 · 说明 · 节拍提示、角色行进、实时声波同屏呈现",
+          "text": "节拍提示、角色行进、实时声波同屏呈现",
+          "font": "HarmonyOS_Sans_SC_Black",
+          "fontSize": 27,
+          "slantDegrees": 9,
+          "x": 300,
+          "baseline": 1905,
+          "id": 10304
+        }
+      ],
+      "output": "psd/04.psd"
+    },
+    {
+      "page": "05",
+      "layers": [
+        {
+          "role": "eyebrow",
+          "name": "05 · 编号 · ONEBEAT / 05",
+          "text": "ONEBEAT / 05",
+          "font": "HarmonyOS_Sans_SC_Black",
+          "fontSize": 23,
+          "slantDegrees": 9,
+          "x": 148,
+          "baseline": 292,
+          "id": 10401
+        },
+        {
+          "role": "first",
+          "name": "05 · 主标题 · 把这一拍",
+          "text": "把这一拍",
+          "font": "HarmonyOS_Sans_SC_Black",
+          "fontSize": 88,
+          "slantDegrees": 9,
+          "x": 134,
+          "baseline": 390,
+          "effects": {
+            "scale": 1,
+            "dropShadow": [
+              {
+                "enabled": true,
+                "present": true,
+                "showInDialog": true,
+                "color": {
+                  "r": 255,
+                  "g": 249,
+                  "b": 238
+                },
+                "opacity": 1,
+                "blendMode": "normal",
+                "useGlobalLight": false,
+                "angle": 131.6335393365702,
+                "distance": {
+                  "units": "Pixels",
+                  "value": 12.041594578792296
+                },
+                "size": {
+                  "units": "Pixels",
+                  "value": 0
+                },
+                "choke": {
+                  "units": "Pixels",
+                  "value": 0
+                },
+                "layerConceals": true
+              }
+            ]
+          },
+          "id": 10402
+        },
+        {
+          "role": "second",
+          "name": "05 · 副标题 · 留成作品",
+          "text": "留成作品",
+          "font": "HarmonyOS_Sans_SC_Black",
+          "fontSize": 88,
+          "slantDegrees": 9,
+          "x": 134,
+          "baseline": 490,
+          "effects": {
+            "scale": 1,
+            "stroke": [
+              {
+                "enabled": true,
+                "present": true,
+                "showInDialog": true,
+                "color": {
+                  "r": 23,
+                  "g": 27,
+                  "b": 31
+                },
+                "size": {
+                  "units": "Pixels",
+                  "value": 5
+                },
+                "position": "center",
+                "fillType": "color",
+                "blendMode": "normal",
+                "opacity": 1
+              }
+            ],
+            "dropShadow": [
+              {
+                "enabled": true,
+                "present": true,
+                "showInDialog": true,
+                "color": {
+                  "r": 41,
+                  "g": 181,
+                  "b": 174
+                },
+                "opacity": 1,
+                "blendMode": "normal",
+                "useGlobalLight": false,
+                "angle": 131.6335393365702,
+                "distance": {
+                  "units": "Pixels",
+                  "value": 12.041594578792296
+                },
+                "size": {
+                  "units": "Pixels",
+                  "value": 0
+                },
+                "choke": {
+                  "units": "Pixels",
+                  "value": 0
+                },
+                "layerConceals": true
+              }
+            ]
+          },
+          "id": 10403
+        },
+        {
+          "role": "subtitle",
+          "name": "05 · 说明 · 回看录制，微调 MIC 音量与时间对齐",
+          "text": "回看录制，微调 MIC 音量与时间对齐",
+          "font": "HarmonyOS_Sans_SC_Black",
+          "fontSize": 27,
+          "slantDegrees": 9,
+          "x": 134,
+          "baseline": 550,
+          "id": 10404
+        }
+      ],
+      "output": "psd/05.psd"
+    },
+    {
+      "page": "06",
+      "layers": [
+        {
+          "role": "eyebrow",
+          "name": "06 · 编号 · ONEBEAT / 06",
+          "text": "ONEBEAT / 06",
+          "font": "HarmonyOS_Sans_SC_Black",
+          "fontSize": 23,
+          "slantDegrees": 9,
+          "x": 110,
+          "baseline": 118,
+          "id": 10501
+        },
+        {
+          "role": "first",
+          "name": "06 · 主标题 · 每一段节奏",
+          "text": "每一段节奏",
+          "font": "HarmonyOS_Sans_SC_Black",
+          "fontSize": 108,
+          "slantDegrees": 9,
+          "x": 96,
+          "baseline": 258,
+          "effects": {
+            "scale": 1,
+            "dropShadow": [
+              {
+                "enabled": true,
+                "present": true,
+                "showInDialog": true,
+                "color": {
+                  "r": 255,
+                  "g": 249,
+                  "b": 238
+                },
+                "opacity": 1,
+                "blendMode": "normal",
+                "useGlobalLight": false,
+                "angle": 131.6335393365702,
+                "distance": {
+                  "units": "Pixels",
+                  "value": 12.041594578792296
+                },
+                "size": {
+                  "units": "Pixels",
+                  "value": 0
+                },
+                "choke": {
+                  "units": "Pixels",
+                  "value": 0
+                },
+                "layerConceals": true
+              }
+            ]
+          },
+          "id": 10502
+        },
+        {
+          "role": "second",
+          "name": "06 · 副标题 · 都由你来编",
+          "text": "都由你来编",
+          "font": "HarmonyOS_Sans_SC_Black",
+          "fontSize": 108,
+          "slantDegrees": 9,
+          "x": 96,
+          "baseline": 388,
+          "effects": {
+            "scale": 1,
+            "stroke": [
+              {
+                "enabled": true,
+                "present": true,
+                "showInDialog": true,
+                "color": {
+                  "r": 23,
+                  "g": 27,
+                  "b": 31
+                },
+                "size": {
+                  "units": "Pixels",
+                  "value": 5
+                },
+                "position": "center",
+                "fillType": "color",
+                "blendMode": "normal",
+                "opacity": 1
+              }
+            ],
+            "dropShadow": [
+              {
+                "enabled": true,
+                "present": true,
+                "showInDialog": true,
+                "color": {
+                  "r": 41,
+                  "g": 181,
+                  "b": 174
+                },
+                "opacity": 1,
+                "blendMode": "normal",
+                "useGlobalLight": false,
+                "angle": 131.6335393365702,
+                "distance": {
+                  "units": "Pixels",
+                  "value": 12.041594578792296
+                },
+                "size": {
+                  "units": "Pixels",
+                  "value": 0
+                },
+                "choke": {
+                  "units": "Pixels",
+                  "value": 0
+                },
+                "layerConceals": true
+              }
+            ]
+          },
+          "id": 10503
+        },
+        {
+          "role": "subtitle",
+          "name": "06 · 说明 · 分段编排节奏与加花，串成完整练习",
+          "text": "分段编排节奏与加花，串成完整练习",
+          "font": "HarmonyOS_Sans_SC_Black",
+          "fontSize": 30,
+          "slantDegrees": 9,
+          "x": 96,
+          "baseline": 468,
+          "id": 10504
+        },
+        {
+          "role": "note",
+          "name": "06 · 功能提示 · PRO 功能 · 支持月卡或分享试用",
+          "text": "PRO 功能 · 支持月卡或分享试用",
+          "font": "HarmonyOS_Sans_SC_Black",
+          "fontSize": 22,
+          "slantDegrees": 9,
+          "x": 108,
+          "baseline": 523,
+          "id": 10506
+        }
+      ],
+      "output": "psd/06.psd"
+    }
+  ],
+  "verification": "Native TySh/EngineData, font PostScript names, font sizes, shear transforms and editable effects read back. Original layer records/channel bytes and embedded smart objects retained by byte-preserving merger. No native-editor re-save verification."
+}

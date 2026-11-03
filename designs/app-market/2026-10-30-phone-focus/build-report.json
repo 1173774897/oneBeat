@@ -1,0 +1,52 @@
+{
+  "canvas": {
+    "width": 1080,
+    "height": 1920
+  },
+  "screenRatio": {
+    "width": 1276,
+    "height": 2848
+  },
+  "checks": [
+    {
+      "mode": "full",
+      "phone": {
+        "x": 140,
+        "y": 410,
+        "width": 800,
+        "inset": 24,
+        "screenRadius": 68,
+        "height": 1726.4451410658307,
+        "radius": 92
+      },
+      "screen": {
+        "x": 164,
+        "y": 434,
+        "width": 752,
+        "height": 1678.4451410658307,
+        "radius": 68
+      },
+      "transparentScreenVerified": true
+    },
+    {
+      "mode": "fit",
+      "phone": {
+        "x": 195,
+        "y": 320,
+        "width": 690,
+        "inset": 22,
+        "screenRadius": 60,
+        "height": 1485.8557993730408,
+        "radius": 82
+      },
+      "screen": {
+        "x": 217,
+        "y": 342,
+        "width": 646,
+        "height": 1441.8557993730408,
+        "radius": 60
+      },
+      "transparentScreenVerified": true
+    }
+  ]
+}

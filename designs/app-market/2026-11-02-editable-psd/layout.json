@@ -1,0 +1,188 @@
+{
+  "canvas": {
+    "width": 1080,
+    "height": 1920
+  },
+  "font": {
+    "family": "HarmonyOS Sans SC",
+    "officialSource": "https://developer.huawei.com/images/download/general/HarmonyOS-Sans.zip"
+  },
+  "palette": {
+    "ink": "#171B1F",
+    "paper": "#FFF9EE",
+    "teal": "#29B5AE"
+  },
+  "styles": {
+    "headline": {
+      "fontSize": 108,
+      "weight": 900,
+      "slantDegrees": 9,
+      "letterSpacing": 0.5
+    },
+    "compactHeadline": {
+      "fontSize": 68,
+      "weight": 900,
+      "slantDegrees": 9,
+      "letterSpacing": 0.5
+    },
+    "subtitle": {
+      "fontSize": 30,
+      "weight": 900,
+      "slantDegrees": 9,
+      "letterSpacing": 0
+    },
+    "compactSubtitle": {
+      "fontSize": 25,
+      "weight": 900,
+      "slantDegrees": 9,
+      "letterSpacing": 0
+    },
+    "eyebrow": {
+      "fontSize": 23,
+      "weight": 900,
+      "slantDegrees": 9,
+      "letterSpacing": 1.4
+    },
+    "note": {
+      "fontSize": 22,
+      "weight": 900,
+      "slantDegrees": 9,
+      "letterSpacing": 0
+    },
+    "bottomHeadline": {
+      "fontSize": 82,
+      "weight": 900,
+      "slantDegrees": 9,
+      "letterSpacing": 0.5
+    },
+    "raisedHeadline": {
+      "fontSize": 88,
+      "weight": 900,
+      "slantDegrees": 9,
+      "letterSpacing": 0.5
+    },
+    "narrowSubtitle": {
+      "fontSize": 27,
+      "weight": 900,
+      "slantDegrees": 9,
+      "letterSpacing": 0
+    }
+  },
+  "titleEffects": {
+    "outlineWidth": 5,
+    "shadowX": 8,
+    "shadowY": 9
+  },
+  "pages": [
+    {
+      "id": "01",
+      "source": "source/01.png",
+      "x": 96,
+      "eyebrowY": 88,
+      "headlineStyle": "headline",
+      "firstBaseline": 258,
+      "secondBaseline": 388,
+      "headline": [
+        "一个人练习",
+        "一群人同拍"
+      ],
+      "subtitle": "从单人节拍，到组队一起行进",
+      "subtitleStyle": "subtitle",
+      "subtitleBaseline": 468,
+      "yOffset": 0
+    },
+    {
+      "id": "02",
+      "source": "source/02.png",
+      "x": 724,
+      "eyebrowY": 1394,
+      "headlineStyle": "compactHeadline",
+      "firstBaseline": 1518,
+      "secondBaseline": 1602,
+      "headline": [
+        "扫码入队",
+        "一起出发"
+      ],
+      "subtitle": "也可输入 6 位加入码",
+      "subtitleStyle": "compactSubtitle",
+      "subtitleBaseline": 1662,
+      "yOffset": 0
+    },
+    {
+      "id": "03",
+      "source": "source/03.png",
+      "x": 96,
+      "eyebrowY": 88,
+      "headlineStyle": "headline",
+      "firstBaseline": 258,
+      "secondBaseline": 388,
+      "headline": [
+        "角色与场景",
+        "随心搭配"
+      ],
+      "subtitle": "随机选角，让每次练习都有新鲜感",
+      "subtitleStyle": "subtitle",
+      "subtitleBaseline": 468,
+      "note": "部分角色需解锁",
+      "noteY": 498,
+      "yOffset": 0
+    },
+    {
+      "id": "04",
+      "source": "source/04.png",
+      "x": 300,
+      "eyebrowY": 1624,
+      "headlineStyle": "bottomHeadline",
+      "firstBaseline": 1750,
+      "secondBaseline": 1848,
+      "headline": [
+        "节奏听得见",
+        "同拍看得见"
+      ],
+      "subtitle": "节拍提示、角色行进、实时声波同屏呈现",
+      "subtitleStyle": "narrowSubtitle",
+      "subtitleBaseline": 1905,
+      "yOffset": 0
+    },
+    {
+      "id": "05",
+      "source": "source/05.png",
+      "x": 134,
+      "eyebrowY": 262,
+      "headlineStyle": "raisedHeadline",
+      "firstBaseline": 390,
+      "secondBaseline": 490,
+      "headline": [
+        "把这一拍",
+        "留成作品"
+      ],
+      "subtitle": "回看录制，微调 MIC 音量与时间对齐",
+      "subtitleStyle": "narrowSubtitle",
+      "subtitleBaseline": 550,
+      "yOffset": 0
+    },
+    {
+      "id": "06",
+      "source": "source/06.png",
+      "x": 96,
+      "eyebrowY": 88,
+      "headlineStyle": "headline",
+      "firstBaseline": 258,
+      "secondBaseline": 388,
+      "headline": [
+        "每一段节奏",
+        "都由你来编"
+      ],
+      "subtitle": "分段编排节奏与加花，串成完整练习",
+      "subtitleStyle": "subtitle",
+      "subtitleBaseline": 468,
+      "note": "PRO 功能 · 支持月卡或分享试用",
+      "noteY": 498,
+      "yOffset": 0
+    }
+  ],
+  "sourcePsdDirectory": "/Users/lizhe/Downloads/onebeatprocessing/screenshottemplet/transparent-screens/editing",
+  "fontFiles": {
+    "900": "fonts/HarmonyOS_Sans_SC_Black.ttf"
+  }
+}

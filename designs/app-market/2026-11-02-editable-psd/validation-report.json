@@ -1,0 +1,660 @@
+{
+  "status": "passed",
+  "review": "Independent byte preservation, native type/effects metadata and merged-preview decode verification",
+  "editableTypeCount": 26,
+  "fontWeight900VerifiedFromFontFile": true,
+  "fontPostScriptName": "HarmonyOS_Sans_SC_Black",
+  "allNewTextSlanted9Degrees": true,
+  "nativeHeadlineEffectsVerified": true,
+  "pages": [
+    {
+      "page": "01",
+      "originalLayerCount": 5,
+      "addedLayerCount": 5,
+      "editableTypeCount": 4,
+      "originalLayersAndChannelsByteIdentical": true,
+      "globalLinkedDataByteIdentical": true,
+      "nonThumbnailResourcesByteIdentical": true,
+      "sourceOriginalSha256Unchanged": true,
+      "mergedCompositeExactRGBAChannelMatch": true,
+      "thumbnailJPEGValid": true,
+      "nativeTyShAndLfx2Present": true,
+      "staleTxt2Removed": true,
+      "outputSha256": "e10b343ffe7aa35cff5dd3cbcfc28c788d4b0377f3e5d5a2a5dc0ef7ab349868"
+    },
+    {
+      "page": "02",
+      "originalLayerCount": 4,
+      "addedLayerCount": 5,
+      "editableTypeCount": 4,
+      "originalLayersAndChannelsByteIdentical": true,
+      "globalLinkedDataByteIdentical": true,
+      "nonThumbnailResourcesByteIdentical": true,
+      "sourceOriginalSha256Unchanged": true,
+      "mergedCompositeExactRGBAChannelMatch": true,
+      "thumbnailJPEGValid": true,
+      "nativeTyShAndLfx2Present": true,
+      "staleTxt2Removed": false,
+      "outputSha256": "24e507d891bf49fef1f2791e2c82151af8435b238938d46f61877847898931d2"
+    },
+    {
+      "page": "03",
+      "originalLayerCount": 5,
+      "addedLayerCount": 7,
+      "editableTypeCount": 5,
+      "originalLayersAndChannelsByteIdentical": true,
+      "globalLinkedDataByteIdentical": true,
+      "nonThumbnailResourcesByteIdentical": true,
+      "sourceOriginalSha256Unchanged": true,
+      "mergedCompositeExactRGBAChannelMatch": true,
+      "thumbnailJPEGValid": true,
+      "nativeTyShAndLfx2Present": true,
+      "staleTxt2Removed": false,
+      "outputSha256": "175d1466142113c85c494aed72ded54cb6d6f631fad5121bcd45853d96461e6e"
+    },
+    {
+      "page": "04",
+      "originalLayerCount": 11,
+      "addedLayerCount": 5,
+      "editableTypeCount": 4,
+      "originalLayersAndChannelsByteIdentical": true,
+      "globalLinkedDataByteIdentical": true,
+      "nonThumbnailResourcesByteIdentical": true,
+      "sourceOriginalSha256Unchanged": true,
+      "mergedCompositeExactRGBAChannelMatch": true,
+      "thumbnailJPEGValid": true,
+      "nativeTyShAndLfx2Present": true,
+      "staleTxt2Removed": false,
+      "outputSha256": "2fb15a54b2591a15d8b6e80f8c1b070c60c21adb48ceab930d37585d21b58041"
+    },
+    {
+      "page": "05",
+      "originalLayerCount": 5,
+      "addedLayerCount": 5,
+      "editableTypeCount": 4,
+      "originalLayersAndChannelsByteIdentical": true,
+      "globalLinkedDataByteIdentical": true,
+      "nonThumbnailResourcesByteIdentical": true,
+      "sourceOriginalSha256Unchanged": true,
+      "mergedCompositeExactRGBAChannelMatch": true,
+      "thumbnailJPEGValid": true,
+      "nativeTyShAndLfx2Present": true,
+      "staleTxt2Removed": false,
+      "outputSha256": "3d3f2e48156694b48150b8999d4b111a2aa87a4f28b06fd4ad607e4e27ba3350"
+    },
+    {
+      "page": "06",
+      "originalLayerCount": 3,
+      "addedLayerCount": 7,
+      "editableTypeCount": 5,
+      "originalLayersAndChannelsByteIdentical": true,
+      "globalLinkedDataByteIdentical": true,
+      "nonThumbnailResourcesByteIdentical": true,
+      "sourceOriginalSha256Unchanged": true,
+      "mergedCompositeExactRGBAChannelMatch": true,
+      "thumbnailJPEGValid": true,
+      "nativeTyShAndLfx2Present": true,
+      "staleTxt2Removed": false,
+      "outputSha256": "2a9c3c6364567dce0e9a7dcf4e68474908d7c87e02d8761c16c78416ebca0193"
+    }
+  ],
+  "textLayerChecks": [
+    {
+      "page": "01",
+      "typeCount": 4,
+      "typeLayers": [
+        {
+          "id": 10001,
+          "name": "01 · 编号 · ONEBEAT / 01",
+          "text": "ONEBEAT / 01",
+          "font": "HarmonyOS_Sans_SC_Black",
+          "fontSize": 23,
+          "slantDegrees": 9,
+          "fill": {
+            "r": 255,
+            "g": 248.99984999999998,
+            "b": 237.99915
+          },
+          "effects": {}
+        },
+        {
+          "id": 10002,
+          "name": "01 · 主标题 · 一个人练习",
+          "text": "一个人练习",
+          "font": "HarmonyOS_Sans_SC_Black",
+          "fontSize": 108,
+          "slantDegrees": 9,
+          "fill": {
+            "r": 23.001,
+            "g": 26.9994,
+            "b": 31.00035
+          },
+          "effects": {
+            "shadowColor": {
+              "r": 255,
+              "g": 249,
+              "b": 238
+            },
+            "offsetX": 8.000000000000002,
+            "offsetY": 8.999999999999996,
+            "blur": 0
+          }
+        },
+        {
+          "id": 10003,
+          "name": "01 · 副标题 · 一群人同拍",
+          "text": "一群人同拍",
+          "font": "HarmonyOS_Sans_SC_Black",
+          "fontSize": 108,
+          "slantDegrees": 9,
+          "fill": {
+            "r": 255,
+            "g": 248.99984999999998,
+            "b": 237.99915
+          },
+          "effects": {
+            "shadowColor": {
+              "r": 41,
+              "g": 181,
+              "b": 174
+            },
+            "offsetX": 8.000000000000002,
+            "offsetY": 8.999999999999996,
+            "blur": 0,
+            "stroke": {
+              "width": 5,
+              "color": {
+                "r": 23,
+                "g": 27,
+                "b": 31
+              }
+            }
+          }
+        },
+        {
+          "id": 10004,
+          "name": "01 · 说明 · 从单人节拍，到组队一起行进",
+          "text": "从单人节拍，到组队一起行进",
+          "font": "HarmonyOS_Sans_SC_Black",
+          "fontSize": 30,
+          "slantDegrees": 9,
+          "fill": {
+            "r": 23.001,
+            "g": 26.9994,
+            "b": 31.00035
+          },
+          "effects": {}
+        }
+      ]
+    },
+    {
+      "page": "02",
+      "typeCount": 4,
+      "typeLayers": [
+        {
+          "id": 10101,
+          "name": "02 · 编号 · ONEBEAT / 02",
+          "text": "ONEBEAT / 02",
+          "font": "HarmonyOS_Sans_SC_Black",
+          "fontSize": 23,
+          "slantDegrees": 9,
+          "fill": {
+            "r": 255,
+            "g": 248.99984999999998,
+            "b": 237.99915
+          },
+          "effects": {}
+        },
+        {
+          "id": 10102,
+          "name": "02 · 主标题 · 扫码入队",
+          "text": "扫码入队",
+          "font": "HarmonyOS_Sans_SC_Black",
+          "fontSize": 68,
+          "slantDegrees": 9,
+          "fill": {
+            "r": 23.001,
+            "g": 26.9994,
+            "b": 31.00035
+          },
+          "effects": {
+            "shadowColor": {
+              "r": 255,
+              "g": 249,
+              "b": 238
+            },
+            "offsetX": 8.000000000000002,
+            "offsetY": 8.999999999999996,
+            "blur": 0
+          }
+        },
+        {
+          "id": 10103,
+          "name": "02 · 副标题 · 一起出发",
+          "text": "一起出发",
+          "font": "HarmonyOS_Sans_SC_Black",
+          "fontSize": 68,
+          "slantDegrees": 9,
+          "fill": {
+            "r": 255,
+            "g": 248.99984999999998,
+            "b": 237.99915
+          },
+          "effects": {
+            "shadowColor": {
+              "r": 41,
+              "g": 181,
+              "b": 174
+            },
+            "offsetX": 8.000000000000002,
+            "offsetY": 8.999999999999996,
+            "blur": 0,
+            "stroke": {
+              "width": 5,
+              "color": {
+                "r": 23,
+                "g": 27,
+                "b": 31
+              }
+            }
+          }
+        },
+        {
+          "id": 10104,
+          "name": "02 · 说明 · 也可输入 6 位加入码",
+          "text": "也可输入 6 位加入码",
+          "font": "HarmonyOS_Sans_SC_Black",
+          "fontSize": 25,
+          "slantDegrees": 9,
+          "fill": {
+            "r": 23.001,
+            "g": 26.9994,
+            "b": 31.00035
+          },
+          "effects": {}
+        }
+      ]
+    },
+    {
+      "page": "03",
+      "typeCount": 5,
+      "typeLayers": [
+        {
+          "id": 10201,
+          "name": "03 · 编号 · ONEBEAT / 03",
+          "text": "ONEBEAT / 03",
+          "font": "HarmonyOS_Sans_SC_Black",
+          "fontSize": 23,
+          "slantDegrees": 9,
+          "fill": {
+            "r": 255,
+            "g": 248.99984999999998,
+            "b": 237.99915
+          },
+          "effects": {}
+        },
+        {
+          "id": 10202,
+          "name": "03 · 主标题 · 角色与场景",
+          "text": "角色与场景",
+          "font": "HarmonyOS_Sans_SC_Black",
+          "fontSize": 108,
+          "slantDegrees": 9,
+          "fill": {
+            "r": 23.001,
+            "g": 26.9994,
+            "b": 31.00035
+          },
+          "effects": {
+            "shadowColor": {
+              "r": 255,
+              "g": 249,
+              "b": 238
+            },
+            "offsetX": 8.000000000000002,
+            "offsetY": 8.999999999999996,
+            "blur": 0
+          }
+        },
+        {
+          "id": 10203,
+          "name": "03 · 副标题 · 随心搭配",
+          "text": "随心搭配",
+          "font": "HarmonyOS_Sans_SC_Black",
+          "fontSize": 108,
+          "slantDegrees": 9,
+          "fill": {
+            "r": 255,
+            "g": 248.99984999999998,
+            "b": 237.99915
+          },
+          "effects": {
+            "shadowColor": {
+              "r": 41,
+              "g": 181,
+              "b": 174
+            },
+            "offsetX": 8.000000000000002,
+            "offsetY": 8.999999999999996,
+            "blur": 0,
+            "stroke": {
+              "width": 5,
+              "color": {
+                "r": 23,
+                "g": 27,
+                "b": 31
+              }
+            }
+          }
+        },
+        {
+          "id": 10204,
+          "name": "03 · 说明 · 随机选角，让每次练习都有新鲜感",
+          "text": "随机选角，让每次练习都有新鲜感",
+          "font": "HarmonyOS_Sans_SC_Black",
+          "fontSize": 30,
+          "slantDegrees": 9,
+          "fill": {
+            "r": 23.001,
+            "g": 26.9994,
+            "b": 31.00035
+          },
+          "effects": {}
+        },
+        {
+          "id": 10206,
+          "name": "03 · 功能提示 · 部分角色需解锁",
+          "text": "部分角色需解锁",
+          "font": "HarmonyOS_Sans_SC_Black",
+          "fontSize": 22,
+          "slantDegrees": 9,
+          "fill": {
+            "r": 23.001,
+            "g": 26.9994,
+            "b": 31.00035
+          },
+          "effects": {}
+        }
+      ]
+    },
+    {
+      "page": "04",
+      "typeCount": 4,
+      "typeLayers": [
+        {
+          "id": 10301,
+          "name": "04 · 编号 · ONEBEAT / 04",
+          "text": "ONEBEAT / 04",
+          "font": "HarmonyOS_Sans_SC_Black",
+          "fontSize": 23,
+          "slantDegrees": 9,
+          "fill": {
+            "r": 255,
+            "g": 248.99984999999998,
+            "b": 237.99915
+          },
+          "effects": {}
+        },
+        {
+          "id": 10302,
+          "name": "04 · 主标题 · 节奏听得见",
+          "text": "节奏听得见",
+          "font": "HarmonyOS_Sans_SC_Black",
+          "fontSize": 82,
+          "slantDegrees": 9,
+          "fill": {
+            "r": 23.001,
+            "g": 26.9994,
+            "b": 31.00035
+          },
+          "effects": {
+            "shadowColor": {
+              "r": 255,
+              "g": 249,
+              "b": 238
+            },
+            "offsetX": 8.000000000000002,
+            "offsetY": 8.999999999999996,
+            "blur": 0
+          }
+        },
+        {
+          "id": 10303,
+          "name": "04 · 副标题 · 同拍看得见",
+          "text": "同拍看得见",
+          "font": "HarmonyOS_Sans_SC_Black",
+          "fontSize": 82,
+          "slantDegrees": 9,
+          "fill": {
+            "r": 255,
+            "g": 248.99984999999998,
+            "b": 237.99915
+          },
+          "effects": {
+            "shadowColor": {
+              "r": 41,
+              "g": 181,
+              "b": 174
+            },
+            "offsetX": 8.000000000000002,
+            "offsetY": 8.999999999999996,
+            "blur": 0,
+            "stroke": {
+              "width": 5,
+              "color": {
+                "r": 23,
+                "g": 27,
+                "b": 31
+              }
+            }
+          }
+        },
+        {
+          "id": 10304,
+          "name": "04 · 说明 · 节拍提示、角色行进、实时声波同屏呈现",
+          "text": "节拍提示、角色行进、实时声波同屏呈现",
+          "font": "HarmonyOS_Sans_SC_Black",
+          "fontSize": 27,
+          "slantDegrees": 9,
+          "fill": {
+            "r": 23.001,
+            "g": 26.9994,
+            "b": 31.00035
+          },
+          "effects": {}
+        }
+      ]
+    },
+    {
+      "page": "05",
+      "typeCount": 4,
+      "typeLayers": [
+        {
+          "id": 10401,
+          "name": "05 · 编号 · ONEBEAT / 05",
+          "text": "ONEBEAT / 05",
+          "font": "HarmonyOS_Sans_SC_Black",
+          "fontSize": 23,
+          "slantDegrees": 9,
+          "fill": {
+            "r": 255,
+            "g": 248.99984999999998,
+            "b": 237.99915
+          },
+          "effects": {}
+        },
+        {
+          "id": 10402,
+          "name": "05 · 主标题 · 把这一拍",
+          "text": "把这一拍",
+          "font": "HarmonyOS_Sans_SC_Black",
+          "fontSize": 88,
+          "slantDegrees": 9,
+          "fill": {
+            "r": 23.001,
+            "g": 26.9994,
+            "b": 31.00035
+          },
+          "effects": {
+            "shadowColor": {
+              "r": 255,
+              "g": 249,
+              "b": 238
+            },
+            "offsetX": 8.000000000000002,
+            "offsetY": 8.999999999999996,
+            "blur": 0
+          }
+        },
+        {
+          "id": 10403,
+          "name": "05 · 副标题 · 留成作品",
+          "text": "留成作品",
+          "font": "HarmonyOS_Sans_SC_Black",
+          "fontSize": 88,
+          "slantDegrees": 9,
+          "fill": {
+            "r": 255,
+            "g": 248.99984999999998,
+            "b": 237.99915
+          },
+          "effects": {
+            "shadowColor": {
+              "r": 41,
+              "g": 181,
+              "b": 174
+            },
+            "offsetX": 8.000000000000002,
+            "offsetY": 8.999999999999996,
+            "blur": 0,
+            "stroke": {
+              "width": 5,
+              "color": {
+                "r": 23,
+                "g": 27,
+                "b": 31
+              }
+            }
+          }
+        },
+        {
+          "id": 10404,
+          "name": "05 · 说明 · 回看录制，微调 MIC 音量与时间对齐",
+          "text": "回看录制，微调 MIC 音量与时间对齐",
+          "font": "HarmonyOS_Sans_SC_Black",
+          "fontSize": 27,
+          "slantDegrees": 9,
+          "fill": {
+            "r": 23.001,
+            "g": 26.9994,
+            "b": 31.00035
+          },
+          "effects": {}
+        }
+      ]
+    },
+    {
+      "page": "06",
+      "typeCount": 5,
+      "typeLayers": [
+        {
+          "id": 10501,
+          "name": "06 · 编号 · ONEBEAT / 06",
+          "text": "ONEBEAT / 06",
+          "font": "HarmonyOS_Sans_SC_Black",
+          "fontSize": 23,
+          "slantDegrees": 9,
+          "fill": {
+            "r": 255,
+            "g": 248.99984999999998,
+            "b": 237.99915
+          },
+          "effects": {}
+        },
+        {
+          "id": 10502,
+          "name": "06 · 主标题 · 每一段节奏",
+          "text": "每一段节奏",
+          "font": "HarmonyOS_Sans_SC_Black",
+          "fontSize": 108,
+          "slantDegrees": 9,
+          "fill": {
+            "r": 23.001,
+            "g": 26.9994,
+            "b": 31.00035
+          },
+          "effects": {
+            "shadowColor": {
+              "r": 255,
+              "g": 249,
+              "b": 238
+            },
+            "offsetX": 8.000000000000002,
+            "offsetY": 8.999999999999996,
+            "blur": 0
+          }
+        },
+        {
+          "id": 10503,
+          "name": "06 · 副标题 · 都由你来编",
+          "text": "都由你来编",
+          "font": "HarmonyOS_Sans_SC_Black",
+          "fontSize": 108,
+          "slantDegrees": 9,
+          "fill": {
+            "r": 255,
+            "g": 248.99984999999998,
+            "b": 237.99915
+          },
+          "effects": {
+            "shadowColor": {
+              "r": 41,
+              "g": 181,
+              "b": 174
+            },
+            "offsetX": 8.000000000000002,
+            "offsetY": 8.999999999999996,
+            "blur": 0,
+            "stroke": {
+              "width": 5,
+              "color": {
+                "r": 23,
+                "g": 27,
+                "b": 31
+              }
+            }
+          }
+        },
+        {
+          "id": 10504,
+          "name": "06 · 说明 · 分段编排节奏与加花，串成完整练习",
+          "text": "分段编排节奏与加花，串成完整练习",
+          "font": "HarmonyOS_Sans_SC_Black",
+          "fontSize": 30,
+          "slantDegrees": 9,
+          "fill": {
+            "r": 23.001,
+            "g": 26.9994,
+            "b": 31.00035
+          },
+          "effects": {}
+        },
+        {
+          "id": 10506,
+          "name": "06 · 功能提示 · PRO 功能 · 支持月卡或分享试用",
+          "text": "PRO 功能 · 支持月卡或分享试用",
+          "font": "HarmonyOS_Sans_SC_Black",
+          "fontSize": 22,
+          "slantDegrees": 9,
+          "fill": {
+            "r": 23.001,
+            "g": 26.9994,
+            "b": 31.00035
+          },
+          "effects": {}
+        }
+      ]
+    }
+  ],
+  "limitation": "No Photoshop/Photopea interactive reopen, edit and save round trip was performed."
+}

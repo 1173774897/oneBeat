@@ -1,0 +1,51 @@
+{
+  "initial": [
+    {
+      "key": "cloud",
+      "args": {
+        "transparent_background": true,
+        "referenced_image_paths": [
+          "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/comic/poses/cloud.png",
+          "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/stand/cloud/frame_01.png",
+          "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/walk/cloud/frame_01.png"
+        ],
+        "prompt": "Use case: precise-object-edit. Asset type: final transparent full-body shop character portrait for the OneBeat app. Input image 1 is the EDIT TARGET: the Cloud Walker mascot currently seated with a hand drum and stool. Input image 2 is the actual in-app standing character and is the authoritative design/proportion reference. Input image 3 is the actual in-app walking frame, additional identity reference. Redraw the edit target as a clean, naturally standing, EMPTY-HANDED portrait matching the actual character. Completely remove the drum, stool, seats and any separate objects. Both cream feet planted, relaxed gently bent knees, arms hanging naturally by the sides with simple rounded mitten hands, smiling toward the viewer in a slight three-quarter view. Preserve this exact mascot identity: cyan-blue slim body and long limbs, one large black-and-white eye, pink round cheeks, friendly open smile, fluffy white cloud hair, the small rainbow-and-yellow clip on the hair, small white feather wing seen at the back, white cloud ring at the hips and cream feet. The rainbow clip, wing and cloud hip ring are part of the actual character and MUST remain. Match the actual standing reference's head-to-body and limb proportions. Matching crisp near-black comic outlines, delicate pen hatching, flat cyan and white cel colors with restrained existing shading. Full character centered with clean comfortable margins, including cloud hair and both feet, approximately 90% image height, portrait canvas approximately 1024x1536. GENUINE TRANSPARENT BACKGROUND, clean alpha cutout. No scene, background color, ground, cast shadow, text, watermark, instrument, drum, sticks, headphones, phone, bag, stool, furniture, or added accessories. This is finished usable production art, not a UI screenshot or a comparison sheet."
+      }
+    },
+    {
+      "key": "teapot",
+      "args": {
+        "transparent_background": true,
+        "referenced_image_paths": [
+          "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/comic/poses/teapot.png",
+          "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/stand/teapot/frame_01.png",
+          "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/walk/teapot/frame_01.png"
+        ],
+        "prompt": "Use case: precise-object-edit. Asset type: final transparent full-body shop character portrait for the OneBeat app. Input image 1 is the EDIT TARGET: Mrs Teapot currently sitting on a stool and holding a tambourine. Input image 2 is the actual in-app standing character and is the authoritative costume, head and proportion reference. Input image 3 is the actual in-app walking frame, additional identity reference. Redraw this mascot as a clean naturally standing EMPTY-HANDED portrait, both brown shoes planted. Completely remove the tambourine, stool, seats and every separate object. Her visible front arm hangs relaxed beside the skirt, the other arm rests gently at the waist like the actual standing reference, anatomically simple rounded cartoon hands with no held objects. Preserve exactly the actual character: large mint-green teapot head with curved mint handle at the back and long raised spout facing right, cream fluted knob on the lid, small black oval eye, pale cream cheek dot and orange triangular nose, friendly curved smile; mint-green arms/legs; white rounded collar, muted gray/pastel-pink striped dress, light pink apron tied in a bow at the back, cream rib-knit leg warmers and chunky warm-brown low shoes. Preserve the actual standing reference's costume pattern, colors, large-head-to-small-body proportions and head shape. At most the same two very thin curling steam lines as the in-app references, no large added smoke cloud. Matching crisp near-black comic outlines, restrained pen hatching and mint/pink/cream flat cel shading. Full body centered in a portrait canvas approximately 1024x1536, complete lid/spout and both shoes visible, approximately 90% image height, clean comfortable margins. GENUINE TRANSPARENT BACKGROUND, clean alpha cutout. No scene, background color, floor, cast shadow, text, watermark, tambourine, instrument, cup, teacup, tray, spoon, handbag, stool, chair, furniture, or any newly invented accessory. Finished usable production art, not a UI screenshot or comparison sheet."
+      }
+    }
+  ],
+  "revisions": [
+    {
+      "key": "cloud_clean",
+      "args": {
+        "transparent_background": true,
+        "referenced_image_paths": [
+          "/Users/lizhe/.codex/generated_images/01a187b9-ce55-7c72-a997-75f5c9b75372/exec-51e01d61-2271-4f89-aa57-e8c9913ff193.png"
+        ],
+        "prompt": "Use case: background-extraction. This is a precise cleanup of the supplied transparent shop character portrait, NOT a redesign. Preserve the Cloud Walker's character pixels and design, standing pose, proportions, colors, ink lines and details as faithfully as possible. REMOVE ALL the diffuse colored haze, gray halo, dark background mist, surrounding glow and ground shadow outside the silhouette. The only visible content must be the crisp comic character itself: white cloud hair with rainbow clip, single eye, blue body, white wing and cloud hip ring, arms and cream feet. Outside the exact character and its ink outline must be fully transparent alpha=0, with only ordinary thin edge anti-aliasing; absolutely no translucent surrounding glows or shadows, no dark matte. Full character comfortably inside the frame with a clean margin at every side. Do not add a background or a checkerboard. Maintain the portrait canvas approximately 1024x1536. No added objects, props, instruments, stool, text or watermark."
+      }
+    },
+    {
+      "key": "teapot_smoke_complete",
+      "args": {
+        "transparent_background": true,
+        "referenced_image_paths": [
+          "/Users/lizhe/.codex/generated_images/01a187b9-ce55-7c72-a997-75f5c9b75372/exec-d6aad0d7-1ca8-4c77-ade3-e232f02eee53.png",
+          "/Users/lizhe/work/oneBeat/entry/src/main/resources/rawfile/stand/teapot/frame_01.png"
+        ],
+        "prompt": "Use case: precise-object-edit. Input image 1 is the exact EDIT TARGET. Input image 2 supports how the actual Teapot character has TWO complete curling wisps rising from the spout. The user specifically says the RIGHT-HAND SIDE OF THE STEAM IS MISSING. Fix the steam fully: redraw two complete, slender, clearly visible curling steam wisps rising from the spout; include the full RIGHT-HAND wisp and all of its outer/inner ink contours and curved free end. No cut-off, half-formed, missing right edge or smoke that vanishes into a canvas edge. Keep all steam within the upper-right portion of the canvas with at least 70 pixels of clear transparent space beyond the rightmost steam curve and above its top. Reframe the whole character uniformly a little smaller only if needed to obtain safe margins; the lid, handle, spout, body and both shoes must all fit. Preserve the exact friendly mint teapot character, face, cream fluted knob, outfit, pink apron, gray/pink stripes, knit cream leg warmers, brown shoes, empty hands and standing pose from image 1. Do not add instruments, furniture or accessories. Also REMOVE ALL surrounding diffuse colored haze/gray halo/glow/ground shadow from image 1: outside the crisp character and the two thin ink-drawn steam wisps must be fully transparent alpha=0, ordinary narrow edge anti-aliasing only. No dark matte, background color, scene, checkerboard, text or watermark. Keep the exact comic illustration style and portrait canvas approximately 1024x1536. Edit only the incomplete steam, clean the transparency, and adjust framing for safe margins; do not redesign the character."
+      }
+    }
+  ]
+}

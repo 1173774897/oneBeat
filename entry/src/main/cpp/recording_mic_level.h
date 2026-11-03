@@ -52,7 +52,7 @@ public:
         const double robustPeak = RobustPeak();
         if (robustPeak == 0) return 1;
         // Quiet takes approach -28 dBFS in active 20 ms windows. A 30 dB cap
-        // limits noise lift; repeated peaks still reserve the user's 200% edit.
+        // limits noise lift; louder user edits (up to 400%) are caught by the bus limiter.
         return std::max(1.0, std::min({Db(-28) / active, Db(30), 0.35 / robustPeak}));
     }
 

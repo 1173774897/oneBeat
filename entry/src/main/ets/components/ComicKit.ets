@@ -36,7 +36,7 @@ export function avatarDisplayName(key: string): string {
   if (key === 'lilroll') { return 'Lilroll'; }
   if (key === 'teapot') { return '茶壶太太'; }
   if (key === 'wave') { return 'Wave'; }
-  if (key === 'scooter') { return '思古特'; }
+  if (key === 'scooter') { return '青柠滑手'; }
   return key;
 }
 

@@ -1,0 +1,275 @@
+{
+  "original": "/Users/lizhe/Downloads/onebeatprocessing/screenshottemplet/transparent-screens/editing/05.psd",
+  "additions": "/Users/lizhe/work/oneBeat/designs/app-market/2026-11-02-editable-psd/.build/05-additions.psd",
+  "output": "/Users/lizhe/work/oneBeat/designs/app-market/2026-11-02-editable-psd/psd/05.psd",
+  "original_sha256": "b0850252f0d939be8413d40bb5612ddc5aba6f06607c9cd7e58c817a06165bca",
+  "additions_sha256": "a02f9e85df669c90a52beb212d425b2b5ab7ed70aa90e204a62db1067575a048",
+  "output_sha256": "3d3f2e48156694b48150b8999d4b111a2aa87a4f28b06fd4ad607e4e27ba3350",
+  "original_layer_count": 5,
+  "added_layer_count": 5,
+  "output_layer_count": 10,
+  "stored_layer_order": "original bottom-to-top records followed by additions bottom-to-top records",
+  "composite_source": "explicit RGBA cache encoded to original channel count",
+  "removed_global_text_caches": [],
+  "replaced_thumbnails": [
+    {
+      "resource_id": 1036,
+      "old_length": 9578,
+      "new_length": 11653,
+      "width": 144,
+      "height": 256,
+      "old_sha256": "8da12271104563804e44a17c4ec18d2882f4938ee8508fe0cf53f7dea0fad610",
+      "new_sha256": "a216bad57321ebd413354cf6ac31fcf4147f12deab08da3c7f4110c0eb3659e5"
+    }
+  ],
+  "original_layers": [
+    {
+      "index": 0,
+      "name": "微信图片_20261101181510_182_312",
+      "layer_id": 3,
+      "record_sha256": "ba692d54a9763455581b6ddbde3de422c888014e06d8dc838b148adc9b445f03",
+      "record_equal": true,
+      "channels": [
+        {
+          "id": -1,
+          "length": 23944,
+          "sha256": "ee754f01563b2c10de2e1ee538723d3d0e117f2940563dbf5399f538e56de0d5",
+          "equal": true
+        },
+        {
+          "id": 0,
+          "length": 293707,
+          "sha256": "4b345c4dbcf91b3787668908d4b31c462e325c0d03c863375f67ca82e39c1a20",
+          "equal": true
+        },
+        {
+          "id": 1,
+          "length": 290537,
+          "sha256": "340b5f5a36b9178a8b4e387abdf7ce04a224fdf3bb02e600ecafba8c50d8ecd5",
+          "equal": true
+        },
+        {
+          "id": 2,
+          "length": 304936,
+          "sha256": "3d0569ae3a46eff090e113873ba3035b23cfe33f339a4e726ba75fa7881b9998",
+          "equal": true
+        }
+      ]
+    },
+    {
+      "index": 1,
+      "name": "微信图片_20261031133834_174_312",
+      "layer_id": 2,
+      "record_sha256": "6ef61943dee7e51bfbf1c92f702c8145e5d92c15938a3c76b74bda7d4fe97181",
+      "record_equal": true,
+      "channels": [
+        {
+          "id": -1,
+          "length": 49968,
+          "sha256": "4d8cbd30968cb6de75861888d0cfa7d5ddc82302646e55571cadd0503f9fda4e",
+          "equal": true
+        },
+        {
+          "id": 0,
+          "length": 1044812,
+          "sha256": "3cad36a5f20a49e951d8b0b76278e36396fdd3e5a9aa577b3a042a1fe96cd65a",
+          "equal": true
+        },
+        {
+          "id": 1,
+          "length": 1033292,
+          "sha256": "71344a0a283564db6a6c1d2211385d888826b554ae666cb182504b86200baf08",
+          "equal": true
+        },
+        {
+          "id": 2,
+          "length": 1064141,
+          "sha256": "888dcca82b13cdcb5ea2aa9a74d87b98e61077e59b2674f74a66a0b4446fa5d2",
+          "equal": true
+        }
+      ]
+    },
+    {
+      "index": 2,
+      "name": "Background",
+      "layer_id": 1,
+      "record_sha256": "92d88a4fef819330fc1d90cf5726bbb7c9de542006755167fb96ae4e6ee80a20",
+      "record_equal": true,
+      "channels": [
+        {
+          "id": -1,
+          "length": 41457,
+          "sha256": "d6a415a29c84dd00df60df21a87e185f548d207583d46097e9891291939ba067",
+          "equal": true
+        },
+        {
+          "id": 0,
+          "length": 409450,
+          "sha256": "5732692bfb66c772dce6f5d30673568b082f89cd0025f06c04cfd6f3be48c512",
+          "equal": true
+        },
+        {
+          "id": 1,
+          "length": 595098,
+          "sha256": "03be5e2fb50d7b3f2840ca6b31f43334f696fb4fc62288c114d3f08e2c274166",
+          "equal": true
+        },
+        {
+          "id": 2,
+          "length": 576360,
+          "sha256": "894749ba3e12d74d145407f2f05a1f5a0142688d512c64170448e4b7e68877b3",
+          "equal": true
+        }
+      ]
+    },
+    {
+      "index": 3,
+      "name": "微信图片_20261031133834_175_312",
+      "layer_id": 3,
+      "record_sha256": "b5c61bb45bf87a88aa43690d27f20d3b7239b1563d602f2f9bf16fb68cff3bdd",
+      "record_equal": true,
+      "channels": [
+        {
+          "id": -1,
+          "length": 4085,
+          "sha256": "09018289b8a94e7f1d30ec43701f08408f8712489e5f8cc4dfcb9fe4b477badf",
+          "equal": true
+        },
+        {
+          "id": 0,
+          "length": 114421,
+          "sha256": "83da96c471ff0d97165e639d824053f1a4aa2f6e149b6822bf46112e7218d8b0",
+          "equal": true
+        },
+        {
+          "id": 1,
+          "length": 125213,
+          "sha256": "36e9a5776b72b5d7226beca6a3a2640f13d590a1bfafc3e5a4f4c6e4bba9dcc4",
+          "equal": true
+        },
+        {
+          "id": 2,
+          "length": 130642,
+          "sha256": "278f6814400a95091d558e9b94ff3aeaa8d3493e8b4496cb2f3ad0d681a5803c",
+          "equal": true
+        }
+      ]
+    },
+    {
+      "index": 4,
+      "name": "05-text",
+      "layer_id": 4,
+      "record_sha256": "3055b229890b446013cde773a60f34b082598c0d24ce5e10248ce193496ea041",
+      "record_equal": true,
+      "channels": [
+        {
+          "id": -1,
+          "length": 364,
+          "sha256": "516b37f06ed7b59e4d7d793a6aafa555b7b48e6f3000b4205dc55a5a7e2ef3ca",
+          "equal": true
+        },
+        {
+          "id": 0,
+          "length": 2344,
+          "sha256": "1f8bfade94fefd77412471328883bdd116091909fe03c54d15322121530b23ed",
+          "equal": true
+        },
+        {
+          "id": 1,
+          "length": 2352,
+          "sha256": "1acf82cc0d575b6821db56a5844bde6454da4b3bef6d7d124fb146ec433024fb",
+          "equal": true
+        },
+        {
+          "id": 2,
+          "length": 2346,
+          "sha256": "309a4b07e6ff9533c52fe86582418ab87fa1628a0ed71cab0ff139f0d9142f05",
+          "equal": true
+        }
+      ]
+    }
+  ],
+  "original_global_blocks": [
+    {
+      "key": "lnk2",
+      "length": 3706920,
+      "sha256": "fd578e9a004ba3f43835bd3db05788b2248a384d48f25c781fdaef8f1d97adcd",
+      "equal": true
+    }
+  ],
+  "original_resources": [
+    {
+      "id": 1005,
+      "length": 16,
+      "sha256": "c31afe2593499fdd5f1a958b70f3cd8b6f529cc9e1fe867c0deeaedd67ec4936",
+      "equal": true,
+      "thumbnail_replaced": false
+    },
+    {
+      "id": 1032,
+      "length": 16,
+      "sha256": "0c8fd02b505326a47d941a442e556487d61d00f10158eb4973e75290a502435e",
+      "equal": true,
+      "thumbnail_replaced": false
+    },
+    {
+      "id": 1036,
+      "length": 9578,
+      "sha256": "8da12271104563804e44a17c4ec18d2882f4938ee8508fe0cf53f7dea0fad610",
+      "equal": false,
+      "thumbnail_replaced": true
+    },
+    {
+      "id": 1044,
+      "length": 4,
+      "sha256": "47ce010b479b7de3f4df2be239d248908a4e65814cfb0044369e4790661f7e5d",
+      "equal": true,
+      "thumbnail_replaced": false
+    },
+    {
+      "id": 1050,
+      "length": 170,
+      "sha256": "712d07a622d319e5fff3eb4d4f7153194da3d9227d6149f15553e6816f431fb1",
+      "equal": true,
+      "thumbnail_replaced": false
+    },
+    {
+      "id": 1065,
+      "length": 42,
+      "sha256": "39cd6b44f427268df97a2fa0c49455a9c83d0ca1b94d9be548bd7520c34476e6",
+      "equal": true,
+      "thumbnail_replaced": false
+    },
+    {
+      "id": 1069,
+      "length": 6,
+      "sha256": "dade4092452ba88567751dfde7fc4d625426d0d49121ad1064530f19adbbe61d",
+      "equal": true,
+      "thumbnail_replaced": false
+    },
+    {
+      "id": 1076,
+      "length": 470,
+      "sha256": "c83adcf58bc5b5832f128b098c3298a9bf073c0c305f6a37eb02498bf32bf28b",
+      "equal": true,
+      "thumbnail_replaced": false
+    },
+    {
+      "id": 1077,
+      "length": 4,
+      "sha256": "14c01682089b0b3670d2cf36cc250882b07b778ee5b461c31d44ed102d08e857",
+      "equal": true,
+      "thumbnail_replaced": false
+    }
+  ],
+  "checks": {
+    "header_byte_identical": true,
+    "all_original_layer_records_byte_identical": true,
+    "all_original_channel_streams_byte_identical": true,
+    "all_retained_global_blocks_byte_identical": true,
+    "global_mask_byte_identical": true,
+    "non_thumbnail_resources_byte_identical": true,
+    "layer_count_sign_preserved": true,
+    "layer_info_even_padded": true
+  }
+}

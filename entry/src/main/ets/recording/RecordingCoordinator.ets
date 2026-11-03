@@ -41,6 +41,7 @@ export class RecordingCoordinator {
   private static savePhase: RecordingSavePhase = 'finishing';
   private static micMuted: boolean = false;
   private static builtInSpeakerCapture: boolean = false;
+  private static headphoneCapture: boolean = false;
   private static systemAecMic: boolean = false;
   private static captureInfo: audio.AudioCapturerInfo = MIC_CAPTURE_INFO;
   private static lastClip: RecordingClip | undefined = undefined;
@@ -231,6 +232,7 @@ export class RecordingCoordinator {
     RecordingCoordinator.amplitude = 0;
     RecordingCoordinator.micMuted = false;
     RecordingCoordinator.builtInSpeakerCapture = AudioOutputMonitor.isBuiltInSpeakerActive();
+    RecordingCoordinator.headphoneCapture = AudioOutputMonitor.isHeadphoneOutputActive();
     RecordingCoordinator.captureStarted = false;
     RecordingCoordinator.pendingStopReason = '';
     RecordingCoordinator.nativeStopOperation = undefined;
@@ -246,9 +248,16 @@ export class RecordingCoordinator {
         throw new Error('当前设备不支持画面与麦克风同时录制');
       }
       await RecordingCoordinator.ensureMicrophonePermission();
-      RecordingCoordinator.systemAecMic = RecordingCoordinator.supportsSystemAecMic();
+      // The MIC records instruments. LIVE AEC/NS is voice-oriented and audibly
+      // damages instrument timbre/transients, so it is used only when the
+      // accompaniment can reach the MIC acoustically. Ear-worn output has no
+      // echo to remove and keeps the plain screen MIC. A route change during
+      // recording already ends the take, so this start-time choice stays valid.
+      RecordingCoordinator.systemAecMic = !RecordingCoordinator.headphoneCapture &&
+        RecordingCoordinator.supportsSystemAecMic();
       RecordingCoordinator.captureInfo = RecordingCoordinator.systemAecMic ? AEC_CAPTURE_INFO : MIC_CAPTURE_INFO;
-      console.info(`[RecordingMic] mode=${RecordingCoordinator.systemAecMic ? 'system-aec' : 'screen-mic'}`);
+      console.info(`[RecordingMic] mode=${RecordingCoordinator.systemAecMic ? 'system-aec' : 'screen-mic'}` +
+        ` headphone=${RecordingCoordinator.headphoneCapture} builtInSpeaker=${RecordingCoordinator.builtInSpeakerCapture}`);
       RecordingCoordinator.inputDevice = await RecordingCoordinator.requirePhoneMicrophone();
       RecordingCoordinator.inputRouting = audio.getAudioManager().getRoutingManager();
       RecordingCoordinator.inputRouting.on('preferredInputDeviceChangeForCapturerInfo',
@@ -315,6 +324,14 @@ export class RecordingCoordinator {
       ` micCaptureMode=${result.micCaptureMode ?? 'screen-mic'} micAecApplied=${result.micAecApplied === true}` +
       ` micInputChannels=${result.micInputChannels ?? 0}` +
       ` durationMs=${result.durationMs} syncValid=${result.syncValid}`);
+    // Drift is timestamp minus written frames (48 kHz frames). A large maxStep means a delivery
+    // gap that contiguous writing collapsed (e.g. accompaniment paused while recording).
+    const timeline = (name: string, t: recordingNative.NativePcmTimelineStats | undefined): string => t === undefined ?
+      ` ${name}=none` : ` ${name}Frames=${t.framesWritten} ${name}DriftLast=${t.lastDriftFrames}` +
+      ` ${name}DriftMin=${t.minDriftFrames} ${name}DriftMax=${t.maxDriftFrames} ${name}MaxStep=${t.maxDriftStepFrames}` +
+      ` ${name}MaxStepAt=${t.maxDriftStepAtFrame} ${name}Gaps=${t.gapCount} ${name}FirstGapAt=${t.firstGapAtFrame}`;
+    console.info(`[RecordingTimeline]${timeline('inner', result.innerTimeline)}${timeline('mic', result.micTimeline)}` +
+      ` durationMs=${result.durationMs}`);
     const target = RecordingCoordinator.target;
     if (target === undefined || result.durationMs <= 0) {
       await RecordingCoordinator.discardTarget();
@@ -375,7 +392,7 @@ export class RecordingCoordinator {
     if (await fileIo.access(clip.path)) {
       const stat = await fileIo.stat(clip.path);
       rendered = stat.isFile() && stat.size > 0 &&
-        (clip.renderedMixVersion ?? 0) >= RecordingMixer.mixVersion(clip) &&
+        RecordingMixer.isRenderCurrent(clip) &&
         clip.autoMicShiftUs !== undefined && clip.autoMicShiftConfidence !== undefined &&
         clip.autoMicShiftReliable !== undefined;
     }

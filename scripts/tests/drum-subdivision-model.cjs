@@ -219,7 +219,7 @@ function testJazzPhrasing() {
 function testRenderedTimeline() {
   let checked = 0;
   for (const bpm of [60, 90, 120, 137]) for (const beats of [3, 4, 6, 7]) {
-    const h = fixture({ queueMs: 0 });
+    const h = fixture({ queueMs: 0, drumKitGain: 1 });
     h.engine.bpm = bpm;
     h.engine.beatPointStates = Array(beats).fill('normal');
     h.engine.sampleBank = new Map([['kick', new Int16Array([10000]).buffer]]);
@@ -259,7 +259,7 @@ async function testRideTailContinuation() {
   const empty = () => new timeline.SequencerPattern(480, 1, []);
   const hit = () => new timeline.SequencerPattern(480, 1, [event(lastTick, 'ride', 0.5)]);
   function harness(samples, state = 'normal', accentProgram = false) {
-    const h = fixture({ queueMs: 0 });
+    const h = fixture({ queueMs: 0, drumKitGain: 1 });
     h.engine.bpm = 120;
     h.engine.beatsPerBar = 1;
     h.engine.beatPointStates = [state];

@@ -1,6 +1,8 @@
 # 整张时间卡：美术素材首版
 
-`TimeCardCalibrationPage.ets`已接替正式耳机校准入口，原`AudioCalibrationPage.ets`源文件保留。单人大厅以小字链接提供可选校准，多人大厅保留原校准卡。本页以下记录基础素材设计阶段；运行时实施情况、入口与常量调整见`native-implementation.md`。
+`TimeCardCalibrationPage.ets`已接替正式耳机校准入口，原`AudioCalibrationPage.ets`源文件保留。单人大厅以设置卡内辅助行提供可选校准，多人大厅保留原校准卡。本页以下记录基础素材设计阶段；运行时实施情况、入口与常量调整见`native-implementation.md`。
+
+2026-11-02：扳手改为独立活动握杆＋固定轴承座，去掉随杆旋转的大黄铜筒。当前两层素材、三态运动检查及调整入口见 [lever-motion-v3/mechanism.md](lever-motion-v3/mechanism.md)。本页的旧`lever.png`说明保留作首版设计记录。
 
 用户选择方案一「整张时间卡」。本目录记录素材来源、分层配准、组合预览与错过打卡时机的交互提案。基础素材阶段仅新增美术资源与独立设计预览；后续实施新增独立 `TimeCardCalibrationPage.ets`，原打卡页面保留。
 

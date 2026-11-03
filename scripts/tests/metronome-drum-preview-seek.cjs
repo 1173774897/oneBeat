@@ -74,10 +74,12 @@ async function testEventProgramSeek() {
     const bar = h.engine.pendingSequence[0];
     assert.equal(bar.frameCount, 88200, 'An event program must still render a two-second 4/4 bar at 120 BPM');
     const firstFrame = Math.round(position * bar.samplesPerBeat);
-    assert.equal(bar.samples[firstFrame], 5000, 'Saved triplet/six-tuplet event velocity must reach actual PCM');
+    // Kit voices carry the engine's fixed -3 dB headroom (DRUM_KIT_GAIN).
+    const kitHit = Math.round(10000 * 0.5 * 10 ** (-3 / 20));
+    assert.equal(bar.samples[firstFrame], kitHit, 'Saved triplet/six-tuplet event velocity must reach actual PCM');
     const pcm = writeTarget(h, transition, bar.frameCount + 64);
     assertSource(pcm, bar, firstFrame, 'Triplet/six-tuplet event program must seek and loop from its exact musical position');
-    assert.equal(pcm[0], 5000, 'Auditioning from a triplet/six-tuplet cursor must start at the chosen hit');
+    assert.equal(pcm[0], kitHit, 'Auditioning from a triplet/six-tuplet cursor must start at the chosen hit');
     h.advanceClock(audibleAt - h.now);
     const snapshot = h.engine.getVisualSnapshot();
     assert.ok(Math.abs(snapshot.mainPlayheadMs - position * 500) < 1e-9);

@@ -201,15 +201,16 @@ function services(environment = durableEnvironment()) {
       coverCalls.push({ videoPath, coverPath, width, height });
       environment.files.set(coverPath, Buffer.from(`cover-of=${videoPath}`));
     } } },
-    './RecordingMixer': { RECORDING_MIX_VERSION: 6, MAX_MIC_SHIFT_US: 300000,
+    './RecordingMixer': { RECORDING_MIX_VERSION: 6, MAX_MIC_SHIFT_US: 300000, MAX_MIC_GAIN: 4,
       RecordingMixer: {
-      mixVersion: clip => clip.micCaptureMode === 'system-aec' ? 8 : 6,
-      processedMicPath: (micPath, mode) => mode === 'system-aec' ? `${micPath}.system-aec-v3.f32` : `${micPath}.clean-v3.f32`,
+      mixVersion: clip => clip.micCaptureMode === 'system-aec' ? 10 : 6,
+      isRenderCurrent: clip => (clip.renderedMixVersion ?? 0) >= (clip.micCaptureMode === 'system-aec' ? 10 : 6),
+      processedMicPath: (micPath, mode) => mode === 'system-aec' ? `${micPath}.system-aec-v5.f32` : `${micPath}.clean-v3.f32`,
       async exportMixed(clip, gain, output, micShiftUs) {
       mixCalls.push({ clip: plain(clip), gain, output, micShiftUs });
       environment.files.set(output, Buffer.from(
         `rendered-gain=${gain};shift=${micShiftUs};source=${clip.sourcePath}`));
-      return {
+      return { micShiftUs: micShiftUs ?? clip.renderedMicShiftUs ?? 0,
         autoMicShiftUs: clip.micCaptureMode === 'system-aec' ? 0 : clip.autoMicShiftUs ?? -1000,
         autoMicShiftConfidence: clip.micCaptureMode === 'system-aec' ? 0 : clip.autoMicShiftConfidence ?? .8,
         autoMicShiftReliable: clip.micCaptureMode === 'system-aec' ? false : clip.autoMicShiftReliable ?? true
@@ -767,7 +768,7 @@ async function testSystemAecProvenanceAndRecovery() {
     renderedMixVersion: 7, autoMicShiftUs: 0, autoMicShiftConfidence: 0, autoMicShiftReliable: false });
   const aec = await h.repository.render(oldAec, 1);
   assert.notEqual(aec.path, oldAec.path, 'Previously quiet AEC exports upgrade at the same user gain');
-  assert.equal(aec.renderedMixVersion, 8);
+  assert.equal(aec.renderedMixVersion, 10);
   assert.equal(h.mixCalls.length, 1);
   assert.equal(aec.micCaptureMode, 'system-aec', 'Indexing and public clip copies retain capture provenance');
   assert.equal(h.repository.list('team')[0].micCaptureMode, 'system-aec');

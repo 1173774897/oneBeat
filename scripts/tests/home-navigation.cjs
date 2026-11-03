@@ -16,7 +16,7 @@ function load(stack) {
   const context = { exports: {}, require: name => { assert.equal(name, '@kit.ArkUI'); return { router }; } };
   vm.runInNewContext(ts.transpileModule(fs.readFileSync('entry/src/main/ets/app/HomeNavigation.ets', 'utf8'),
     { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021 } }).outputText, context);
-  return { navigateToHome: context.exports.navigateToHome, calls };
+  return { navigateToHome: context.exports.navigateToHome, navigateToTeam: context.exports.navigateToTeam, calls };
 }
 
 (async () => {
@@ -28,5 +28,14 @@ function load(stack) {
   await afterDisband.navigateToHome();
   assert.deepEqual(afterDisband.calls, ['clear', 'replace:pages/Index'],
     'Without Index on the stack (remote disband cleared it) home is rebuilt instead of a silent no-op back');
+
+  const leaveTeam = load(['pages/Index', 'pages/TeamPage', 'pages/LeaderLobbyPage']);
+  await leaveTeam.navigateToTeam();
+  assert.deepEqual(leaveTeam.calls, ['back:pages/TeamPage'], 'Leaving a team pops back to 多人练习');
+
+  const teamGone = load(['pages/LeaderLobbyPage']);
+  await teamGone.navigateToTeam();
+  assert.deepEqual(teamGone.calls, ['clear', 'replace:pages/TeamPage'],
+    'Without TeamPage on the stack 多人练习 is rebuilt instead of a silent no-op back');
   console.log('PASS home navigation: pops to Index when stacked, rebuilds it after a cleared stack');
 })().catch(error => { console.error(error); process.exitCode = 1; });

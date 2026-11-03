@@ -55,8 +55,9 @@ function harness(options = {}) {
     exports: {}, Map, Date,
     ...comicInkOffsets,
     beijingDayKey: now => new Date(now + 8 * 3600000).toISOString().substring(0, 10), SHARE_CHECK_IN_DAY_MS: 86400000,
-    getShareCheckInSummary: () => ({ todayCompleted }), MAX_MIC_SHIFT_US: 300000,
-    RecordingMixer: { mixVersion: clip => clip.micCaptureMode === 'system-aec' ? 8 : 6 },
+    getShareCheckInSummary: () => ({ todayCompleted }), MAX_MIC_SHIFT_US: 300000, MAX_MIC_GAIN: 4,
+    RecordingMixer: { mixVersion: clip => clip.micCaptureMode === 'system-aec' ? 10 : 6,
+      isRenderCurrent: clip => (clip.renderedMixVersion ?? 0) >= (clip.micCaptureMode === 'system-aec' ? 10 : 6) },
     RenderingContextSettings: class {},
     CanvasRenderingContext2D: class {
       clearRect() {} beginPath() {} moveTo() {} lineTo() {} stroke() {}
@@ -361,13 +362,13 @@ if (require.main === module) (async () => {
   mixLibrary.changeMicShift(-60, mixing.context.SliderChangeMode.End);
   await mixLibrary.audioRenderTask;
   assert.equal(mixLibrary.selectedClip().renderedMicShiftUs, -60000);
-  assert.equal(mixLibrary.micShiftLabel(), '人声提前 60 毫秒');
+  assert.equal(mixLibrary.micShiftLabel(), '提前 60 毫秒');
   mixLibrary.clips = [{ ...mixLibrary.selectedClip(), autoMicShiftUs: -1000,
     autoMicShiftConfidence: .8, autoMicShiftReliable: true, renderedMicShiftUs: 0 }];
   mixLibrary.micShiftMs = 0;
   assert.equal(mixLibrary.micShiftLabel(), '已自动提前 1 毫秒');
   mixLibrary.micShiftMs = -60;
-  assert.equal(mixLibrary.micShiftLabel(), '自动基准上提前 60 毫秒');
+  assert.equal(mixLibrary.micShiftLabel(), '在自动对齐基础上提前 60 毫秒');
   mixLibrary.changeMicGain(0.3, mixing.context.SliderChangeMode.End);
   await mixLibrary.audioRenderTask;
   const beforeSaveRenders = mixing.trace.filter(item => item.startsWith('render:')).length;

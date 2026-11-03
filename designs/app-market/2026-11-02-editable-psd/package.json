@@ -1,0 +1,13 @@
+{
+  "name": "onebeat-editable-market-psd",
+  "version": "1.0.0",
+  "private": true,
+  "description": "OneBeat native editable PSD typography builder. Uses unmodified HarmonyOS Sans SC Black.",
+  "scripts": {
+    "build": "python3 extract-composites.py && python3 outline-text.py && node build-native-psd.cjs"
+  },
+  "dependencies": {
+    "ag-psd": "34.1.0",
+    "sharp": "^0.34.0"
+  }
+}
