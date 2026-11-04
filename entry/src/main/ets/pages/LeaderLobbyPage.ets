@@ -32,12 +32,14 @@ import {
   isExclusiveTakenByOther,
   isRandomAvatar,
   isRandomPoolCharacter,
+  RANDOM_AVATAR_KEY,
   rosterKeysForLobby,
   sortRosterKeysForPicker
 } from '../assets/CharacterCatalog';
 import {
   ensureBluetoothDiscoveryPermission,
   ensureTeamNetworkPermissions,
+  openBluetoothSettings,
   openWirelessSettings,
   teamNetworkAccessUnavailableHint,
   teamNetworkPermissionDeniedHint,
@@ -54,6 +56,7 @@ import {
   formatTrialExpiry
 } from '../store/EntitlementStore';
 import { refreshStoreEntitlementsNow } from '../store/StoreBootstrapSync';
+import { refreshLocalIapEntitlements } from '../store/IapEntitlements';
 import { SESSION_MAX_MEMBER_COUNT } from '../common/Constants';
 import { getCalibrationMs } from '../store/AudioLatencyPersistence';
 import { logUserFailure, showUserNotice, userErrorMessage } from '../common/UserFeedback';
@@ -74,6 +77,8 @@ const LOBBY_SCENES: LobbySceneOption[] = [
 const PRO_DRUM_BUTTON_HEIGHT: number = 56;
 // Regional faces use DrumPaper sibling backings; their shadows must stay outside face clipping.
 const LOBBY_AREA_SHADOW_OFFSET: number = 4;
+// Hard white drop under the character panel slogan; larger values push the white copy further right/down.
+const CHARACTER_PANEL_SLOGAN_SHADOW_OFFSET: number = 5;
 const LOBBY_SCENE_CARD_WIDTH: number = 154;
 const LOBBY_SCENE_CARD_HEIGHT: number = 148;
 const LOBBY_SCENE_CORNER_RADIUS: number = 7;
@@ -227,6 +232,13 @@ struct LeaderLobbyPage {
   private bluetoothRouteProbeRequestToken: number = 0;
   private rhythms: string[] = ['均匀节拍', '双分节拍', '仅小节重音'];
   private enteringStage: boolean = false;
+  // A ready member must un-ready before the room accepts a new character; the
+  // fallback to random then finishes on the next snapshot (see refresh()).
+  private characterRevertPending: boolean = false;
+  private characterRevertInFlight: boolean = false;
+  private characterUnreadyRequested: boolean = false;
+  // Set when a snapshot arrives during a revert, so it is re-checked once after.
+  private characterRecheckRequested: boolean = false;
   private refreshingConnectivity: boolean = false;
   private connectivityRefreshQueued: boolean = false;
   private connectivityRefreshOwner: number = 0;
@@ -359,7 +371,7 @@ struct LeaderLobbyPage {
       const ctx = getContext(this) as common.UIAbilityContext;
       if (this.inviteBluetoothState === 'off' || this.inviteBluetoothState === 'turningOff') {
         // Opening settings does not claim success. State events/page return own radio and advertisement revalidation.
-        await openWirelessSettings(ctx);
+        await openBluetoothSettings(ctx);
         return;
       }
       const granted = await ensureBluetoothDiscoveryPermission(ctx);
@@ -739,6 +751,20 @@ struct LeaderLobbyPage {
     this.refresh();
     this.latencyCalibrationMs = getCalibrationMs();
     void this.refreshLeaderConnectivity();
+    this.refreshPurchasedItems();
+  }
+
+  /**
+   * Paid items are only used here and in the Store, so Huawei is re-queried
+   * whenever either page shows, including return from a refund in Huawei
+   * account settings. No timer or foreground hook. Lock badges follow through
+   * storeEntitlementEpoch; a failure keeps the saved summary.
+   */
+  private refreshPurchasedItems(): void {
+    const ctx = getContext(this) as common.UIAbilityContext;
+    void refreshLocalIapEntitlements(ctx).catch((error: Error) => {
+      logUserFailure('lobby-iap-refresh', error);
+    });
   }
   onPageHide(): void {
     this.clearInviteAction();
@@ -859,7 +885,80 @@ struct LeaderLobbyPage {
         logUserFailure('lobby-scene-access', error);
       });
     }
+    this.characterRevertPending = true;
+    this.characterUnreadyRequested = false;
     this.refresh();
+  }
+
+  /**
+   * A character this device chose but can no longer use (refund, ended pass or
+   * limited-free window) falls back to random. Only members this device edits
+   * are checked: purchases belong to the device that chose the character, so a
+   * leader never judges a remote member with its own entitlement cache.
+   */
+  private reconcileLobbyCharacterAccess(): void {
+    const session = AppSession.get();
+    if (session === undefined || !this.randomPreviewPageVisible || this.leavingLobby || this.enteringStage) {
+      return;
+    }
+    if (this.characterRevertInFlight) {
+      this.characterRecheckRequested = true;
+      return;
+    }
+    const controller = session.controller;
+    const localId = controller.getLocalMemberId();
+    const lost = controller.getMembers().filter((member: SessionMember) =>
+      this.canEditMember(member.id) && !isCharacterOwned(member.avatarKey));
+    if (lost.length === 0) {
+      this.characterRevertPending = false;
+      this.characterUnreadyRequested = false;
+      return;
+    }
+    // Waiting for the snapshot that confirms un-ready: nothing to do until it
+    // arrives. Starting a no-op revert here re-entered itself through finally
+    // in an endless microtask chain that froze the UI thread, so the unready
+    // message never left (Pura X appfreeze THREAD_BLOCK_6S, 2026-11-04).
+    if (this.characterUnreadyRequested && lost.every((member: SessionMember) =>
+      member.id === localId && member.lobbyReady === true)) {
+      return;
+    }
+    this.characterRevertInFlight = true;
+    this.characterRecheckRequested = false;
+    void this.revertLostCharacters(controller, lost).catch((error: Error) => {
+      logUserFailure('lobby-character-revoke', error);
+    }).finally(() => {
+      this.characterRevertInFlight = false;
+      // Only a snapshot that arrived meanwhile earns one more pass; a pass never
+      // schedules itself, so this cannot spin.
+      if (this.characterRecheckRequested && this.characterRevertPending &&
+        AppSession.get()?.controller === controller) {
+        this.characterRecheckRequested = false;
+        this.reconcileLobbyCharacterAccess();
+      }
+    });
+  }
+
+  private async revertLostCharacters(controller: SessionController, lost: SessionMember[]): Promise<void> {
+    for (let i = 0; i < lost.length; i++) {
+      const member = lost[i];
+      if (member.lobbyReady === true && member.id === controller.getLocalMemberId()) {
+        // Ready locks the character. Un-ready first (once); the snapshot that
+        // confirms it runs refresh() again, which completes the switch below.
+        if (!this.characterUnreadyRequested) {
+          this.characterUnreadyRequested = true;
+          await controller.setLobbyReady(false);
+        }
+        continue;
+      }
+      // getMembers() hands out the live member objects, which the update below
+      // rewrites to random; read the lost character's name first.
+      const lostName = avatarDisplayName(member.avatarKey);
+      await controller.updateMemberAvatar(member.id, RANDOM_AVATAR_KEY);
+      const updated = controller.getMembers().find((entry: SessionMember) => entry.id === member.id);
+      if (updated === undefined || isRandomAvatar(updated.avatarKey) || member.id === controller.getLocalMemberId()) {
+        showUserNotice(`「${lostName}」已无法使用，已换成随机角色`, 'lobby-character-revoke');
+      }
+    }
   }
 
   private async reconcileLobbySceneAccess(session: AppSession): Promise<void> {
@@ -1061,6 +1160,9 @@ struct LeaderLobbyPage {
     this.localReady = c.isLocalLobbyReady();
     this.leaderCanDepart = c.canLeaderStartWalk();
     this.ensureEditingMember();
+    if (this.characterRevertPending) {
+      this.reconcileLobbyCharacterAccess();
+    }
     if (this.randomPreviewPendingMemberId === this.editingMemberId &&
       this.members.some((member: SessionMember) => member.id === this.randomPreviewPendingMemberId &&
         isRandomAvatar(member.avatarKey) && (member.randomDrawId ?? 0) > this.randomPreviewPreviousDrawId)) {
@@ -1936,7 +2038,8 @@ struct LeaderLobbyPage {
     // Keep entitlement labels when readiness disables selection. Unowned roles
     // retain the lock priority; accessible exclusive roles can show occupancy.
     // Free access sits left of occupancy, which keeps the right edge anchored.
-    // These labels remain opaque sibling layers and are not tap targets.
+    // Labels are not tap targets: Transparent lets a tap on a badge reach the
+    // avatar button beneath (None still let the badge images swallow it).
     Row({ space: CHARACTER_BADGE_GAP }) {
       if (!isCharacterOwned(key)) {
         this.unownedLockBadge()
@@ -1959,7 +2062,7 @@ struct LeaderLobbyPage {
       y: CHARACTER_PICK_AVATAR_TOP + CHARACTER_PICK_AVATAR_SIZE - CHARACTER_BADGE_INSET -
         this.characterBadgeHeight(key)
     })
-    .clip(false).hitTestBehavior(HitTestMode.None)
+    .clip(false).hitTestBehavior(HitTestMode.Transparent)
   }
 
   @Builder
@@ -2323,6 +2426,8 @@ struct LeaderLobbyPage {
             Image($rawfile('comic/decor/character_panel.png')).width('100%').height('100%').objectFit(ImageFit.Fill)
             ComicCharacter({ avatar: this.editingAvatarKey() }).width('82%').height(248)
             Text('JUST KEEP\nTHE BEAT.').fontWeight(900).fontStyle(FontStyle.Italic).fontSize(14)
+              .textShadow({ radius: 0, offsetX: CHARACTER_PANEL_SLOGAN_SHADOW_OFFSET,
+                offsetY: CHARACTER_PANEL_SLOGAN_SHADOW_OFFSET, color: WHITE })
               .position({ x: '72%', y: 12 })
           }.height(RANDOM_FILM_HEIGHT).width('100%').clip(true)
         }

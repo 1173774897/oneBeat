@@ -39,7 +39,8 @@ function harness(specs = [{}]) {
   const logs = [];
   const server = {
     on: (event, callback) => serverHandlers.set(event, callback),
-    addService() {}, sendResponse() {}, close() {}
+    addService() {}, sendResponse() {}, closes: 0, closeError: undefined,
+    close() { this.closes++; if (this.closeError) throw this.closeError; }
   };
   function makeClient(spec = {}) {
     const handlers = new Map();
@@ -121,7 +122,7 @@ function harness(specs = [{}]) {
   discovery.lastResolvedDeviceId = 'device';
   discovery.lastResolvedRoomId = 'room';
   const attempt = new context.exports.BleMemberJoinFeedbackAttempt();
-  return { discovery, attempt, clients, timers, logs, context,
+  return { discovery, attempt, clients, timers, logs, context, server,
     start: () => discovery.startMemberJoinFeedback(invitation, attempt),
     async advance(ms) {
       const end = now + ms;
@@ -302,13 +303,55 @@ async function main() {
   named.discovery.applyDialogDecision('rejected');
   assert.equal(notices.at(-1), '', 'A dialog decision clears the notice');
 
+  // The accept event can miss the leader (Pura X 2026-11-04). A member that
+  // reached the room closes with C:<id>:J: no "已放弃" notice, no queue hold.
+  const missedAccept = harness([{}]);
+  await missedAccept.discovery.startLeaderAdvertising(invitation);
+  const staleNotices = [];
+  missedAccept.discovery.setStaleDialogListener(name => staleNotices.push(name));
+  missedAccept.deliverLeaderWrite('P:0123456789abcdef:小明');
+  assert.equal(missedAccept.discovery.activeJoinTurnDeviceId, 'device');
+  missedAccept.deliverLeaderWrite('C:0123456789abcdef:J');
+  assert.deepEqual(staleNotices, [], 'A joined member is never reported as withdrawn');
+  assert.equal(missedAccept.discovery.staleDialogUntil, 0, 'A joined member does not hold the queue');
+  assert.equal(missedAccept.discovery.leaderJoinAttempts.has('device'), false);
+  assert.equal(missedAccept.discovery.activeJoinTurnDeviceId, '');
+  missedAccept.deliverLeaderWrite('P:fedcba9876543210:小红');
+  missedAccept.deliverLeaderWrite('C:fedcba9876543210');
+  assert.deepEqual(staleNotices, ['小红'], 'A plain C: during an undecided turn is still a withdrawal');
+  assert.ok(missedAccept.discovery.staleDialogUntil > 0);
+
+  // Member side: C:<id>:J only after markJoined, plain C:<id> otherwise.
+  for (const joined of [true, false]) {
+    const closing = harness([{}]);
+    await closing.start();
+    if (joined) closing.attempt.markJoined();
+    closing.attempt.cancel();
+    await flush();
+    const last = closing.clients[0].writes.at(-1);
+    assert.match(last, joined ? /^C:[0-9a-f]{16}:J$/ : /^C:[0-9a-f]{16}$/);
+    assert.ok(new TextEncoder().encode(last).length <= 20, 'The close fits the default 20-byte ATT payload');
+  }
+
+  // Bluetooth turned off while leading: the stack rejects removeService/close
+  // (2900099). Leaving the team must still finish, and a retry must not hit
+  // the same stale server again (Pura X 2026-11-04: every exit failed).
+  const radioOff = harness([{}]);
+  await radioOff.discovery.startLeaderAdvertising(invitation);
+  radioOff.server.closeError = Object.assign(new Error('bluetoothManager napi assert failed'), { code: 2900099 });
+  await radioOff.discovery.stopLeaderAdvertising();
+  assert.equal(radioOff.server.closes, 1);
+  assert.equal(radioOff.discovery.gattServer, undefined, 'A failed close still forgets the server');
+  await radioOff.discovery.stopLeaderAdvertising();
+  assert.equal(radioOff.server.closes, 1, 'A retry does not close the stale server again');
+
   // Member side: the registration carries the nickname.
   const member = harness([{}]);
   member.discovery.setMemberDisplayName('小明');
   await member.start();
   assert.match(member.clients[0].writes[0], /^P:[0-9a-f]{16}:小明$/);
 
-  console.log('PASS: actual BLE feedback lifecycle cancels connect, service, registration and retry work; closes bounded GATT handles; retains rejection polling and exact-attempt cleanup; registration carries the nickname to the leader notice');
+  console.log('PASS: actual BLE feedback lifecycle cancels connect, service, registration and retry work; closes bounded GATT handles; retains rejection polling and exact-attempt cleanup; registration carries the nickname to the leader notice; a GATT close rejected while Bluetooth is off cannot fail leader teardown; a joined member closes with C:id:J so a missed accept event is neither a withdrawal nor a queue hold');
 }
 
 main().catch(error => { console.error(error); process.exitCode = 1; });

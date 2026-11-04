@@ -3,7 +3,6 @@ import { isStoreApiConfigured, storeApiBaseUrl } from './StoreApiConfig';
 import {
   StoreBootstrap,
   StoreBootstrapEnvelope,
-  StorePurchaseSubmission,
   StoreRedemptionEnvelope,
   StoreRedemptionRequest,
   StoreRedemptionResult,
@@ -12,10 +11,6 @@ import {
 } from './StoreModels';
 
 const STORE_REQUEST_TIMEOUT_MS: number = 10000;
-
-interface StoreRestoreRequest {
-  purchases: StorePurchaseSubmission[];
-}
 
 function requestHeaders(accessToken?: string): Record<string, string> {
   const headers: Record<string, string> = {
@@ -32,12 +27,6 @@ function parseBootstrap(result: string, statusCode: number): StoreBootstrap {
   const envelope = JSON.parse(result) as StoreBootstrapEnvelope;
   if (statusCode !== 200 || envelope.code !== 0 || envelope.data === undefined) {
     const detail = envelope.message.length > 0 ? envelope.message : `store request failed with HTTP ${statusCode}`;
-    if (statusCode === 422 && envelope.code === 42232) {
-      throw new Error('订单与当前华为账号不匹配，请确认登录账号后重试');
-    }
-    if (statusCode === 422 && envelope.code === 42231) {
-      throw new Error('购买验证失败，请尝试恢复购买');
-    }
     throw new Error(detail);
   }
   return envelope.data;
@@ -93,20 +82,8 @@ export async function authenticateHuawei(idToken: string, authorizationCode: str
   }
 }
 
-export async function verifyStorePurchase(
-  accessToken: string,
-  purchase: StorePurchaseSubmission
-): Promise<StoreBootstrap> {
-  return postBootstrap('/api/v1/iap/purchases/verify', accessToken, purchase);
-}
-
-export async function restoreStorePurchases(
-  accessToken: string,
-  purchases: StorePurchaseSubmission[]
-): Promise<StoreBootstrap> {
-  const body: StoreRestoreRequest = { purchases: purchases };
-  return postBootstrap('/api/v1/iap/purchases/restore', accessToken, body);
-}
+// Paid purchases are verified and delivered on the device (IapEntitlements);
+// this API only carries Huawei sign-in, free redemptions and account deletion.
 
 export async function redeemStoreCode(
   accessToken: string,
@@ -140,14 +117,10 @@ export async function redeemStoreCode(
         throw new Error('这个账号已经领取过本次活动月卡');
       case 40924:
         throw new Error('本次活动名额已领完');
-      case 40925:
-        throw new Error('华为自动续费月卡仍在生效，暂时不能领取赠送月卡');
       case 40926:
         throw new Error('兑换请求已变化，请重新输入后再试');
       case 42901:
         throw new Error('尝试次数过多，请稍后再试');
-      case 50321:
-        throw new Error('暂时无法核对华为订阅状态，请稍后再试');
       default:
         throw new Error(envelope.message.length > 0 ? envelope.message : '口令兑换失败');
     }
@@ -156,21 +129,44 @@ export async function redeemStoreCode(
   }
 }
 
-async function postBootstrap(path: string, accessToken: string, body: Object): Promise<StoreBootstrap> {
+interface StoreAccountDeletionResult {
+  deletedAt: string;
+}
+
+interface StoreAccountDeletionEnvelope {
+  code: number;
+  message: string;
+  data?: StoreAccountDeletionResult;
+}
+
+/**
+ * Deletes the signed-in Store account on the server. Idempotent: retrying with
+ * the same session after a lost response still succeeds.
+ */
+export async function deleteStoreAccount(accessToken: string): Promise<string> {
   const client = http.createHttp();
   try {
-    const response = await client.request(`${storeApiBaseUrl()}${path}`, {
+    const response = await client.request(`${storeApiBaseUrl()}/api/v1/account/deletion`, {
       method: http.RequestMethod.POST,
       header: requestHeaders(accessToken),
-      extraData: JSON.stringify(body),
+      extraData: '{}',
       connectTimeout: STORE_REQUEST_TIMEOUT_MS,
       readTimeout: STORE_REQUEST_TIMEOUT_MS,
       expectDataType: http.HttpDataType.STRING
     });
     if (typeof response.result !== 'string') {
-      throw new Error(`store request failed with HTTP ${response.responseCode}`);
+      throw new Error(`store account deletion failed with HTTP ${response.responseCode}`);
     }
-    return parseBootstrap(response.result, response.responseCode);
+    const envelope = JSON.parse(response.result) as StoreAccountDeletionEnvelope;
+    if (response.responseCode === 200 && envelope.code === 0 && envelope.data !== undefined) {
+      return envelope.data.deletedAt;
+    }
+    switch (envelope.code) {
+      case 40101:
+        throw new Error('登录已失效，请重新进入小铺后再注销');
+      default:
+        throw new Error('注销未完成，请检查网络后重试');
+    }
   } finally {
     client.destroy();
   }

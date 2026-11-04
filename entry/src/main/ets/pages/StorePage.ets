@@ -12,12 +12,14 @@ import {
   INK,
   LILAC,
   PAPER,
+  WHITE,
 } from '../components/ComicKit';
-import { fetchStoreBootstrap, redeemStoreCode, restoreStorePurchases, verifyStorePurchase } from '../store/StoreApi';
+import { deleteStoreAccount, fetchStoreBootstrap, redeemStoreCode } from '../store/StoreApi';
 import { isStoreApiConfigured } from '../store/StoreApiConfig';
 import {
   applyStoreBootstrap,
   initializeEntitlementCache,
+  isHuaweiPassActive,
   limitedFreeCharacterKeys,
   ownedCharacterKeys,
   ownedSceneKeys,
@@ -35,12 +37,15 @@ import {
   currentStoreSessionToken,
   ensureStoreSession
 } from '../store/HuaweiAccountService';
+import { productTypeForStoreItem, purchaseStoreProduct } from '../store/IapPurchaseService';
+import { refreshLocalIapEntitlements } from '../store/IapEntitlements';
+import { StoreBootstrap, StoreRedemptionResult } from '../store/StoreModels';
 import {
-  createStorePurchase,
-  productTypeForStoreItem,
-  queryRestorablePurchases
-} from '../store/IapPurchaseService';
-import { StoreBootstrap, StorePurchaseSubmission, StoreRedemptionResult } from '../store/StoreModels';
+  hasCrossBorderConsent,
+  revokeCrossBorderConsent,
+  setCrossBorderConsentPrompter
+} from '../store/CrossBorderConsent';
+import { storeProductIntroduction } from '../store/StoreProductCopy';
 
 interface StoreCharacter {
   key: string;
@@ -102,6 +107,12 @@ const STORE_SCENES: StoreScene[] = [
 
 const PASS_PRODUCT_ID: string = 'onebeat.pass.monthly';
 const IAP_ERROR_ALREADY_OWNED: number = 1001860051;
+// Header slot of the「兑」redemption entrance; kept as an empty placeholder while
+// a pass is active so the title row does not shift.
+const REDEMPTION_ENTRANCE_WIDTH: number = 46;
+const REDEMPTION_ENTRANCE_HEIGHT: number = 42;
+// Gap between「恢复购买」and the low-key「注销小铺账号」link in the 我的 tab.
+const ACCOUNT_DELETION_LINK_TOP: number = 4;
 
 const PASS_BANNER_MAX_WIDTH: number = 472;
 const PASS_BANNER_DEFAULT_WIDTH: number = 372;
@@ -112,16 +123,40 @@ const PASS_BANNER_STATUS_X: string = '6.2%';
 const PASS_BANNER_STATUS_Y: string = '85.2%';
 const PASS_BANNER_STATUS_WIDTH: string = '21%';
 const PASS_BANNER_STATUS_HEIGHT: string = '10%';
-const PASS_BANNER_ACTION_X: string = '78.4%';
-const PASS_BANNER_ACTION_Y: string = '59.2%';
+const PASS_BANNER_STATUS_FONT_SIZE: number = 7.2;
+const PASS_BANNER_STATUS_LINE_HEIGHT: number = 10;
+// Center live content on the illustrated capsule face, not its offset ink shadow.
+const PASS_BANNER_ACTION_X: string = '78.5%';
+const PASS_BANNER_ACTION_Y: string = '58.5%';
 const PASS_BANNER_ACTION_WIDTH: string = '17.4%';
 const PASS_BANNER_ACTION_HEIGHT: string = '20.5%';
+const PASS_BANNER_ACTION_FONT_SIZE: number = 10.5;
+const PASS_BANNER_ACTION_LINE_HEIGHT: number = 14;
+const PASS_BANNER_ACTION_CONTENT_GAP: number = 3;
+const PASS_BANNER_ACTION_ARROW_WIDTH: number = 5;
+const PASS_BANNER_ACTION_ARROW_HEIGHT: number = 8;
+const PASS_BANNER_ACTION_ARROW_STROKE: number = 1.6;
 const DRUM_INTRO_ASSET: string = 'comic/store/pro-drum-intro.png';
 const DRUM_INTRO_IMAGE_RATIO: number = 2 / 3;
 const DRUM_INTRO_SIDE_INSET: number = 12;
 const DRUM_INTRO_CLOSE_TOP: number = 8;
 const DRUM_INTRO_CLOSE_SIZE: number = 44;
 const DRUM_INTRO_CONTENT_GAP: number = 10;
+const PURCHASE_DIALOG_MAX_WIDTH: number = 388;
+const PURCHASE_DIALOG_PADDING: number = 28;
+const PURCHASE_DIALOG_EDGE_GAP: number = 20;
+const PURCHASE_HEADER_GAP: number = 14;
+// All viewports share these tuning values; a breakpoint must not override them.
+const PURCHASE_AVATAR_SIZE: number = 102;
+const PURCHASE_PRODUCT_MEDIA_WIDTH: number = 104;
+const PURCHASE_MEDIA_TOP: number = 0;
+const PURCHASE_INTRO_FONT_SIZE: number = 13;
+const PURCHASE_INTRO_LINE_HEIGHT: number = 22;
+const PURCHASE_INTRO_LINES: number = 2;
+// Product stories are capped at 100 characters; keep one Text node in both states.
+const PURCHASE_INTRO_EXPANDED_LINES: number = 100;
+// A small preview avoids mounting the full parallax scene in a checkout dialog.
+const PURCHASE_SCENE_PREVIEW_ASSET: string = 'comic/store/neon-preview.jpg';
 
 // The bubble hugs two five-character phrases instead of stretching with the viewport.
 const REDEMPTION_SPEECH_WIDTH: number = 168;
@@ -135,6 +170,11 @@ const REDEMPTION_CHARACTER_TOP: number = 14;
 const REDEMPTION_TEXT_WIDTH_RATIO: number = 0.46;
 const REDEMPTION_CHARACTER_X_OFFSET: number = 0;
 
+/** Access that lapses by itself; such items are usable but not kept in 「我的」. */
+function isTemporaryAccessReason(reason: string): boolean {
+  return reason === 'LIMITED_FREE' || reason === 'PASS_IAP' || reason === 'PASS_REDEMPTION';
+}
+
 @Entry
 @Component
 struct StorePage {
@@ -144,6 +184,10 @@ struct StorePage {
   @State selectedTab: number = 0;
   @State ownedCharacters: string[] = [];
   @State ownedScenes: string[] = [];
+  // 「我的」 lists only items kept for good (bought, or free by default). Access
+  // that ends on its own (limited free, monthly pass) stays out of it.
+  @State keptCharacters: string[] = [];
+  @State keptScenes: string[] = [];
   @State passActive: boolean = false;
   @State passStatus: string = '';
   @State passExpiresAt: string = '';
@@ -164,8 +208,14 @@ struct StorePage {
   @State redemptionSucceeded: boolean = false;
   @State redemptionSyncFailed: boolean = false;
   @State redemptionBusy: boolean = false;
+  private readonly redemptionInputController: TextInputController = new TextInputController();
   @State purchaseVisible: boolean = false;
   @State drumIntroVisible: boolean = false;
+  @State purchaseIntroExpanded: boolean = false;
+  @State purchaseIntroAnchorTop: number = 0;
+  @State purchaseIntroAnchorPinned: boolean = false;
+  @State purchaseIntroOverflow: boolean = false;
+  @State storeViewportHeight: number = 720;
   @State pendingType: string = '';
   @State pendingKey: string = '';
   @State pendingName: string = '';
@@ -176,14 +226,22 @@ struct StorePage {
   @State serviceStatus: string = '';
   @State storeActionStatus: string = '';
   @State storeActionRecovery: string = '';
+  @State accountDeletionBusy: boolean = false;
+  @State accountDeletionStatus: string = '';
+  @State accountDeletionDialogStep: number = 0;
+  @State accountDeletionWithoutLocalAccount: boolean = false;
   @State storeActionType: string = '';
   @State purchaseBusy: boolean = false;
   private storeLifetimeEpoch: number = 0;
   private storePageActive: boolean = true;
+  private readonly purchaseScroller: Scroller = new Scroller();
+  @State crossBorderConsentVisible: boolean = false;
+  private crossBorderConsentResolver: ((agreed: boolean) => void) | undefined = undefined;
 
   aboutToAppear(): void {
     this.storePageActive = true;
     this.storeLifetimeEpoch++;
+    setCrossBorderConsentPrompter(() => this.askCrossBorderConsent());
     initializeEntitlementCache();
     this.loadPurchases();
   }
@@ -191,6 +249,35 @@ struct StorePage {
   aboutToDisappear(): void {
     this.storePageActive = false;
     this.storeLifetimeEpoch++;
+    setCrossBorderConsentPrompter(undefined);
+  }
+
+  /**
+   * Separate PIPL consent before any Store data goes to the Hong Kong server.
+   * Since 2026-11-03 only redemption (and its sign-in) needs it: purchase data
+   * stays between the device and Huawei.
+   * Opening the privacy statement counts as not yet agreeing: the action is
+   * cancelled silently and the user can tap it again after reading.
+   */
+  private askCrossBorderConsent(): Promise<boolean> {
+    return new Promise<boolean>((resolve) => {
+      this.crossBorderConsentResolver = resolve;
+      this.crossBorderConsentVisible = true;
+    });
+  }
+
+  private resolveCrossBorderConsent(agreed: boolean): void {
+    const resolve = this.crossBorderConsentResolver;
+    this.crossBorderConsentResolver = undefined;
+    this.crossBorderConsentVisible = false;
+    if (resolve !== undefined) {
+      resolve(agreed);
+    }
+  }
+
+  private viewPrivacyFromConsent(): void {
+    this.resolveCrossBorderConsent(false);
+    router.pushUrl({ url: 'pages/PrivacyPage' });
   }
 
   private isCurrentStorePage(epoch: number): boolean {
@@ -203,13 +290,21 @@ struct StorePage {
   }
 
   onBackPress(): boolean {
+    if (this.crossBorderConsentVisible) {
+      this.resolveCrossBorderConsent(false);
+      return true;
+    }
     if (this.purchaseVisible && this.drumIntroVisible) {
       this.closeDrumIntro();
       return true;
     }
     if (this.purchaseVisible) {
       if (!this.purchaseBusy) {
-        this.purchaseVisible = false;
+        if (this.purchaseIntroExpanded && this.storeActionType !== 'restore') {
+          this.collapsePurchaseIntroduction();
+        } else {
+          this.purchaseVisible = false;
+        }
       }
       return true;
     }
@@ -232,6 +327,13 @@ struct StorePage {
 
   private async refreshStoreData(): Promise<void> {
     const lifetime = this.storeLifetimeEpoch;
+    // Paid items: re-ask Huawei on every Store visit so refunds, renewals and
+    // purchases made on another device show up. Failures keep the saved summary.
+    void refreshLocalIapEntitlements(this.hostContext()).then(() => {
+      if (this.isCurrentStorePage(lifetime)) {
+        this.loadPurchases();
+      }
+    }).catch((error: Object) => logUserFailure('store.iap-refresh', error));
     const priceTask: Promise<StoreProductPriceQueryResult> = isStoreApiConfigured() ?
       queryStoreProductPrices(this.hostContext()).catch((err: Object) => {
         logUserFailure('store.price', err);
@@ -342,6 +444,10 @@ struct StorePage {
     this.limitedFreeScenes = limitedScenes;
     this.passCharacters = passCharacters;
     this.passScenes = passScenes;
+    this.keptCharacters = this.ownedCharacters.filter((key: string) =>
+      !isTemporaryAccessReason(storeItemAccessReason(`character.${key}`)));
+    this.keptScenes = this.ownedScenes.filter((key: string) =>
+      !isTemporaryAccessReason(storeItemAccessReason(`scene.${key}`)));
     this.redemptionAvailable = AppStorage.get<boolean>('storeRedemptionAvailable') ?? false;
   }
 
@@ -351,6 +457,14 @@ struct StorePage {
 
   private hasScene(key: string): boolean {
     return this.ownedScenes.indexOf(key) >= 0;
+  }
+
+  private keepsCharacter(key: string): boolean {
+    return this.keptCharacters.indexOf(key) >= 0;
+  }
+
+  private keepsScene(key: string): boolean {
+    return this.keptScenes.indexOf(key) >= 0;
   }
 
   private selectScene(item: StoreScene): void {
@@ -378,7 +492,7 @@ struct StorePage {
   private ownedSceneCount(): number {
     let count = 0;
     for (let i = 0; i < STORE_SCENES.length; i++) {
-      if (this.hasScene(STORE_SCENES[i].key)) {
+      if (this.keepsScene(STORE_SCENES[i].key)) {
         count++;
       }
     }
@@ -391,7 +505,7 @@ struct StorePage {
     }
     let count = 0;
     for (let i = 0; i < items.length; i++) {
-      if (this.hasCharacter(items[i].key)) {
+      if (this.keepsCharacter(items[i].key)) {
         count++;
       }
     }
@@ -456,55 +570,6 @@ struct StorePage {
     this.drumIntroVisible = false;
   }
 
-  private restorablePurchases(purchases: StorePurchaseSubmission[]): StorePurchaseSubmission[] {
-    const restorable: StorePurchaseSubmission[] = [];
-    for (let i = 0; i < purchases.length; i++) {
-      if (purchases[i].productId.length > 0 && purchases[i].purchaseData.length > 0) {
-        restorable.push(purchases[i]);
-      }
-    }
-    return restorable;
-  }
-
-  private purchasesForProduct(
-    purchases: StorePurchaseSubmission[],
-    productId: string
-  ): StorePurchaseSubmission[] {
-    const matched: StorePurchaseSubmission[] = [];
-    for (let i = 0; i < purchases.length; i++) {
-      if (purchases[i].productId === productId) {
-        matched.push(purchases[i]);
-      }
-    }
-    return matched;
-  }
-
-  private async syncOwnedPurchase(accessToken: string, productId: string, lifetime: number): Promise<boolean> {
-    const purchases = this.restorablePurchases(await queryRestorablePurchases(this.hostContext()));
-    if (!this.isCurrentStorePage(lifetime)) {
-      return false;
-    }
-    const scoped = this.purchasesForProduct(purchases, productId);
-    if (scoped.length === 0) {
-      return false;
-    }
-    try {
-      const verified = await verifyStorePurchase(accessToken, scoped[0]);
-      applyStoreBootstrap(verified);
-      if (this.isCurrentStorePage(lifetime)) {
-        this.loadPurchases();
-      }
-      return true;
-    } catch (_verifyError) {
-      const bootstrap = await restoreStorePurchases(accessToken, [scoped[0]]);
-      applyStoreBootstrap(bootstrap);
-      if (this.isCurrentStorePage(lifetime)) {
-        this.loadPurchases();
-      }
-      return true;
-    }
-  }
-
   private async confirmPurchase(): Promise<void> {
     if (this.purchaseBusy || this.redemptionBusy || this.pendingProductId.length === 0 ||
       (this.pendingType === 'pass' && this.passPurchaseRestriction().length > 0)) {
@@ -518,43 +583,17 @@ struct StorePage {
     this.storeActionType = 'purchase';
     this.storeActionStatus = '正在完成购买…';
     this.storeActionRecovery = '';
+    // Purchases are completed between this device and Huawei only: no Store
+    // login, no cross-border consent and no request to the store server.
     try {
-      const accessToken = await ensureStoreSession(this.hostContext(), true);
-      if (!this.isCurrentStorePage(lifetime)) {
-        return;
-      }
-      // Recheck the server immediately before opening Huawei checkout. Cached UI
-      // state may predate a code redemption on another device.
-      const bootstrap = await fetchStoreBootstrap(accessToken);
-      if (!this.isCurrentStorePage(lifetime)) {
-        return;
-      }
-      if (bootstrap === null || bootstrap.developerPayload === undefined || bootstrap.developerPayload.length === 0) {
-        throw new Error('服务端未返回购买绑定信息');
-      }
-      applyStoreBootstrap(bootstrap);
-      this.loadPurchases();
-      if (isPass && (!bootstrap.pass.iapPurchaseAllowed || bootstrap.pass.active)) {
-        this.storeActionStatus = '';
-        this.purchaseVisible = true;
-        return;
-      }
       try {
-        const purchase = await createStorePurchase(
-          this.hostContext(),
-          productId,
-          productTypeForStoreItem(isPass),
-          bootstrap.developerPayload
-        );
-        const verified = await verifyStorePurchase(accessToken, purchase);
-        applyStoreBootstrap(verified);
-        // Paid orders still reach verification if the page leaves during native
+        await purchaseStoreProduct(this.hostContext(), productId, productTypeForStoreItem(isPass));
+        // A paid order is delivered even if the page leaves during native
         // checkout; only this page's state and completion notice are discarded.
         if (!this.isCurrentStorePage(lifetime)) {
           return;
         }
         this.loadPurchases();
-        this.serviceStatus = '';
         this.storeActionStatus = '';
         this.purchaseVisible = false;
         showUserNotice('购买成功，权益已到账', 'store.purchase');
@@ -565,19 +604,19 @@ struct StorePage {
         const iapError = purchaseError as BusinessError;
         if (iapError.code !== IAP_ERROR_ALREADY_OWNED) {
           // ArkTS only throws Error classes; retain the SDK code while keeping
-          // untrusted native/server prose out of the page's error contract.
+          // untrusted native prose out of the page's error contract.
           throw new StorePurchaseError(userErrorMessage(purchaseError, '购买未完成，请重试；已支付可恢复购买'),
             iapError.code ?? 0);
         }
         this.storeActionStatus = '正在同步已购权益…';
-        const synced = await this.syncOwnedPurchase(accessToken, productId, lifetime);
+        await refreshLocalIapEntitlements(this.hostContext());
         if (!this.isCurrentStorePage(lifetime)) {
           return;
         }
-        if (!synced) {
+        this.loadPurchases();
+        if (storeItemAccessReason(this.pendingItemKey()) === 'LOCKED') {
           throw new Error('华为账号已拥有该商品，请稍后点击「恢复购买」同步权益');
         }
-        this.serviceStatus = '';
         this.storeActionStatus = '';
         this.purchaseVisible = false;
         showUserNotice('已同步华为账号中的购买记录', 'store.purchase');
@@ -602,40 +641,20 @@ struct StorePage {
     }
   }
 
-  private async synchronizePurchasesBeforeRedemption(accessToken: string, lifetime: number): Promise<void> {
-    // Huawei cannot query all subscriptions by OneBeat user ID. Restore the
-    // purchases visible on this device before asking the server to grant a pass.
-    // queryPurchases may throw BusinessError (not instanceof Error); that must not
-    // block redemption — treat as "no local receipts" and still refresh bootstrap.
-    let purchases: StorePurchaseSubmission[] = [];
-    try {
-      purchases = this.restorablePurchases(await queryRestorablePurchases(this.hostContext()));
-    } catch (_queryError) {
-      purchases = [];
+  private pendingItemKey(): string {
+    if (this.pendingType === 'pass') {
+      return 'pass.all';
     }
-    if (!this.isCurrentStorePage(lifetime)) {
-      return;
-    }
-    try {
-      const bootstrap = await restoreStorePurchases(accessToken, purchases);
-      applyStoreBootstrap(bootstrap);
-      if (this.isCurrentStorePage(lifetime)) {
-        this.loadPurchases();
-      }
-    } catch (restoreError) {
-      if (purchases.length === 0) {
-        if (restoreError instanceof Error) {
-          throw restoreError;
-        }
-        throw new Error(String(restoreError));
-      }
-      // Stale or unverifiable local JWS should not prevent a code redemption attempt.
-      const bootstrap = await restoreStorePurchases(accessToken, []);
-      applyStoreBootstrap(bootstrap);
-      if (this.isCurrentStorePage(lifetime)) {
-        this.loadPurchases();
-      }
-    }
+    return this.pendingType === 'scene' ? `scene.${this.pendingKey}` : `character.${this.pendingKey}`;
+  }
+
+  /**
+   * No new redemption is offered while any pass (Huawei or gift) is active.
+   * An already open redemption page stays open so a background refresh cannot
+   * pull it away mid-entry; its result page hides "another code" the same way.
+   */
+  private redemptionEntranceVisible(): boolean {
+    return !this.passActive;
   }
 
   private startAnotherRedemption(): void {
@@ -729,19 +748,35 @@ struct StorePage {
     if (this.redemptionSucceeded || this.redemptionBusy || this.purchaseBusy || this.redemptionCode.trim().length === 0) {
       return;
     }
+    // Close the keyboard before any consent dialog or sign-in UI appears. If it
+    // stays open, the page stays lifted above it and drops when the keyboard
+    // finally closes on navigation (e.g. opening the privacy statement).
+    this.redemptionInputController.stopEditing();
     this.redemptionBusy = true;
     const lifetime = this.storeLifetimeEpoch;
-    this.redemptionStatus = '正在核对账号权益…';
     try {
       const accessToken = await ensureStoreSession(this.hostContext(), true);
       if (!this.isCurrentStorePage(lifetime)) {
         return;
       }
-      await this.synchronizePurchasesBeforeRedemption(accessToken, lifetime);
+      // Shown only after sign-in and consent. The redemption Scroll centres its
+      // shorter-than-screen content, so a status line inserted before the
+      // consent dialog lifted the page, and clearing it on decline (e.g. via
+      // 「详见隐私声明」) dropped it again. The button already reads 「兑换中…」.
+      this.redemptionStatus = '正在核对账号权益…';
+      // The server no longer knows about Huawei subscriptions, so the rule
+      // "no gift pass while a Huawei pass is live" is checked here against a
+      // fresh Huawei query. A failed query falls back to the saved summary.
+      try {
+        await refreshLocalIapEntitlements(this.hostContext());
+      } catch (queryError) {
+        logUserFailure('store.redemption.iap-query', queryError);
+      }
       if (!this.isCurrentStorePage(lifetime)) {
         return;
       }
-      if (this.passActive && this.passSource === 'PASS_IAP') {
+      this.loadPurchases();
+      if (isHuaweiPassActive()) {
         throw new Error('华为自动续费月卡仍在生效，暂时不能领取赠送月卡');
       }
       if (this.redemptionIdempotencyKey.length === 0) {
@@ -780,65 +815,29 @@ struct StorePage {
       return;
     }
     this.purchaseBusy = true;
+    this.purchaseIntroExpanded = false;
+    this.purchaseIntroAnchorPinned = false;
+    this.purchaseIntroOverflow = false;
+    this.drumIntroVisible = false;
+    if (this.purchaseVisible) {
+      this.purchaseScroller.scrollEdge(Edge.Top);
+    }
     const lifetime = this.storeLifetimeEpoch;
     this.storeActionType = 'restore';
     this.storeActionStatus = '正在恢复购买…';
     this.storeActionRecovery = '';
     try {
-      const accessToken = await ensureStoreSession(this.hostContext(), true);
+      // Restoring is a fresh query of the Huawei account; purchases are kept
+      // by Huawei, so no Store login is involved.
+      const result = await refreshLocalIapEntitlements(this.hostContext());
       if (!this.isCurrentStorePage(lifetime)) {
         return;
       }
-      const purchases = this.restorablePurchases(await queryRestorablePurchases(this.hostContext()));
-      if (!this.isCurrentStorePage(lifetime)) {
-        return;
-      }
-      let bootstrap: StoreBootstrap | null = null;
-      let failedCount: number = 0;
-      if (purchases.length > 0) {
-        try {
-          bootstrap = await restoreStorePurchases(accessToken, purchases);
-        } catch (_batchRestoreError) {
-          let syncedCount: number = 0;
-          for (let i = 0; i < purchases.length; i++) {
-            try {
-              await verifyStorePurchase(accessToken, purchases[i]);
-              syncedCount++;
-            } catch (_verifyError) {
-              try {
-                await restoreStorePurchases(accessToken, [purchases[i]]);
-                syncedCount++;
-              } catch (restoreError) {
-                failedCount++;
-                logUserFailure('store.restore.item', restoreError);
-              }
-            }
-          }
-          if (syncedCount === 0) {
-            throw new Error('恢复失败，请检查账号和网络后重试');
-          }
-          bootstrap = await fetchStoreBootstrap(accessToken);
-        }
-      } else {
-        try {
-          bootstrap = await restoreStorePurchases(accessToken, []);
-        } catch (_reconcileError) {
-          bootstrap = await fetchStoreBootstrap(accessToken);
-        }
-      }
-      if (bootstrap !== null) {
-        applyStoreBootstrap(bootstrap);
-        if (!this.isCurrentStorePage(lifetime)) {
-          return;
-        }
-        this.loadPurchases();
-        this.serviceStatus = '';
-      }
-      if (!this.isCurrentStorePage(lifetime)) {
-        return;
-      }
-      this.storeActionStatus = failedCount > 0 ? '部分权益已同步，其余购买记录请稍后重试' : '权益已同步';
-      this.storeActionRecovery = failedCount > 0 ? 'restore' : '';
+      this.loadPurchases();
+      const restored = result.ownedItemCount > 0 || result.passActive;
+      this.storeActionStatus = result.rejectedCount > 0 ? '部分购买记录未能核验，请稍后重试' :
+        restored ? '已购权益已恢复' : '当前华为账号没有可恢复的购买';
+      this.storeActionRecovery = result.rejectedCount > 0 ? 'restore' : '';
     } catch (e) {
       if (!this.isCurrentStorePage(lifetime)) {
         return;
@@ -848,7 +847,7 @@ struct StorePage {
         return;
       }
       logUserFailure('store.restore', e);
-      this.storeActionStatus = userErrorMessage(e, '恢复失败，请检查账号和网络后重试');
+      this.storeActionStatus = userErrorMessage(e, '恢复失败，请确认已登录华为账号并检查网络后重试');
       this.storeActionRecovery = 'restore';
     } finally {
       if (this.isCurrentStorePage(lifetime)) {
@@ -929,7 +928,7 @@ struct StorePage {
     if (this.passActive) {
       return this.passSource === 'PASS_REDEMPTION' ? '赠送生效中' : '已开通';
     }
-    return '查看方案  ›';
+    return '查看方案';
   }
 
   private passPurchaseRestriction(): string {
@@ -942,9 +941,177 @@ struct StorePage {
 
   private resetPurchaseFeedback(): void {
     this.drumIntroVisible = false;
+    this.purchaseIntroExpanded = false;
+    this.purchaseIntroAnchorPinned = false;
+    this.purchaseIntroOverflow = false;
+    if (this.purchaseVisible) {
+      this.purchaseScroller.scrollEdge(Edge.Top);
+    }
     this.storeActionType = 'purchase';
     this.storeActionStatus = '';
     this.storeActionRecovery = '';
+  }
+
+  private pendingIntroduction(): string {
+    return this.storeActionType === 'restore' ? '' : storeProductIntroduction(this.pendingProductId);
+  }
+
+  private pendingPurchaseCaption(): string {
+    if (this.pendingType === 'pass') {
+      return '角色、场景与 PRO 定制鼓机';
+    }
+    if (this.pendingType === 'scene') {
+      return STORE_SCENES.find((item: StoreScene) => item.key === this.pendingKey)?.caption ?? '';
+    }
+    const caption = STORE_CHARACTERS.find((item: StoreCharacter) => item.key === this.pendingKey)?.caption ?? '';
+    return caption.length > 0 ? `独占角色 · ${caption}` : '独占角色';
+  }
+
+  private purchaseMediaWidth(): number {
+    return this.pendingType === 'character' ? PURCHASE_AVATAR_SIZE : PURCHASE_PRODUCT_MEDIA_WIDTH;
+  }
+
+  private updatePurchaseIntroOverflow(width: number): void {
+    const introduction = this.pendingIntroduction();
+    if (!Number.isFinite(width) || width <= 0 || introduction.length === 0) {
+      this.purchaseIntroOverflow = false;
+      return;
+    }
+    try {
+      // Compare the same native font layout with and without a line limit.
+      // Character counts would hide the link incorrectly after font/window changes.
+      const measure = this.getUIContext().getMeasureUtils();
+      const full = measure.measureTextSize({
+        textContent: introduction, fontSize: `${PURCHASE_INTRO_FONT_SIZE}fp`, fontWeight: 400,
+        lineHeight: `${PURCHASE_INTRO_LINE_HEIGHT}vp`, constraintWidth: `${width}vp`
+      });
+      const folded = measure.measureTextSize({
+        textContent: introduction, fontSize: `${PURCHASE_INTRO_FONT_SIZE}fp`, fontWeight: 400,
+        lineHeight: `${PURCHASE_INTRO_LINE_HEIGHT}vp`, constraintWidth: `${width}vp`, maxLines: PURCHASE_INTRO_LINES
+      });
+      const fullHeight = Number(full.height);
+      const foldedHeight = Number(folded.height);
+      this.purchaseIntroOverflow = !Number.isFinite(fullHeight) || !Number.isFinite(foldedHeight) ||
+        fullHeight <= 0 || foldedHeight <= 0 ||
+        fullHeight > foldedHeight + 1;
+    } catch (_error) {
+      // A measurement failure must not make truncated product copy inaccessible.
+      this.purchaseIntroOverflow = true;
+    }
+  }
+
+  private expandPurchaseIntroduction(): void {
+    if (!this.purchaseVisible || this.purchaseBusy || this.storeActionType === 'restore' ||
+      !this.purchaseIntroOverflow || this.pendingIntroduction().length === 0) {
+      return;
+    }
+    this.purchaseIntroAnchorPinned = true;
+    this.purchaseIntroExpanded = true;
+  }
+
+  private collapsePurchaseIntroduction(): void {
+    if (this.purchaseBusy) {
+      return;
+    }
+    this.purchaseIntroExpanded = false;
+  }
+
+  private updatePurchaseDialogAnchor(top: number): void {
+    if (!this.purchaseIntroAnchorPinned && Number.isFinite(top) && top >= 0 &&
+      Math.abs(top - this.purchaseIntroAnchorTop) >= 0.5) {
+      this.purchaseIntroAnchorTop = top;
+    }
+  }
+
+  private purchaseDialogTopPadding(): number {
+    const safeTop = this.topSafeInset + PURCHASE_DIALOG_EDGE_GAP;
+    // Once opened, keep this top edge through every expand/collapse cycle.
+    // Switching back to centering while Text shrinks produces a second layout jump.
+    return this.purchaseIntroAnchorPinned ? Math.max(safeTop, this.purchaseIntroAnchorTop) : safeTop;
+  }
+
+  private openAccountDeletionDialog(): void {
+    if (this.accountDeletionBusy || this.purchaseBusy) {
+      return;
+    }
+    // Login requires cross-border consent first, and consent is cleared only by
+    // a completed deletion, so no consent on record means this install never
+    // sent anything to the server. The server may still hold data from another
+    // device or an earlier install, which only a login can find, so deletion
+    // stays available; the dialog just explains the consent step up front
+    // instead of surprising the user with it after「确认注销」.
+    this.accountDeletionWithoutLocalAccount = !hasCrossBorderConsent();
+    this.accountDeletionDialogStep = 1;
+  }
+
+  private accountDeletionDialogTitle(): string {
+    if (this.accountDeletionDialogStep !== 1) {
+      return '确认注销小铺账号？';
+    }
+    return this.accountDeletionWithoutLocalAccount ? '本机还没有登录过小铺账号' : '注销后兑换权益将永久失去';
+  }
+
+  private accountDeletionConfirmLabel(): string {
+    if (this.accountDeletionDialogStep !== 1) {
+      return '确认注销';
+    }
+    return this.accountDeletionWithoutLocalAccount ? '仍要注销' : '继续';
+  }
+
+  private dismissAccountDeletionDialog(): void {
+    this.accountDeletionDialogStep = 0;
+  }
+
+  private advanceAccountDeletion(): void {
+    this.accountDeletionDialogStep = 2;
+  }
+
+  private confirmAccountDeletion(): void {
+    this.accountDeletionDialogStep = 0;
+    void this.performAccountDeletion();
+  }
+
+  /**
+   * Two explicit confirmations that every entitlement is lost for good, then
+   * the server deletion. Login comes after confirming: it may first ask for
+   * the cross-border consent, and deletion itself needs the account identity.
+   */
+  private async performAccountDeletion(): Promise<void> {
+    const lifetime = this.storeLifetimeEpoch;
+    this.accountDeletionBusy = true;
+    this.accountDeletionStatus = '';
+    try {
+      const accessToken = await ensureStoreSession(this.hostContext(), true);
+      await deleteStoreAccount(accessToken);
+      clearStoreSession();
+      await revokeCrossBorderConsent();
+      // Reset the server-granted part through the ordinary anonymous bootstrap
+      // path. Paid items come from Huawei (IapEntitlements) and stay.
+      try {
+        const anonymous = await fetchStoreBootstrap('');
+        if (anonymous !== null) {
+          applyStoreBootstrap(anonymous);
+        }
+      } catch (_e) {
+        // The deletion succeeded; entitlements refresh on the next Store visit.
+      }
+      if (this.isCurrentStorePage(lifetime)) {
+        this.loadPurchases();
+        this.storeActionStatus = '';
+        this.storeActionRecovery = '';
+      }
+      showUserNotice('小铺账号已注销', 'store.account-deletion');
+    } catch (e) {
+      if (!this.isCurrentStorePage(lifetime) || isUserCancelled(e)) {
+        return;
+      }
+      logUserFailure('store.account-deletion', e);
+      this.accountDeletionStatus = userErrorMessage(e, '注销未完成，请检查网络后重试');
+    } finally {
+      if (this.isCurrentStorePage(lifetime)) {
+        this.accountDeletionBusy = false;
+      }
+    }
   }
 
   @Builder
@@ -963,7 +1130,7 @@ struct StorePage {
       }.width('100%')
       if (this.redemptionAvailable) {
         Column({ space: 9 }) {
-          TextInput({ placeholder: '输入活动口令', text: this.redemptionCode })
+          TextInput({ placeholder: '输入活动口令', text: this.redemptionCode, controller: this.redemptionInputController })
             .width('100%').height(46).fontSize(15).fontColor(INK)
             .placeholderColor('#8D857A').backgroundColor(PAPER)
             .border({ width: 1.5, color: INK }).borderRadius(5)
@@ -1041,7 +1208,7 @@ struct StorePage {
         .border({ width: 1.5, color: INK }).borderRadius(6)
         .background(comicInkSurface(CORAL, 6, COMIC_CONTROL_INK_OFFSET)).clip(false)
         .onClick(() => { this.redemptionVisible = false; })
-      if (this.redemptionAvailable) {
+      if (this.redemptionAvailable && this.redemptionEntranceVisible()) {
         ActionButton({
           label: '兑换其他口令', active: !this.redemptionBusy && !this.purchaseBusy,
           controlHeight: 36, labelSize: 13, labelWeight: 800, fill: '#00000000',
@@ -1082,7 +1249,7 @@ struct StorePage {
           .position({ x: 34, y: 3 })
       }
     }
-    .width(46).height(42)
+    .width(REDEMPTION_ENTRANCE_WIDTH).height(REDEMPTION_ENTRANCE_HEIGHT)
     .onClick(() => this.redemptionVisible = true)
   }
 
@@ -1252,6 +1419,16 @@ struct StorePage {
     return this.passBannerWidth / PASS_BANNER_DEFAULT_WIDTH;
   }
 
+  private passBannerChevronPath(): string {
+    const scale = this.passBannerScale();
+    const width = PASS_BANNER_ACTION_ARROW_WIDTH * scale;
+    const height = PASS_BANNER_ACTION_ARROW_HEIGHT * scale;
+    const inset = PASS_BANNER_ACTION_ARROW_STROKE * scale / 2;
+    // Geometry keeps the arrow centered independently of CJK/Latin font baselines.
+    return `M ${vp2px(inset)} ${vp2px(inset)} L ${vp2px(width - inset)} ${vp2px(height / 2)} ` +
+      `L ${vp2px(inset)} ${vp2px(height - inset)}`;
+  }
+
   @Builder
   private passBanner() {
     Stack({ alignContent: Alignment.TopStart }) {
@@ -1261,18 +1438,40 @@ struct StorePage {
         .width('100%').height('100%').objectFit(ImageFit.Cover).zIndex(0)
         .hitTestBehavior(HitTestMode.None).accessibilityLevel('no')
 
-      Text(this.passTicketStatusLabel())
-        .width(PASS_BANNER_STATUS_WIDTH).height(PASS_BANNER_STATUS_HEIGHT)
-        .fontSize(7.2 * this.passBannerScale()).fontWeight(900).fontColor(INK)
-        .maxLines(1).textAlign(TextAlign.Center)
+      Row() {
+        Text(this.passTicketStatusLabel())
+          .fontSize(PASS_BANNER_STATUS_FONT_SIZE * this.passBannerScale()).fontWeight(900).fontColor(INK)
+          .lineHeight(PASS_BANNER_STATUS_LINE_HEIGHT * this.passBannerScale()).halfLeading(true)
+          .maxLines(1).textAlign(TextAlign.Center).textOverflow({ overflow: TextOverflow.Ellipsis })
+          .width('100%')
+      }.width(PASS_BANNER_STATUS_WIDTH).height(PASS_BANNER_STATUS_HEIGHT)
+        .justifyContent(FlexAlign.Center).alignItems(VerticalAlign.Center)
         .position({ x: PASS_BANNER_STATUS_X, y: PASS_BANNER_STATUS_Y })
         .hitTestBehavior(HitTestMode.None)
 
-      Button(this.passButtonLabel(), { type: ButtonType.Normal })
-        .width(PASS_BANNER_ACTION_WIDTH).height(PASS_BANNER_ACTION_HEIGHT)
-        .padding(0).fontSize(10.5 * this.passBannerScale()).fontWeight(900).fontColor(PAPER)
+      Button({ type: ButtonType.Normal }) {
+        Row({ space: PASS_BANNER_ACTION_CONTENT_GAP * this.passBannerScale() }) {
+          Text(this.passButtonLabel())
+            .fontSize(PASS_BANNER_ACTION_FONT_SIZE * this.passBannerScale()).fontWeight(900).fontColor(PAPER)
+            .lineHeight(PASS_BANNER_ACTION_LINE_HEIGHT * this.passBannerScale()).halfLeading(true)
+            .maxLines(1).textAlign(TextAlign.Center).textOverflow({ overflow: TextOverflow.Ellipsis }).flexShrink(1)
+          if (!this.passActive) {
+            Path().commands(this.passBannerChevronPath())
+              .width(PASS_BANNER_ACTION_ARROW_WIDTH * this.passBannerScale())
+              .height(PASS_BANNER_ACTION_ARROW_HEIGHT * this.passBannerScale())
+              .fill('#00000000').stroke(PAPER)
+              .strokeWidth(PASS_BANNER_ACTION_ARROW_STROKE * this.passBannerScale())
+              .strokeLineCap(LineCapStyle.Round).strokeLineJoin(LineJoinStyle.Round)
+              .accessibilityLevel('no')
+          }
+        }.width('100%').height('100%')
+          .justifyContent(FlexAlign.Center).alignItems(VerticalAlign.Center)
+          .hitTestBehavior(HitTestMode.None).accessibilityLevel('no-hide-descendants')
+      }.width(PASS_BANNER_ACTION_WIDTH).height(PASS_BANNER_ACTION_HEIGHT)
+        .padding(0)
         .backgroundColor('#00000000').borderRadius(18)
         .position({ x: PASS_BANNER_ACTION_X, y: PASS_BANNER_ACTION_Y })
+        .accessibilityText(this.passButtonLabel())
         .onClick(() => this.openPassPurchase())
     }
     .width('102%')
@@ -1300,6 +1499,24 @@ struct StorePage {
     })
   }
 
+  /** Deliberately low-key: a destructive, rarely used action below「恢复购买」. */
+  @Builder
+  private accountDeletionEntry() {
+    Column({ space: 4 }) {
+      Text(this.accountDeletionBusy ? '正在注销…' : '注销小铺账号 ›')
+        .fontSize(12)
+        .fontColor('#66615A')
+        .width('100%')
+        .textAlign(TextAlign.End)
+        .opacity(this.accountDeletionBusy || this.purchaseBusy ? 0.5 : 1)
+        .accessibilityText('注销小铺账号')
+        .onClick(() => { this.openAccountDeletionDialog(); })
+      if (this.accountDeletionStatus.length > 0) {
+        Text(this.accountDeletionStatus).fontSize(12).fontWeight(FontWeight.Bold).width('100%')
+      }
+    }.width('100%').margin({ top: ACCOUNT_DELETION_LINK_TOP })
+  }
+
   @Builder
   private tabBar() {
     DrumPaper({
@@ -1313,10 +1530,17 @@ struct StorePage {
     }) {
       Row() {
         ForEach(['角色', '场景', '我的'], (label: string, index: number) => {
-          Button(label, { type: ButtonType.Normal }).layoutWeight(1).height(42).padding(0)
-            .fontSize(15).fontWeight(900).fontColor(INK)
+          Button({ type: ButtonType.Normal }) {
+            Row() {
+              Text(label).fontSize(15).fontWeight(900).fontColor(INK)
+                .lineHeight(20).halfLeading(true).maxLines(1).textAlign(TextAlign.Center)
+            }.width('100%').height('100%')
+              .justifyContent(FlexAlign.Center).alignItems(VerticalAlign.Center)
+              .hitTestBehavior(HitTestMode.None).accessibilityLevel('no-hide-descendants')
+          }.layoutWeight(1).height(42).padding(0)
             .backgroundColor(this.selectedTab === index ? CORAL : PAPER)
             .border({ width: { right: index < 2 ? 1 : 0 }, color: '#C9C0B4' })
+            .accessibilityText(label)
             .onClick(() => this.selectedTab = index)
         })
       }.width('100%').clip(true)
@@ -1361,9 +1585,9 @@ struct StorePage {
     Column({ space: 8 }) {
       Row({ space: 10 }) {
         Divider().color(INK).strokeWidth(1).layoutWeight(1)
-        Text(title).fontSize(11).fontWeight(900).fontColor('#655F57')
+        Text(title).fontSize(11).fontWeight(900).fontColor('#655F57').lineHeight(15).halfLeading(true)
         Divider().color(INK).strokeWidth(1).layoutWeight(1)
-      }.width('100%')
+      }.width('100%').alignItems(VerticalAlign.Center)
       Text(hint).fontSize(10).fontWeight(FontWeight.Medium).fontColor('#6B655D')
         .lineHeight(15).width('100%').textAlign(TextAlign.Start)
     }.width('100%').margin({ top: 4, bottom: 10 })
@@ -1373,7 +1597,7 @@ struct StorePage {
   private characterGridForList(items: StoreCharacter[], onlyAccessible: boolean) {
     Grid() {
       ForEach(items, (item: StoreCharacter) => {
-        if (!onlyAccessible || this.hasCharacter(item.key)) {
+        if (!onlyAccessible || this.keepsCharacter(item.key)) {
           GridItem() {
             this.characterCard(item)
           }.clip(false)
@@ -1388,7 +1612,7 @@ struct StorePage {
   private characterCatalog(onlyAccessible: boolean) {
     Column({ space: 0 }) {
       if (onlyAccessible) {
-        // “我的”只展示已拥有的独占角色，无需分区标题或随机池卡片。
+        // “我的”只展示永久拥有（已购买或默认免费）的独占角色；限免和月卡不算，无需分区标题或随机池卡片。
         this.characterGridForList(STORE_EXCLUSIVE_CHARACTERS, true)
       } else {
         if (this.visibleCharacterCountInList(STORE_EXCLUSIVE_CHARACTERS, false) > 0) {
@@ -1542,111 +1766,346 @@ struct StorePage {
   }
 
   @Builder
-  private purchaseDialog() {
-    Stack({ alignContent: Alignment.Center }) {
-      DrumPaper({
-        fill: '#FFF1D7',
-        paperWidth: '88%',
-        cornerRadius: 8,
-        paperLineWidth: 2.5,
-        clipContent: true,
-        offsetX: COMIC_CARD_INK_OFFSET,
-        offsetY: COMIC_CARD_INK_OFFSET
-      }) {
-        Column({ space: 12 }) {
-          Text(this.pendingType === 'pass' ? 'MORE BEATS!' : 'NEW FRIEND!')
-            .fontSize(11).fontWeight(900).fontColor(PAPER).backgroundColor(INK)
-            .padding({ left: 9, right: 9, top: 4, bottom: 4 }).rotate({ angle: -3 })
-            .background(comicInkSurface(INK, 0, COMIC_CONTROL_INK_OFFSET)).clip(false)
-          Text(this.storeActionType === 'restore' ? '恢复购买' : this.pendingName)
-            .fontSize(27).fontWeight(900).fontStyle(FontStyle.Italic)
-          if (this.storeActionType !== 'restore') {
-            if (this.pendingType === 'pass') {
-              Text() {
-                Span('开通后可使用当前及后续上架的所有角色、场景和 ')
-                Span('PRO 定制鼓机').fontColor('#B63926')
-                  .decoration({ type: TextDecorationType.Underline })
-                  .onClick(() => this.openDrumIntro())
-                Span('。')
-              }.fontSize(13).fontWeight(FontWeight.Bold).lineHeight(20).width('100%')
-                .id('pass-benefits-description')
-            } else {
-              Text('购买后会加入“我的”，可在小铺和队伍中使用。')
-                .fontSize(13).fontWeight(FontWeight.Bold).lineHeight(20).width('100%')
-            }
-            Text(this.pendingPrice).fontSize(22).fontWeight(900).fontColor(CORAL)
-          }
-          if (this.pendingType === 'pass' && this.storeActionType !== 'restore') {
-            Text() {
-              if (this.passDescription().includes('PRO 定制鼓机')) {
-                Span(this.passDescription().split('PRO 定制鼓机')[0])
-                Span('PRO 定制鼓机').fontColor('#B63926')
-                  .decoration({ type: TextDecorationType.Underline })
-                  .onClick(() => this.openDrumIntro())
-                Span(this.passDescription().split('PRO 定制鼓机')[1])
+  private purchaseProductImage() {
+    if (this.pendingType === 'character') {
+      ComicCharacter({ avatar: this.pendingKey, portrait: true, allowNativeDrag: false })
+        .width(this.purchaseMediaWidth()).height(this.purchaseMediaWidth())
+        .accessibilityText(`${this.pendingName}头像`)
+    } else if (this.pendingType === 'scene') {
+      Image($rawfile(PURCHASE_SCENE_PREVIEW_ASSET)).width(this.purchaseMediaWidth())
+        .aspectRatio(13 / 8).objectFit(ImageFit.Cover).draggable(false)
+        .border({ width: 1.5, color: INK }).borderRadius(5).clip(true)
+        .accessibilityText(`${this.pendingName}场景缩略图`)
+    }
+  }
+
+  @Builder
+  private purchaseProductHeader() {
+    Row({ space: PURCHASE_HEADER_GAP }) {
+      Column({ space: 9 }) {
+        Text(this.storeActionType === 'restore' ? 'RESTORE' : this.pendingType === 'pass' ? 'MORE BEATS!' :
+          this.pendingType === 'scene' ? 'NEW WORLD!' : 'NEW FRIEND!')
+          .fontSize(11).fontWeight(900).fontColor(PAPER).backgroundColor(INK)
+          .padding({ left: 9, right: 9, top: 4, bottom: 4 }).rotate({ angle: -3 })
+          .background(comicInkSurface(INK, 0, COMIC_CONTROL_INK_OFFSET)).clip(false)
+        Text(this.storeActionType === 'restore' ? '恢复购买' : this.pendingName)
+          .fontSize(27).fontWeight(900).fontStyle(FontStyle.Italic).width('100%').maxLines(2)
+        if (this.storeActionType !== 'restore') {
+          Text(this.pendingPurchaseCaption()).fontSize(12).lineHeight(18).fontColor('#665E54').width('100%')
+        }
+      }.alignItems(HorizontalAlign.Start).layoutWeight(1)
+      if (this.storeActionType !== 'restore' && (this.pendingType === 'character' || this.pendingType === 'scene')) {
+        Column() {
+          this.purchaseProductImage()
+        }.width(this.purchaseMediaWidth()).margin({ top: PURCHASE_MEDIA_TOP })
+      }
+    }.width('100%').alignItems(VerticalAlign.Top)
+  }
+
+  @Builder
+  private purchaseIntroduction() {
+    if (this.pendingIntroduction().length > 0) {
+      Column({ space: 1 }) {
+        Text(this.pendingIntroduction()).fontSize(PURCHASE_INTRO_FONT_SIZE).fontWeight(400)
+          .lineHeight(`${PURCHASE_INTRO_LINE_HEIGHT}vp`).fontColor('#665E54').width('100%')
+          .maxLines(this.purchaseIntroExpanded ? PURCHASE_INTRO_EXPANDED_LINES : PURCHASE_INTRO_LINES)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+          .onAreaChange((_old: Area, area: Area) => {
+            this.updatePurchaseIntroOverflow(Number(area.width));
+          })
+        if (this.purchaseIntroExpanded || this.purchaseIntroOverflow) {
+          ActionButton({
+            label: this.purchaseIntroExpanded ? '收起 ⌃' : '查看更多 ⌄',
+            active: !this.purchaseBusy, controlWidth: 'auto', controlHeight: 40,
+            labelSize: 12, labelWeight: 800, labelColor: '#167B76', fill: Color.Transparent,
+            action: () => {
+              if (this.purchaseIntroExpanded) {
+                this.collapsePurchaseIntroduction();
               } else {
-                Span(this.passDescription())
+                this.expandPurchaseIntroduction();
               }
-            }.fontSize(12).fontWeight(FontWeight.Bold).width('100%').id('pass-rights-description')
-            Text(this.passActive && this.passSource === 'PASS_REDEMPTION' ? '赠送月卡到期后结束，不自动续费。' :
-              '本方案按月自动续费，可在华为账号的订阅管理中取消；取消后本期仍可使用。')
-              .fontSize(11).fontColor('#6B655D').lineHeight(17).width('100%')
-            if (this.passPurchaseRestriction().length > 0) {
-              Text(this.passPurchaseRestriction()).fontSize(12).fontWeight(FontWeight.Bold).width('100%')
             }
+          }).id('purchase-introduction-toggle')
+        }
+      }.width('100%').alignItems(HorizontalAlign.Start)
+    }
+  }
+
+  @Builder
+  private purchaseRightsAndPrice() {
+    Column({ space: 11 }) {
+      Column({ space: 4 }) {
+        Text(this.pendingType === 'pass' ? '开通后' : '购买后')
+          .fontSize(11).fontWeight(800).fontColor('#665E54').width('100%')
+        if (this.pendingType === 'pass') {
+          Text('有效期内畅用全部角色、场景').fontSize(12).fontWeight(800).lineHeight(20).width('100%')
+            .id('pass-benefits-description')
+          Text() {
+            Span('包含后续上架内容与 ')
+            Span('PRO 定制鼓机').fontColor('#B63926').decoration({ type: TextDecorationType.Underline })
+              .onClick(() => this.openDrumIntro())
+          }.fontSize(12).fontWeight(800).lineHeight(20).width('100%').id('pass-rights-description')
+        } else {
+          Text('永久解锁并加入“我的”').fontSize(12).fontWeight(800).lineHeight(20).width('100%')
+          Text(this.pendingType === 'scene' ? '单人练习可选；多人场景由队长设置' : '单人、多人练习均可选用')
+            .fontSize(12).fontWeight(800).lineHeight(20).width('100%')
+        }
+      }.width('100%').alignItems(HorizontalAlign.Start)
+      Flex({ wrap: FlexWrap.Wrap, justifyContent: FlexAlign.SpaceBetween, alignItems: ItemAlign.Center }) {
+        Text(this.pendingType !== 'pass' ? '一次购买' :
+          this.passActive && this.passSource === 'PASS_REDEMPTION' ? '赠送月卡 · 不自动续费' : '每月自动续费')
+          .fontSize(11).fontColor('#665E54').margin({ right: 12 })
+        Row({ space: 3 }) {
+          Text(this.pendingPrice).fontSize(26).fontWeight(900).fontColor(CORAL).flexShrink(1)
+          if (this.pendingType === 'pass' && this.pendingPrice !== '价格加载中') {
+            Text('/月').fontSize(12).fontWeight(700).fontColor('#665E54').flexShrink(0)
           }
-          if (this.storeActionStatus.length > 0) {
-            Text(this.storeActionStatus).fontSize(12).fontWeight(FontWeight.Bold).width('100%')
-          }
-          Row({ space: 9 }) {
+        }.constraintSize({ maxWidth: '100%' }).alignItems(VerticalAlign.Center)
+      }.width('100%')
+      if (this.pendingType === 'pass') {
+        if (this.passActive || this.passExpiresAt.length > 0) {
+          Text(this.passDescription()).fontSize(12).fontWeight(800).width('100%')
+        }
+        Text(this.passActive && this.passSource === 'PASS_REDEMPTION' ? '赠送月卡到期后结束，不自动续费。' :
+          '按月自动续费，可在华为账号的订阅管理中取消；取消后本期仍可使用。')
+          .fontSize(11).fontColor('#6B655D').lineHeight(18).width('100%')
+        if (this.passPurchaseRestriction().length > 0) {
+          Text(this.passPurchaseRestriction()).fontSize(12).fontWeight(800).width('100%')
+        }
+      }
+    }.width('100%').alignItems(HorizontalAlign.Start).padding({ top: 11 })
+      .border({ width: { top: 1 }, color: '#D5C6AD' })
+  }
+
+  @Builder
+  private purchaseDialogActions() {
+    Column({ space: 12 }) {
+      if (this.storeActionStatus.length > 0) {
+        Text(this.storeActionStatus).fontSize(12).fontWeight(FontWeight.Bold).width('100%')
+      }
+      Row({ space: 9 }) {
+        ActionButton({
+          label: this.storeActionType === 'restore' ? '关闭' : '再想想', active: !this.purchaseBusy,
+          controlHeight: 44, labelSize: 13, labelWeight: 900, fill: PAPER,
+          contentPadding: { left: 16, right: 16 }, lineWidth: 1.5, cornerRadius: 5,
+          hardShadow: { offsetX: COMIC_CONTROL_INK_OFFSET, offsetY: COMIC_CONTROL_INK_OFFSET, color: INK },
+          action: () => { this.purchaseVisible = false; }
+        }).layoutWeight(1)
+        if (this.storeActionType === 'restore') {
+          if (this.storeActionRecovery === 'restore') {
             ActionButton({
-              label: this.storeActionType === 'restore' ? '关闭' : '再想想', active: !this.purchaseBusy,
-              controlHeight: 42, labelSize: 13, labelWeight: 900, fill: PAPER,
-              contentPadding: { left: 16, right: 16 },
+              label: '重试恢复', active: !this.purchaseBusy, controlHeight: 44, labelSize: 13,
+              labelWeight: 900, fill: CORAL, contentPadding: { left: 16, right: 16 },
               lineWidth: 1.5, cornerRadius: 5,
               hardShadow: { offsetX: COMIC_CONTROL_INK_OFFSET, offsetY: COMIC_CONTROL_INK_OFFSET, color: INK },
-              action: () => { this.purchaseVisible = false; }
-            }).layoutWeight(1)
-            if (this.storeActionType === 'restore') {
-              if (this.storeActionRecovery === 'restore') {
-                ActionButton({
-                  label: '重试恢复', active: !this.purchaseBusy,
-                  controlHeight: 42, labelSize: 13, labelWeight: 900, fill: CORAL,
-                  contentPadding: { left: 16, right: 16 },
-                  lineWidth: 1.5, cornerRadius: 5,
-                  hardShadow: { offsetX: COMIC_CONTROL_INK_OFFSET, offsetY: COMIC_CONTROL_INK_OFFSET, color: INK },
-                  action: () => { void this.restorePurchases(); }
-                }).layoutWeight(1.3)
-              }
-            } else {
-              ActionButton({
-                label: this.pendingType === 'pass' && this.passPurchaseRestriction().length > 0 ? '暂不可购买' :
-                  (this.storeActionRecovery === 'purchase' ? '重新购买' : '确认购买'),
-                active: !this.purchaseBusy &&
-                  (this.pendingType !== 'pass' || this.passPurchaseRestriction().length === 0),
-                controlHeight: 42, labelSize: 13, labelWeight: 900, fill: CORAL,
-                contentPadding: { left: 16, right: 16 },
-                lineWidth: 1.5, cornerRadius: 5,
-                hardShadow: { offsetX: COMIC_CONTROL_INK_OFFSET, offsetY: COMIC_CONTROL_INK_OFFSET, color: INK },
-                action: () => { void this.confirmPurchase(); }
-              }).layoutWeight(1.3)
-            }
-          }.width('100%')
-          if (this.storeActionRecovery === 'purchase') {
-            ActionButton({
-              label: '恢复购买', active: !this.purchaseBusy,
-              controlHeight: 34, labelSize: 12, labelWeight: 900, fill: PAPER,
-              contentPadding: { left: 16, right: 16 },
-              lineWidth: 1, cornerRadius: 5,
-              hardShadow: { offsetX: COMIC_CONTROL_INK_OFFSET, offsetY: COMIC_CONTROL_INK_OFFSET, color: INK },
               action: () => { void this.restorePurchases(); }
-            })
+            }).layoutWeight(1.3)
           }
-          Text('支付后权益未到账，可在“我的”中点击“恢复购买”。')
-            .fontSize(9).fontColor('#6B655D').width('100%')
-        }.width('100%').padding(17)
+        } else {
+          ActionButton({
+            label: this.pendingType === 'pass' && this.passPurchaseRestriction().length > 0 ? '暂不可购买' :
+              (this.storeActionRecovery === 'purchase' ? '重新购买' : '确认购买'),
+            active: !this.purchaseBusy && (this.pendingType !== 'pass' || this.passPurchaseRestriction().length === 0),
+            controlHeight: 44, labelSize: 13, labelWeight: 900, fill: CORAL,
+            contentPadding: { left: 16, right: 16 }, lineWidth: 1.5, cornerRadius: 5,
+            hardShadow: { offsetX: COMIC_CONTROL_INK_OFFSET, offsetY: COMIC_CONTROL_INK_OFFSET, color: INK },
+            action: () => { void this.confirmPurchase(); }
+          }).layoutWeight(1.3)
+        }
+      }.width('100%')
+      if (this.storeActionRecovery === 'purchase') {
+        ActionButton({
+          label: '恢复购买', active: !this.purchaseBusy, controlHeight: 44, labelSize: 12,
+          labelWeight: 900, fill: PAPER, contentPadding: { left: 16, right: 16 }, lineWidth: 1, cornerRadius: 5,
+          hardShadow: { offsetX: COMIC_CONTROL_INK_OFFSET, offsetY: COMIC_CONTROL_INK_OFFSET, color: INK },
+          action: () => { void this.restorePurchases(); }
+        })
       }
+      Text('支付后权益未到账，可在“我的”中恢复购买。').fontSize(11).lineHeight(17).fontColor('#6B655D').width('100%')
+    }.width('100%')
+  }
+
+  @Builder
+  private purchaseDialog() {
+    Stack({ alignContent: Alignment.Center }) {
+      Scroll(this.purchaseScroller) {
+        Column() {
+          // A native background follows this host in the same layout pass.
+          // A measured backing can retain its expanded height for one frame.
+          Column() {
+            Column({ space: 13 }) {
+              this.purchaseProductHeader()
+              if (this.storeActionType !== 'restore') {
+                this.purchaseIntroduction()
+                this.purchaseRightsAndPrice()
+              }
+              this.purchaseDialogActions()
+            }.width('100%').padding(PURCHASE_DIALOG_PADDING)
+              .backgroundColor('#FFF1D7').border({ width: 2.5, color: INK }).borderRadius(8).clip(true)
+          }.width('88%').constraintSize({ maxWidth: PURCHASE_DIALOG_MAX_WIDTH })
+            .background(comicInkSurface('#FFF1D7', 8, COMIC_CARD_INK_OFFSET)).clip(false)
+            .onAreaChange((_old: Area, area: Area) => {
+              this.updatePurchaseDialogAnchor(Number(area.position.y));
+            })
+        }.width('100%').constraintSize({ minHeight: this.storeViewportHeight })
+          .justifyContent(this.purchaseIntroAnchorPinned ? FlexAlign.Start : FlexAlign.Center)
+          .padding({ top: this.purchaseDialogTopPadding(),
+            bottom: this.bottomSafeInset + PURCHASE_DIALOG_EDGE_GAP + COMIC_CARD_INK_OFFSET })
+      }.width('100%').height('100%').scrollBar(BarState.Auto)
+        .onAppear(() => { this.purchaseScroller.scrollEdge(Edge.Top); })
     }.width('100%').height('100%').backgroundColor('#77000000').zIndex(100)
+  }
+
+  @Builder
+  consentTransferBullet(label: string, detail: string) {
+    Row({ space: 6 }) {
+      Text(label)
+        .fontSize(11.5).fontWeight(900).fontColor(INK)
+        .padding({ left: 6, right: 6, top: 2, bottom: 2 })
+        .backgroundColor(LILAC).borderRadius(4)
+      Text(detail)
+        .fontSize(11.5).fontColor(INK).lineHeight(17)
+        .layoutWeight(1)
+    }.width('100%').alignItems(VerticalAlign.Top)
+  }
+
+  @Builder
+  accountDeletionDialog() {
+    Stack({ alignContent: Alignment.Center }) {
+      Column()
+        .width('100%').height('100%')
+        .onClick(() => this.dismissAccountDeletionDialog())
+      Column() {
+        DrumPaper({
+          fill: '#FFF1D7',
+          paperWidth: '100%',
+          cornerRadius: 8,
+          paperLineWidth: 2.5,
+          paperLineColor: INK,
+          offsetX: COMIC_CARD_INK_OFFSET,
+          offsetY: COMIC_CARD_INK_OFFSET,
+          clipContent: true
+        }) {
+          Column({ space: 12 }) {
+            Text(this.accountDeletionDialogTitle())
+              .fontSize(17).fontWeight(900).fontColor(INK).width('100%')
+            if (this.accountDeletionDialogStep === 1) {
+              Scroll() {
+                Column({ space: 8 }) {
+                  if (this.accountDeletionWithoutLocalAccount) {
+                    Text('这台设备上没有需要清理的小铺数据。如果你曾在其他设备或重装应用前用这个华为账号兑换过口令，注销前需要登录华为账号确认身份，登录前会请你同意数据跨境传输。')
+                      .fontSize(12.5).fontColor(INK).lineHeight(19).width('100%')
+                  }
+                  Text('注销只影响通过活动口令兑换获得的权益，这部分在注销后再也无法找回。')
+                    .fontSize(12.5).fontColor('#5D574F').lineHeight(19).width('100%')
+                  Text('· 兑换获得的畅游月卡：立即失效，不退还、不折算。')
+                    .fontSize(12.5).fontColor('#5D574F').lineHeight(19).width('100%')
+                  Text('· 已购买的角色、场景和华为自动续费月卡：不受影响。它们随华为账号保留，重装应用后点「恢复购买」即可找回。')
+                    .fontSize(12.5).fontColor('#5D574F').lineHeight(19).width('100%')
+                  Text('· 自动续费的扣费由华为账号管理，注销不会停止续费；如需停止，请在华为账号的订阅管理中取消。')
+                    .fontSize(12.5).fontColor('#5D574F').lineHeight(19).width('100%')
+                  Text('· 服务器会删除账号与华为账号的对应关系，兑换记录仅以去标识化形式保留。')
+                    .fontSize(12.5).fontColor('#5D574F').lineHeight(19).width('100%')
+                }.width('100%')
+              }.width('100%').constraintSize({ maxHeight: 260 }).scrollBar(BarState.Off)
+            } else {
+              Text('兑换获得的权益注销后再也无法找回，且注销无法撤销。已购商品、节拍练习、组队和录制不受影响。')
+                .fontSize(12.5).fontColor('#5D574F').lineHeight(19).width('100%')
+              if (this.accountDeletionWithoutLocalAccount) {
+                Text('确认后会先请你同意数据跨境传输，再登录华为账号核实身份。')
+                  .fontSize(12.5).fontColor(INK).lineHeight(19).width('100%')
+              }
+            }
+            Row({ space: 10 }) {
+              ActionButton({
+                label: this.accountDeletionDialogStep === 1 ? '取消' : '再想想',
+                active: true, controlHeight: 44, labelSize: 13, labelWeight: 900,
+                fill: PAPER, labelColor: INK, contentPadding: { left: 16, right: 16 }, lineWidth: 1.5, cornerRadius: 5,
+                hardShadow: { offsetX: COMIC_CONTROL_INK_OFFSET, offsetY: COMIC_CONTROL_INK_OFFSET, color: INK },
+                action: () => this.dismissAccountDeletionDialog()
+              }).layoutWeight(1)
+              ActionButton({
+                label: this.accountDeletionConfirmLabel(),
+                active: true, controlHeight: 44, labelSize: 13, labelWeight: 900,
+                fill: CORAL, labelColor: WHITE, contentPadding: { left: 16, right: 16 }, lineWidth: 1.5, cornerRadius: 5,
+                hardShadow: { offsetX: COMIC_CONTROL_INK_OFFSET, offsetY: COMIC_CONTROL_INK_OFFSET, color: INK },
+                action: () => {
+                  if (this.accountDeletionDialogStep === 1) {
+                    this.advanceAccountDeletion();
+                  } else {
+                    this.confirmAccountDeletion();
+                  }
+                }
+              }).layoutWeight(1)
+            }.width('100%')
+          }
+          .width('100%')
+          .padding(22)
+        }
+      }
+      .width('88%').constraintSize({ maxWidth: 360 })
+    }
+    .width('100%').height('100%').backgroundColor('#77000000').zIndex(110)
+  }
+
+  @Builder
+  crossBorderConsentDialog() {
+    Stack({ alignContent: Alignment.Center }) {
+      Column()
+        .width('100%').height('100%')
+        .onClick(() => this.resolveCrossBorderConsent(false))
+      Column() {
+        DrumPaper({
+          fill: '#FFF1D7',
+          paperWidth: '100%',
+          cornerRadius: 8,
+          paperLineWidth: 2.5,
+          paperLineColor: INK,
+          offsetX: COMIC_CARD_INK_OFFSET,
+          offsetY: COMIC_CARD_INK_OFFSET,
+          clipContent: true
+        }) {
+          Column({ space: 12 }) {
+            Text('数据跨境传输说明')
+            .fontSize(17).fontWeight(900).fontColor(INK).width('100%')
+          Scroll() {
+            Column({ space: 8 }) {
+              Text('使用活动口令兑换需要登录华为账号，并同意将以下信息跨境传输：')
+                .fontSize(12.5).fontColor(INK).lineHeight(18).width('100%')
+              this.consentTransferBullet('传输内容', '华为账号标识（经不可逆脱敏）、兑换信息及兑换权益记录')
+              this.consentTransferBullet('接收方', '开发者服务器（位于中国香港特别行政区）')
+              this.consentTransferBullet('用途', '核实账号、发放和恢复兑换权益')
+              Text('购买与恢复购买由手机直接与华为应用内支付完成，不经过该服务器，无需此项同意。')
+                .fontSize(11.5).fontColor('#5D574F').lineHeight(17).width('100%')
+              Text('如不同意：仅无法使用口令兑换，不影响购买、节拍练习、组队和录制。')
+                .fontSize(11.5).fontColor('#5D574F').lineHeight(17).width('100%')
+              Text('详见《隐私声明》第四部分 ›')
+                .fontSize(12).fontWeight(700).fontColor(CORAL)
+                .onClick(() => this.viewPrivacyFromConsent())
+            }.width('100%')
+          }.width('100%').constraintSize({ maxHeight: 280 }).scrollBar(BarState.Off)
+          Row({ space: 10 }) {
+            ActionButton({
+              label: '不同意', active: true, controlHeight: 44, labelSize: 13, labelWeight: 900,
+              fill: PAPER, labelColor: INK, contentPadding: { left: 16, right: 16 }, lineWidth: 1.5, cornerRadius: 5,
+              hardShadow: { offsetX: COMIC_CONTROL_INK_OFFSET, offsetY: COMIC_CONTROL_INK_OFFSET, color: INK },
+              action: () => this.resolveCrossBorderConsent(false)
+            }).layoutWeight(1)
+            ActionButton({
+              label: '同意', active: true, controlHeight: 44, labelSize: 13, labelWeight: 900,
+              fill: CORAL, labelColor: WHITE, contentPadding: { left: 16, right: 16 }, lineWidth: 1.5, cornerRadius: 5,
+              hardShadow: { offsetX: COMIC_CONTROL_INK_OFFSET, offsetY: COMIC_CONTROL_INK_OFFSET, color: INK },
+              action: () => this.resolveCrossBorderConsent(true)
+            }).layoutWeight(1)
+          }.width('100%')
+        }
+        .width('100%')
+        .padding(22)
+        }
+      }
+      .width('88%').constraintSize({ maxWidth: 360 })
+    }
+    .width('100%').height('100%').backgroundColor('#77000000').zIndex(110)
   }
 
   build() {
@@ -1657,8 +2116,12 @@ struct StorePage {
             Text('‹').fontSize(32).width(32).onClick(() => router.back())
             Text('奇遇小铺').fontSize(32).fontWeight(900).fontStyle(FontStyle.Italic)
             Blank()
-            this.redemptionEntrance()
-          }.width('100%')
+            if (this.redemptionEntranceVisible()) {
+              this.redemptionEntrance()
+            } else {
+              Row().width(REDEMPTION_ENTRANCE_WIDTH).height(REDEMPTION_ENTRANCE_HEIGHT)
+            }
+          }.width('100%').alignItems(VerticalAlign.Center)
           this.passBanner()
           if (this.serviceStatus.length > 0) {
             Text(this.serviceStatus).fontSize(10).fontColor('#6B655D').width('100%')
@@ -1698,7 +2161,7 @@ struct StorePage {
             if (this.ownedSceneCount() > 0) {
               Text('我的场景').fontSize(17).fontWeight(900).width('100%')
               ForEach(STORE_SCENES, (item: StoreScene) => {
-                if (this.hasScene(item.key)) {
+                if (this.keepsScene(item.key)) {
                   this.sceneCard(item)
                 }
               }, (item: StoreScene) => this.storeOfferRenderKey('owned-scene', item.key, item.productId))
@@ -1707,6 +2170,7 @@ struct StorePage {
             if (this.storeActionType === 'restore' && !this.purchaseVisible && this.storeActionStatus.length > 0) {
               Text(this.storeActionStatus).fontSize(12).fontWeight(FontWeight.Bold).width('100%')
             }
+            this.accountDeletionEntry()
           }
           Row() {
             Text('COLLECT MORE WEIRDOS\nFOR A BRIGHTER RHYTHM.')
@@ -1739,7 +2203,19 @@ struct StorePage {
       if (this.purchaseVisible && this.drumIntroVisible) {
         this.drumIntroOverlay()
       }
+      if (this.crossBorderConsentVisible) {
+        this.crossBorderConsentDialog()
+      }
+      if (this.accountDeletionDialogStep > 0) {
+        this.accountDeletionDialog()
+      }
     }.width('100%').height('100%').backgroundColor(PAPER)
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
+    .onAreaChange((_old: Area, area: Area) => {
+      const height = Number(area.height);
+      if (Number.isFinite(height) && height > 0 && height !== this.storeViewportHeight) {
+        this.storeViewportHeight = height;
+      }
+    })
   }
 }

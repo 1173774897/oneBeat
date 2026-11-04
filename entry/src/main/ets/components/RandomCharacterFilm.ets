@@ -20,6 +20,8 @@ const FILM_FOCUS_WIDTH: number = 120;
 const FILM_FOCUS_HEIGHT: number = 154;
 const FILM_FOCUS_TOP: number = 12;
 const FILM_FOCUS_RING: number = 6;
+// Hard white drop under the footer slogan; larger values push the white copy further right/down.
+const FILM_SLOGAN_SHADOW_OFFSET: number = 4;
 
 /** Lobby-only film: motion never draws a new role or reveals its color palette. */
 @Component
@@ -387,6 +389,7 @@ export struct RandomCharacterFilm {
       this.filmReel()
       Row() {
         Text('JUST KEEP THE BEAT.').fontSize(10).fontWeight(900).fontStyle(FontStyle.Italic).fontColor(INK)
+          .textShadow({ radius: 0, offsetX: FILM_SLOGAN_SHADOW_OFFSET, offsetY: FILM_SLOGAN_SHADOW_OFFSET, color: WHITE })
         Blank()
         Row({ space: 4 }) {
           ForEach(this.beatIndices, (beat: number) => {

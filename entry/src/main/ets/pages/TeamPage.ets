@@ -1,9 +1,12 @@
 import { common } from '@kit.AbilityKit';
-import { router, promptAction } from '@kit.ArkUI';
+import { router } from '@kit.ArkUI';
 import { navigateToHome } from '../app/HomeNavigation';
 import { ComicCharacter, PAPER, INK, CORAL, LILAC, TEAL, WHITE, CONTROL_SHADOW } from '../components/ComicKit';
 import { TeamTicketBackdrop, TeamWifiFooter } from '../components/TeamEntryVisuals';
 import { isTeamWifiActive, openWirelessSettings } from '../network/join/TeamNetworkPermissions';
+import { ActionButton } from '../components/ActionButton';
+import { COMIC_CARD_INK_OFFSET, COMIC_CONTROL_INK_OFFSET } from '../components/ComicInkSurface';
+import { DrumPaper } from '../components/DrumPaper';
 
 const PLAYER_DISPLAY_NAME_KEY: string = 'playerDisplayName';
 const TEAM_PAGE_SIDE_INSET: number = 18;
@@ -60,6 +63,7 @@ struct TeamPage {
   @State nicknameHintOpacity: number = 1;
   @State private viewportHeight: number = 720;
   @State private contentWidth: number = 360;
+  @State wifiPromptVisible: boolean = false;
   private nicknameHintPulseRevision: number = 0;
   private nicknamePool: string[] = [
     '云朵侠', '节拍猫', '慢半拍', '闪电腿', '小旋风', '踩点王',
@@ -74,6 +78,10 @@ struct TeamPage {
   }
 
   onBackPress(): boolean {
+    if (this.wifiPromptVisible) {
+      this.dismissWifiPrompt();
+      return true;
+    }
     void navigateToHome();
     return true;
   }
@@ -133,21 +141,7 @@ struct TeamPage {
       return;
     }
     if (!isTeamWifiActive()) {
-      try {
-        const result = await promptAction.showDialog({
-          title: '建队前先打开 Wi-Fi',
-          message: '同拍使用 Wi-Fi 直连组队，不需要连接同一个路由器。打开后再回来创建队伍。',
-          buttons: [
-            { text: '暂不创建', color: '#625B53' },
-            { text: '去打开 Wi-Fi', color: CORAL, primary: true }
-          ]
-        });
-        if (result.index === 1) {
-          const ctx = getContext(this) as common.UIAbilityContext;
-          await openWirelessSettings(ctx);
-        }
-      } catch (_e) {
-      }
+      this.wifiPromptVisible = true;
       return;
     }
     router.pushUrl({
@@ -362,30 +356,91 @@ struct TeamPage {
       .onClick(() => { if (captain) { void this.createTeam(); } else { this.joinTeam(); } })
   }
 
-  build() {
-    Scroll() {
+  private dismissWifiPrompt(): void {
+    this.wifiPromptVisible = false;
+  }
+
+  private openWifiFromPrompt(): void {
+    this.wifiPromptVisible = false;
+    const ctx = getContext(this) as common.UIAbilityContext;
+    void openWirelessSettings(ctx);
+  }
+
+  @Builder
+  wifiPromptDialog() {
+    Stack({ alignContent: Alignment.Center }) {
+      Column()
+        .width('100%').height('100%')
+        .onClick(() => this.dismissWifiPrompt())
       Column() {
-        Row({ space: 2 }) {
-          Text('‹').fontSize(32).fontColor(INK).width(32).height(TEAM_HEADER_HEIGHT)
-            .accessibilityText('返回首页').onClick(() => { void navigateToHome(); })
-          Text('多人练习').fontSize(20).fontWeight(900).fontStyle(FontStyle.Italic).fontColor(INK)
-        }.width('100%').height(TEAM_HEADER_HEIGHT)
-        this.slogan()
-        this.nicknameCard()
-        Row({ space: TEAM_TICKET_GAP }) {
-          this.roleTicket(true)
-          this.roleTicket(false)
-        }.width('100%').height(this.ticketHeight()).margin({ top: TEAM_NICKNAME_BOTTOM_GAP })
-        TeamWifiFooter().margin({ top: TEAM_FOOTER_TOP_GAP })
-      }.width('100%').padding({ left: TEAM_PAGE_SIDE_INSET, right: TEAM_PAGE_SIDE_INSET,
-        top: TEAM_PAGE_TOP_INSET + this.topSafeInset, bottom: TEAM_PAGE_BOTTOM_INSET + this.bottomSafeInset })
-    }.width('100%').height('100%').backgroundColor(PAPER)
-      .onAreaChange((_old: Area, area: Area) => {
-        const height = Number(area.height);
-        const width = Number(area.width) - TEAM_PAGE_SIDE_INSET * 2;
-        if (height > 0 && Math.abs(height - this.viewportHeight) > 0.1) { this.viewportHeight = height; }
-        if (width > 0 && Math.abs(width - this.contentWidth) > 0.1) { this.contentWidth = width; }
-      })
-      .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
+        DrumPaper({
+          fill: '#FFF1D7',
+          paperWidth: '100%',
+          cornerRadius: 8,
+          paperLineWidth: 2.5,
+          paperLineColor: INK,
+          offsetX: COMIC_CARD_INK_OFFSET,
+          offsetY: COMIC_CARD_INK_OFFSET,
+          clipContent: true
+        }) {
+          Column({ space: 14 }) {
+            Text('建队前先打开 Wi-Fi')
+            .fontSize(17).fontWeight(900).fontColor(INK).width('100%')
+          Text('同拍使用 Wi-Fi 直连组队，不需要连接同一个路由器。打开后再回来创建队伍。')
+            .fontSize(12.5).fontColor('#5D574F').lineHeight(19).width('100%')
+          Row({ space: 10 }) {
+            ActionButton({
+              label: '暂不创建', active: true, controlHeight: 44, labelSize: 13, labelWeight: 900,
+              fill: PAPER, labelColor: INK, contentPadding: { left: 16, right: 16 }, lineWidth: 1.5, cornerRadius: 5,
+              hardShadow: { offsetX: COMIC_CONTROL_INK_OFFSET, offsetY: COMIC_CONTROL_INK_OFFSET, color: INK },
+              action: () => this.dismissWifiPrompt()
+            }).layoutWeight(1)
+            ActionButton({
+              label: '去打开 Wi-Fi', active: true, controlHeight: 44, labelSize: 13, labelWeight: 900,
+              fill: CORAL, labelColor: WHITE, contentPadding: { left: 16, right: 16 }, lineWidth: 1.5, cornerRadius: 5,
+              hardShadow: { offsetX: COMIC_CONTROL_INK_OFFSET, offsetY: COMIC_CONTROL_INK_OFFSET, color: INK },
+              action: () => this.openWifiFromPrompt()
+            }).layoutWeight(1)
+          }.width('100%')
+        }
+        .width('100%')
+        .padding(22)
+        }
+      }
+      .width('88%').constraintSize({ maxWidth: 360 })
+    }
+    .width('100%').height('100%').backgroundColor('#77000000').zIndex(110)
+  }
+
+  build() {
+    Stack() {
+      Scroll() {
+        Column() {
+          Row({ space: 2 }) {
+            Text('‹').fontSize(32).fontColor(INK).width(32).height(TEAM_HEADER_HEIGHT)
+              .accessibilityText('返回首页').onClick(() => { void navigateToHome(); })
+            Text('多人练习').fontSize(20).fontWeight(900).fontStyle(FontStyle.Italic).fontColor(INK)
+          }.width('100%').height(TEAM_HEADER_HEIGHT)
+          this.slogan()
+          this.nicknameCard()
+          Row({ space: TEAM_TICKET_GAP }) {
+            this.roleTicket(true)
+            this.roleTicket(false)
+          }.width('100%').height(this.ticketHeight()).margin({ top: TEAM_NICKNAME_BOTTOM_GAP })
+          TeamWifiFooter().margin({ top: TEAM_FOOTER_TOP_GAP })
+        }.width('100%').padding({ left: TEAM_PAGE_SIDE_INSET, right: TEAM_PAGE_SIDE_INSET,
+          top: TEAM_PAGE_TOP_INSET + this.topSafeInset, bottom: TEAM_PAGE_BOTTOM_INSET + this.bottomSafeInset })
+      }.width('100%').height('100%').backgroundColor(PAPER)
+        .onAreaChange((_old: Area, area: Area) => {
+          const height = Number(area.height);
+          const width = Number(area.width) - TEAM_PAGE_SIDE_INSET * 2;
+          if (height > 0 && Math.abs(height - this.viewportHeight) > 0.1) { this.viewportHeight = height; }
+          if (width > 0 && Math.abs(width - this.contentWidth) > 0.1) { this.contentWidth = width; }
+        })
+        .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
+      if (this.wifiPromptVisible) {
+        this.wifiPromptDialog()
+      }
+    }.width('100%').height('100%')
   }
 }

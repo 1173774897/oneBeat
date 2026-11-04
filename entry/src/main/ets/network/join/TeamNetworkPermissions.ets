@@ -112,7 +112,29 @@ export function isBluetoothDiscoveryAvailable(): boolean {
 }
 
 export async function openWirelessSettings(context: common.UIAbilityContext): Promise<void> {
-  await context.startAbility({ action: 'ohos.settings.wireless' });
+  try {
+    await context.startAbility({
+      bundleName: 'com.huawei.hmos.settings',
+      abilityName: 'com.huawei.hmos.settings.MainAbility',
+      uri: 'wifi_entry'
+    });
+  } catch (_e) {
+    // Fall back to the wireless & networks page when the dedicated Wi-Fi entry is unavailable.
+    await context.startAbility({ action: 'ohos.settings.wireless' });
+  }
+}
+
+export async function openBluetoothSettings(context: common.UIAbilityContext): Promise<void> {
+  try {
+    await context.startAbility({
+      bundleName: 'com.huawei.hmos.settings',
+      abilityName: 'com.huawei.hmos.settings.MainAbility',
+      uri: 'bluetooth_entry'
+    });
+  } catch (_e) {
+    // Fall back to the wireless & networks page when the dedicated Bluetooth entry is unavailable.
+    await context.startAbility({ action: 'ohos.settings.wireless' });
+  }
 }
 
 export async function ensureCameraPermission(context: common.UIAbilityContext): Promise<boolean> {

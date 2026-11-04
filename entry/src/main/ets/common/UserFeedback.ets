@@ -20,6 +20,9 @@ let shownNotices: ShownNotice[] = [];
 // These are explicit business messages produced by the app, rather than an
 // arbitrary server/native error string that could contain payloads or credentials.
 const PRODUCT_ERROR_MESSAGES: string[] = [
+  // Store account deletion (store/StoreApi); shown verbatim, they are the guidance.
+  '登录已失效，请重新进入小铺后再注销',
+  '注销未完成，请检查网络后重试',
   '打卡记录尚未准备好，请稍后重试',
   '设备时间发生回拨，请开启自动时间后再确认打卡',
   '月卡购买结果待确认，请完成购买后再确认分享',
@@ -35,8 +38,6 @@ const PRODUCT_ERROR_MESSAGES: string[] = [
   '鼓机权益已到期，请重新解锁或切回普通节拍',
   '双方版本不一致，请更新同拍后重试',
   '邀请已过期，请让队长重新创建队伍',
-  '订单与当前华为账号不匹配，请确认登录账号后重试',
-  '购买验证失败，请尝试恢复购买',
   '活动尚未开始',
   '口令不正确或活动已结束',
   '这个账号已经领取过本次活动月卡',
@@ -44,10 +45,13 @@ const PRODUCT_ERROR_MESSAGES: string[] = [
   '华为自动续费月卡仍在生效，暂时不能领取赠送月卡',
   '兑换请求已变化，请重新输入后再试',
   '尝试次数过多，请稍后再试',
-  '暂时无法核对华为订阅状态，请稍后再试',
   '赠送月卡生效期间不能购买自动续费月卡',
   '畅游月卡已生效',
   '华为账号已拥有该商品，请稍后点击「恢复购买」同步权益',
+  // On-device purchase delivery (store/IapPurchaseService, IapEntitlements).
+  '华为支付未返回订单数据',
+  '华为支付返回的商品与所选商品不一致',
+  '该订单已退款或撤销',
   '上次队伍连接尚未释放，请稍后重试',
   '请输入 6 位加入码',
   '队长已拒绝本次加入请求，请和队长确认后再试一次',
@@ -66,11 +70,16 @@ function feedbackErrorCode(error: Object): number {
   return typeof code === 'number' && Number.isFinite(code) ? code : 0;
 }
 
-/** Only explicit SDK cancellation codes count as cancellation; error prose does not. */
+/** App-defined: the user declined the Store cross-border consent (store/CrossBorderConsent). */
+export const PRIVACY_CONSENT_DECLINED_CODE: number = 2026110301;
+
+/** Only explicit cancellation codes count as cancellation; error prose does not. */
 export function isUserCancelled(error: Object): boolean {
   const code = feedbackErrorCode(error);
-  // ScanKit SCAN_SERVICE_CANCELED, IAP USER_CANCELED, AccountKit USER_CANCELED.
-  return code === 1000500002 || code === 1001860000 || code === 1001502012;
+  // ScanKit SCAN_SERVICE_CANCELED, IAP USER_CANCELED, AccountKit USER_CANCELED,
+  // and a declined cross-border consent, which is a user choice, not a failure.
+  return code === 1000500002 || code === 1001860000 || code === 1001502012 ||
+    code === PRIVACY_CONSENT_DECLINED_CODE;
 }
 
 /** Map known business failures to actionable copy; unknown details stay out of the UI. */

@@ -82,6 +82,8 @@ function harness(params = { solo: '1', displayName: '新队长' }, { usableCache
     resolveDrumAccess: () => ({ allowed: paidSceneAccessible,
       source: paidSceneAccessible ? 'monthly' : 'locked', expiresAt: 0 }),
     isRandomAvatar: key => key === 'random', isRandomPoolCharacter: () => false,
+    // Character revocation has its own suite (lobby-character-revoke.cjs).
+    isCharacterOwned: () => true, RANDOM_AVATAR_KEY: 'random', avatarDisplayName: key => key,
     clearInterval: () => assert.fail('Initialization must not start or own page timers')
   });
   const page = new LeaderLobbyPage();

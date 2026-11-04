@@ -18,8 +18,14 @@ function percentageConstant(name) {
   return Number(match[1]) / 100;
 }
 const banner = source.slice(source.indexOf('private passBanner()'), source.indexOf('private restorePurchasesAction()'));
-const dialog = source.slice(source.indexOf('private purchaseDialog()'), source.indexOf('  build()'));
-assert.ok(banner.length > 0 && dialog.length > 0);
+// The purchase dialog is split into section builders; the confirmation button
+// lives in purchaseDialogActions(), which purchaseDialog() must still render.
+const dialog = source.slice(source.indexOf('private purchaseIntroduction()'), source.indexOf('  build()'));
+const dialogShell = source.slice(source.indexOf('private purchaseDialog()'), source.indexOf('  build()'));
+assert.ok(banner.length > 0 && dialog.length > 0 && dialogShell.length > 0);
+assert.ok(source.indexOf('private purchaseIntroduction()') < source.indexOf('private purchaseDialogActions()') &&
+  source.indexOf('private purchaseDialogActions()') < source.indexOf('private purchaseDialog()'));
+assert.match(dialogShell, /this\.purchaseDialogActions\(\)/, 'The confirmation actions are rendered in the dialog');
 
 // The approved PNG replaced the old SVG/native three-portrait composition.
 // Keep the live overlays and purchase boundary; do not resurrect the old UI.
@@ -34,7 +40,17 @@ assert.match(banner, /\.hitTestBehavior\(HitTestMode\.None\)\.accessibilityLevel
 assert.doesNotMatch(banner, /ComicCharacter\(|passBannerTitle|monthly_pass_coupon|monthly_pass_rhythm/);
 assert.match(banner, /Text\(this\.passTicketStatusLabel\(\)\)/);
 assert.match(banner, /\.position\(\{ x: PASS_BANNER_STATUS_X, y: PASS_BANNER_STATUS_Y \}\)/);
-assert.match(banner, /Button\(this\.passButtonLabel\(\), \{ type: ButtonType\.Normal \}\)/);
+assert.match(banner, /Button\(\{ type: ButtonType\.Normal \}\)/);
+assert.match(banner, /Text\(this\.passButtonLabel\(\)\)/);
+assert.doesNotMatch(banner, /Button\(this\.passButtonLabel\(\)/,
+  'The CTA label and arrow no longer share the native label baseline');
+assert.match(banner, /if \(!this\.passActive\)/,
+  'Only the plan-entry label carries a chevron; active pass states remain plain text');
+assert.match(banner, /Path\(\)\s*\.commands\(this\.passBannerChevronPath\(\)\)/);
+assert.match(banner, /\.lineHeight\(PASS_BANNER_STATUS_LINE_HEIGHT \* this\.passBannerScale\(\)\)/);
+assert.match(banner, /\.lineHeight\(PASS_BANNER_ACTION_LINE_HEIGHT \* this\.passBannerScale\(\)\)/);
+assert.ok((banner.match(/\.halfLeading\(true\)/g) || []).length >= 2,
+  'Both live labels distribute extra line leading symmetrically');
 assert.match(banner, /\.position\(\{ x: PASS_BANNER_ACTION_X, y: PASS_BANNER_ACTION_Y \}\)/);
 assert.match(banner, /\.backgroundColor\('#00000000'\)\.borderRadius\(18\)/,
   'The live label leaves the illustrated CTA face visible');
@@ -61,7 +77,7 @@ assert.match(source, /private async confirmPurchase\(\): Promise<void> \{\s*if \
 const statusBox = ['X', 'Y', 'WIDTH', 'HEIGHT'].map(suffix => percentageConstant('PASS_BANNER_STATUS_' + suffix));
 const actionBox = ['X', 'Y', 'WIDTH', 'HEIGHT'].map(suffix => percentageConstant('PASS_BANNER_ACTION_' + suffix));
 assert.deepEqual(statusBox.map(value => Number(value.toFixed(4))), [0.062, 0.852, 0.21, 0.1]);
-assert.deepEqual(actionBox.map(value => Number(value.toFixed(4))), [0.784, 0.592, 0.174, 0.205]);
+assert.deepEqual(actionBox.map(value => Number(value.toFixed(4))), [0.785, 0.585, 0.174, 0.205]);
 for (const [name, [x, y, width, height]] of [['status', statusBox], ['CTA', actionBox]]) {
   assert.ok(x >= 0 && y >= 0 && width > 0 && height > 0 && x + width <= 1 && y + height <= 1,
     name + ' stays inside the cropped artwork');
@@ -71,12 +87,13 @@ const helpers = source.slice(source.indexOf('private passDate('), source.indexOf
 const ticketHelpers = source.slice(source.indexOf('private passTicketStatusLabel()'), source.indexOf('  @Builder\n  private passBanner()'));
 const openPlan = source.slice(source.indexOf('private openPassPurchase()'), source.indexOf('private openDrumIntro()'));
 const constantSource = source.match(/const PASS_PRODUCT_ID: string = '[^']+';/)[0] + '\n' +
-  source.match(/const PASS_BANNER_DEFAULT_WIDTH: number = [0-9.]+;/)[0];
+  [...source.matchAll(/const PASS_BANNER_[A-Z_]+: number = [0-9.]+;/g)].map(match => match[0]).join('\n');
 const compiled = ts.transpileModule(constantSource + '\nexport class PassContract {\n' + helpers + ticketHelpers + openPlan + '\n}', {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021 }, reportDiagnostics: true
 });
 assert.equal(compiled.diagnostics.filter(d => d.category === ts.DiagnosticCategory.Error).length, 0);
-const context = { exports: {} };
+let displayDensity = 1;
+const context = { exports: {}, vp2px: value => value * displayDensity };
 vm.runInNewContext(compiled.outputText, context);
 const pass = new context.exports.PassContract();
 for (const viewport of [320, 360, 390, 430, 600, 768]) {
@@ -85,13 +102,51 @@ for (const viewport of [320, 360, 390, 430, 600, 768]) {
   pass.passBannerWidth = width;
   const scale = pass.passBannerScale();
   assert.equal(scale, width / numberConstant('PASS_BANNER_DEFAULT_WIDTH'));
-  assert.ok(actionBox[2] * width > 10.5 * scale * 5, viewport + ': reserve width for the longest CTA');
-  assert.ok(actionBox[3] * height > 10.5 * scale, viewport + ': reserve height for the CTA');
-  assert.ok(statusBox[2] * width > 7.2 * scale * 7, viewport + ': reserve width for short status/date text');
-  assert.ok(statusBox[3] * height > 7.2 * scale, viewport + ': reserve height for the status');
+  const actionFont = numberConstant('PASS_BANNER_ACTION_FONT_SIZE');
+  const statusFont = numberConstant('PASS_BANNER_STATUS_FONT_SIZE');
+  const actionLine = numberConstant('PASS_BANNER_ACTION_LINE_HEIGHT');
+  const statusLine = numberConstant('PASS_BANNER_STATUS_LINE_HEIGHT');
+  const arrowWidth = numberConstant('PASS_BANNER_ACTION_ARROW_WIDTH');
+  const arrowHeight = numberConstant('PASS_BANNER_ACTION_ARROW_HEIGHT');
+  const arrowStroke = numberConstant('PASS_BANNER_ACTION_ARROW_STROKE');
+  const contentGap = numberConstant('PASS_BANNER_ACTION_CONTENT_GAP');
+  assert.ok(actionBox[2] * width > actionFont * scale * 5, viewport + ': reserve width for the longest active CTA');
+  assert.ok(actionBox[2] * width > (actionFont * 4 + contentGap + arrowWidth) * scale,
+    viewport + ': the plan label and independent chevron fit together');
+  assert.ok(actionLine >= actionFont && statusLine >= statusFont, 'Text line boxes contain the font sizes');
+  assert.ok(actionBox[3] * height > actionLine * scale, viewport + ': reserve height for the CTA line box');
+  assert.ok(statusBox[2] * width > statusFont * scale * 7, viewport + ': reserve width for short status/date text');
+  assert.ok(statusBox[3] * height > statusLine * scale, viewport + ': reserve height for the status line box');
+  assert.ok(arrowHeight < actionLine && arrowStroke > 0 && arrowStroke < arrowWidth,
+    'The chevron fits inside the same centered text row');
+  for (const density of [1, 1.5, 2, 3]) {
+    displayDensity = density;
+    const coords = pass.passBannerChevronPath().match(/-?\d+(?:\.\d+)?/g).map(Number);
+    assert.equal(coords.length, 6, 'The chevron is a three-point path');
+    const [x1, y1, x2, y2, x3, y3] = coords;
+    const epsilon = 1e-6;
+    assert.ok(Math.abs(x1 - x3) < epsilon && x2 > x1,
+      'The independent chevron points right without font-dependent bearings');
+    assert.ok(y1 < y2 && y2 < y3 && Math.abs((y1 + y3) / 2 - y2) < epsilon,
+      'The visible chevron is vertically symmetric at every viewport and pixel density');
+    assert.ok(Math.min(x1, x2, x3) >= -epsilon && Math.max(x1, x2, x3) <= arrowWidth * scale * density + epsilon);
+    assert.ok(Math.min(y1, y2, y3) >= -epsilon && Math.max(y1, y2, y3) <= arrowHeight * scale * density + epsilon);
+  }
 }
+// Map the overlay center back through ImageFit.Cover to the illustrated CTA face.
+// This catches a responsive-box drift without pretending to verify device glyph rasterization.
+const sourceWidth = asset.readUInt32BE(16);
+const sourceHeight = asset.readUInt32BE(20);
+const visibleSourceHeight = sourceWidth / numberConstant('PASS_BANNER_DISPLAY_RATIO');
+const sourceCropY = (sourceHeight - visibleSourceHeight) / 2;
+const actionSourceCenter = [
+  (actionBox[0] + actionBox[2] / 2) * sourceWidth,
+  sourceCropY + (actionBox[1] + actionBox[3] / 2) * visibleSourceHeight
+];
+assert.ok(Math.abs(actionSourceCenter[0] - 1526) < 1 && Math.abs(actionSourceCenter[1] - 585.5) < 1,
+  'The CTA content box remains centered on the painted capsule');
 const cases = [
-  [{ passActive: false }, '付费角色、场景与 PRO 定制鼓机', '查看方案  ›', '全权益通行'],
+  [{ passActive: false }, '付费角色、场景与 PRO 定制鼓机', '查看方案', '全权益通行'],
   [{ passActive: true }, '付费角色与场景', '已开通', '已开通'],
   [{ passActive: true, passAutoRenewing: true }, '自动续费中', '已开通', '自动续费中'],
   [{ passActive: true, passStatus: 'CANCELED_ACTIVE' }, '已取消续费，本期仍可使用', '已开通', '本期仍有效'],
@@ -100,7 +155,7 @@ const cases = [
   [{ passActive: true, passStatus: 'CANCELED_ACTIVE', passExpiresAt: '2030-03-21T12:00:00' }, '已取消续费，可使用至 2030-03-21', '已开通', '有效至 03-21'],
   [{ passActive: true, passSource: 'PASS_REDEMPTION', passExpiresAt: '2030-03-21T12:00:00' }, '口令赠送 · 可使用至 2030-03-21', '赠送生效中', '赠送至 03-21'],
   [{ passActive: true, passExpiresAt: 'not-a-date' }, '付费角色与场景', '已开通', '已开通'],
-  [{ passActive: false, passExpiresAt: '2030-03-21T12:00:00' }, '已于 2030-03-21 到期', '查看方案  ›', '全权益通行']
+  [{ passActive: false, passExpiresAt: '2030-03-21T12:00:00' }, '已于 2030-03-21 到期', '查看方案', '全权益通行']
 ];
 for (const [state, description, label, status] of cases) {
   Object.assign(pass, { passActive: false, passAutoRenewing: false, passStatus: '', passSource: '', passExpiresAt: '' }, state);
@@ -127,4 +182,4 @@ for (const busy of ['purchaseBusy', 'redemptionBusy']) {
   pass.openPassPurchase();
   assert.equal(pass.purchaseVisible, false, busy + ': do not replace an in-flight transaction');
 }
-console.log('PASS monthly pass: approved PNG composition, responsive status/CTA at 320–768vp, full accessible expiry, ten status cases, plan-entry guards and restricted native purchase confirmation');
+console.log('PASS monthly pass: approved PNG composition, centered status/CTA at 320–768vp, density-independent symmetric chevron, full accessible expiry, ten status cases, plan-entry guards and restricted native purchase confirmation');

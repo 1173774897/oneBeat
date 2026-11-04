@@ -33,7 +33,7 @@ export function avatarDisplayName(key: string): string {
   if (key === 'lamp' || key === 'matchman') { return '台灯漫游者'; }
   if (key === 'mismatch') { return '条纹步客'; }
   if (key === 'cloud') { return '云行者'; }
-  if (key === 'lilroll') { return 'Lilroll'; }
+  if (key === 'lilroll') { return '轮滑小子'; }
   if (key === 'teapot') { return '茶壶太太'; }
   if (key === 'wave') { return 'Wave'; }
   if (key === 'scooter') { return '青柠滑手'; }

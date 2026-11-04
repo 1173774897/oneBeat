@@ -13,8 +13,16 @@ import {
   snapshotPassExpiry,
   snapshotServerTime
 } from './EntitlementSnapshotCache';
+import {
+  currentLocalIapState,
+  itemKeyForProductId,
+  localIapOwnedItemKeys,
+  localIapPassExpiry,
+  PASS_INCLUDED_ITEM_KEYS,
+  setLocalIapChangeListener
+} from './IapEntitlements';
 
-const ENTITLEMENT_CACHE_SCHEMA: number = 6;
+const ENTITLEMENT_CACHE_SCHEMA: number = 7;
 const DEFAULT_CHARACTERS: string[] = [];
 const DEFAULT_SCENES: string[] = ['sunset_coast'];
 const MONTHLY_PASS_PREFERENCES: string = 'onebeat_monthly_pass_summary';
@@ -58,8 +66,7 @@ function persistMonthlyPassSummary(summary: MonthlyPassSummary, revision: number
       if (!validMonthlyPassSummary(summary)) {
         throw new Error('月卡状态暂时无法核对，请稍后重试');
       }
-      // Persist only membership facts. Bootstrap also carries purchase binding
-      // data, which must never be copied into this independent local cache.
+      // Persist only membership facts, never the rest of the bootstrap.
       await pref.put(MONTHLY_PASS_KEY, JSON.stringify(summary));
       await pref.flush();
       if (revision === monthlyPassRevision) {
@@ -154,6 +161,8 @@ export function isMonthlyPassRewardStateKnown(): boolean {
   // A separately persisted reward summary is not authority for unlocking paid
   // content. A possibly active member without a current full snapshot must wait
   // for refresh before a local check-in can grant a trial.
+  // A verified Huawei pass is itself a known, active membership.
+  if (isHuaweiPassActive()) { return true; }
   const summary = monthlyPassSummary;
   if (!monthlyPassKnown || summary === undefined) { return false; }
   const snapshot = entitlementSnapshot;
@@ -231,6 +240,110 @@ export function hasUsableEntitlementCache(now: number = Date.now()): boolean {
   return isEntitlementSnapshotUsable(entitlementSnapshot, now);
 }
 
+export const ACCESS_IAP_PURCHASE: string = 'IAP_PURCHASE';
+export const ACCESS_PASS_IAP: string = 'PASS_IAP';
+const PERMANENT_EXPIRY: number = Number.MAX_SAFE_INTEGER;
+
+interface ItemAccess {
+  reason: string;
+  /** 0 = locked. */
+  expiry: number;
+}
+
+/**
+ * One precedence for every reader, mirroring the server catalog's order:
+ * default free > paid purchase > pass > limited free. Paid purchases and the
+ * Huawei pass come from the device (IapEntitlements) and ignore the server
+ * snapshot lease; when both passes are live the Huawei one wins.
+ */
+function resolveItemAccess(itemKey: string, now: number): ItemAccess {
+  const snapshot = entitlementSnapshot;
+  const serverItem = snapshot?.bootstrap.items.find((entry) => entry.itemKey === itemKey);
+  const serverExpiry = serverItem !== undefined ? snapshotItemExpiry(snapshot, serverItem, now) : 0;
+  const serverReason = serverItem !== undefined ? serverItem.access.reason : 'LOCKED';
+  if (serverExpiry > 0 && serverReason === 'DEFAULT_FREE') {
+    return { reason: serverReason, expiry: serverExpiry };
+  }
+  const local = currentLocalIapState();
+  if (localIapOwnedItemKeys(local).indexOf(itemKey) >= 0) {
+    return { reason: ACCESS_IAP_PURCHASE, expiry: PERMANENT_EXPIRY };
+  }
+  // Catalog membership is configuration, not a grant, so an expired snapshot
+  // still says which items the pass covers.
+  const includedInPass = serverItem !== undefined ? serverItem.includedInPass
+    : PASS_INCLUDED_ITEM_KEYS.indexOf(itemKey) >= 0;
+  const huaweiPass = localIapPassExpiry(local, now);
+  if (includedInPass && huaweiPass > 0) {
+    return { reason: ACCESS_PASS_IAP, expiry: huaweiPass };
+  }
+  if (serverExpiry > 0) {
+    return { reason: serverReason, expiry: serverExpiry };
+  }
+  return { reason: 'LOCKED', expiry: 0 };
+}
+
+function candidateItemKeys(): string[] {
+  const keys: string[] = PASS_INCLUDED_ITEM_KEYS.slice();
+  const items = entitlementSnapshot?.bootstrap.items ?? [];
+  for (let i = 0; i < items.length; i++) {
+    if (keys.indexOf(items[i].itemKey) < 0) { keys.push(items[i].itemKey); }
+  }
+  const purchases = currentLocalIapState().purchases;
+  for (let i = 0; i < purchases.length; i++) {
+    const key = itemKeyForProductId(purchases[i].productId);
+    if (key.length > 0 && keys.indexOf(key) < 0) { keys.push(key); }
+  }
+  return keys;
+}
+
+function characterKeyOf(itemKey: string): string {
+  if (!itemKey.startsWith('character.')) { return ''; }
+  const key = itemKey.substring('character.'.length);
+  // The obsolete free matchman identity must not unlock the paid lamp.
+  return key === 'matchman' ? '' : key;
+}
+
+/** Effective pass end across the Huawei pass and a server gift pass. */
+function effectivePassExpiry(now: number): number {
+  return Math.max(localIapPassExpiry(currentLocalIapState(), now), snapshotPassExpiry(entitlementSnapshot, now));
+}
+
+interface EffectivePass {
+  status: string;
+  expiresAt: string;
+  autoRenewing: boolean;
+  source: string;
+  iapPurchaseAllowed: boolean;
+}
+
+function effectivePass(now: number): EffectivePass {
+  const localPass = currentLocalIapState().pass;
+  const huaweiExpiry = localIapPassExpiry(currentLocalIapState(), now);
+  if (localPass !== null && huaweiExpiry > 0) {
+    return {
+      status: localPass.status, expiresAt: new Date(huaweiExpiry).toISOString(),
+      autoRenewing: localPass.autoRenewing, source: ACCESS_PASS_IAP, iapPurchaseAllowed: false
+    };
+  }
+  const pass = entitlementSnapshot?.bootstrap.pass;
+  const giftActive = snapshotPassExpiry(entitlementSnapshot, now) > 0;
+  return {
+    status: pass?.status ?? '',
+    expiresAt: pass?.expiresAt ?? '',
+    autoRenewing: pass?.autoRenewing === true,
+    source: pass?.source ?? '',
+    // Any live pass blocks buying a second one in the normal flow; the server
+    // can also block it explicitly, but only while its snapshot is still valid.
+    iapPurchaseAllowed: !giftActive &&
+      !(isEntitlementSnapshotUsable(entitlementSnapshot, now) && pass?.iapPurchaseAllowed === false)
+  };
+}
+
+/** A live Huawei auto-renew pass blocks redeeming a gift pass (client-only rule since 2026-11-03). */
+export function isHuaweiPassActive(now: number = Date.now()): boolean {
+  return localIapPassExpiry(currentLocalIapState(), now) > 0;
+}
+
 function projectEntitlementSnapshot(now: number): void {
   const snapshot = entitlementSnapshot;
   const bootstrap = snapshot?.bootstrap;
@@ -240,34 +353,31 @@ function projectEntitlementSnapshot(now: number): void {
   const limited: string[] = [];
   const limitedAccess: string[] = [];
   let proActive = false;
-  if (bootstrap !== undefined) {
-    for (let i = 0; i < bootstrap.items.length; i++) {
-      const item = bootstrap.items[i];
-      const expiry = snapshotItemExpiry(snapshot, item, now);
-      if (expiry <= 0) { continue; }
-      if (item.itemKey.startsWith('character.')) {
-        const key = item.itemKey.substring('character.'.length);
-        // The obsolete free matchman identity must not unlock the paid lamp.
-        if (key.length === 0 || key === 'matchman') { continue; }
-        characters.push(key);
-        if (item.access.reason === 'LIMITED_FREE') {
-          limited.push(key);
-          limitedAccess.push(JSON.stringify({ key, endsAt: new Date(expiry).toISOString() }));
-        }
-      } else if (item.itemKey.startsWith('scene.')) {
-        const key = item.itemKey.substring('scene.'.length);
-        if (key.length > 0 && scenes.indexOf(key) < 0) { scenes.push(key); }
-      } else if (item.itemKey === 'feature.pro_drum_machine') {
-        proActive = true;
+  const keys = candidateItemKeys();
+  for (let i = 0; i < keys.length; i++) {
+    const access = resolveItemAccess(keys[i], now);
+    if (access.expiry <= 0) { continue; }
+    const characterKey = characterKeyOf(keys[i]);
+    if (characterKey.length > 0) {
+      characters.push(characterKey);
+      if (access.reason === 'LIMITED_FREE') {
+        limited.push(characterKey);
+        limitedAccess.push(JSON.stringify({ key: characterKey, endsAt: new Date(access.expiry).toISOString() }));
       }
+    } else if (keys[i].startsWith('scene.')) {
+      const key = keys[i].substring('scene.'.length);
+      if (key.length > 0 && scenes.indexOf(key) < 0) { scenes.push(key); }
+    } else if (keys[i] === 'feature.pro_drum_machine') {
+      proActive = true;
     }
   }
-  const monthly = snapshotPassExpiry(snapshot, now) > 0;
+  characters.sort();
+  const monthly = effectivePassExpiry(now) > 0;
+  const pass = effectivePass(now);
   const charactersJson = JSON.stringify(characters);
   const scenesJson = JSON.stringify(scenes);
   const limitedJson = JSON.stringify(limited);
   const limitedAccessJson = `[${limitedAccess.join(',')}]`;
-  const pass = bootstrap?.pass;
   const fingerprint = JSON.stringify({
     catalog: bootstrap === undefined ? '' : entitlementSnapshotFingerprint(bootstrap),
     usable,
@@ -277,7 +387,9 @@ function projectEntitlementSnapshot(now: number): void {
     // TTL renewal is metadata, not a visible change. Include which grants are
     // active, while leaving their lease timestamps out of UI comparison.
     monthly,
-    proActive
+    proActive,
+    // Pass status/source changes (e.g. auto-renew cancelled) are visible too.
+    pass: JSON.stringify(pass)
   });
   const changed = fingerprint !== projectedEntitlementFingerprint;
   // Observers can synchronously call getters. Commit the comparison state before
@@ -287,11 +399,11 @@ function projectEntitlementSnapshot(now: number): void {
   setString('storeOwnedScenes', scenesJson);
   setBoolean('storePassActive', monthly);
   setBoolean('storeProDrumMachine', proActive || monthly);
-  setString('storePassStatus', pass?.status ?? '');
-  setString('storePassExpiresAt', pass?.expiresAt ?? '');
-  setBoolean('storePassAutoRenewing', pass?.autoRenewing === true);
-  setString('storePassSource', pass?.source ?? '');
-  setBoolean('storePassIapPurchaseAllowed', pass?.iapPurchaseAllowed !== false);
+  setString('storePassStatus', pass.status);
+  setString('storePassExpiresAt', pass.expiresAt);
+  setBoolean('storePassAutoRenewing', pass.autoRenewing);
+  setString('storePassSource', pass.source);
+  setBoolean('storePassIapPurchaseAllowed', pass.iapPurchaseAllowed);
   setBoolean('storeRedemptionAvailable', bootstrap?.redemption.available === true);
   setString('storeLimitedFreeCharacters', limitedJson);
   setString('storeLimitedFreeCharacterAccess', limitedAccessJson);
@@ -308,6 +420,7 @@ function projectEntitlementSnapshot(now: number): void {
 
 /** Unverified AppStorage flags and legacy simulated purchases are never entitlement authority. */
 export function initializeEntitlementCache(): void {
+  setLocalIapChangeListener(() => projectEntitlementSnapshot(Date.now()));
   projectEntitlementSnapshot(Date.now());
 }
 
@@ -327,48 +440,46 @@ export function applyStoreBootstrap(bootstrap: StoreBootstrap): void {
 
 export function ownedCharacterKeys(): string[] {
   initializeEntitlementCache();
-  const snapshot = entitlementSnapshot;
-  const bootstrap = snapshot?.bootstrap;
-  if (bootstrap === undefined) { return DEFAULT_CHARACTERS.slice(); }
   const now = Date.now();
-  return bootstrap.items.filter((item) => item.itemKey.startsWith('character.') &&
-    item.itemKey.length > 'character.'.length && item.itemKey !== 'character.matchman' &&
-    snapshotItemExpiry(snapshot, item, now) > 0)
-    .map((item) => item.itemKey.substring('character.'.length));
+  const keys = candidateItemKeys();
+  const owned: string[] = [];
+  for (let i = 0; i < keys.length; i++) {
+    const key = characterKeyOf(keys[i]);
+    if (key.length > 0 && resolveItemAccess(keys[i], now).expiry > 0) { owned.push(key); }
+  }
+  return owned.sort();
 }
 
 export function ownedSceneKeys(): string[] {
   initializeEntitlementCache();
-  const snapshot = entitlementSnapshot;
-  const bootstrap = snapshot?.bootstrap;
+  const now = Date.now();
   const scenes = DEFAULT_SCENES.slice();
-  if (bootstrap !== undefined) {
-    const now = Date.now();
-    for (let i = 0; i < bootstrap.items.length; i++) {
-      const item = bootstrap.items[i];
-      const key = item.itemKey.substring('scene.'.length);
-      if (item.itemKey.startsWith('scene.') && key.length > 0 && scenes.indexOf(key) < 0 &&
-        snapshotItemExpiry(snapshot, item, now) > 0) { scenes.push(key); }
-    }
+  const keys = candidateItemKeys();
+  for (let i = 0; i < keys.length; i++) {
+    const key = keys[i].substring('scene.'.length);
+    if (keys[i].startsWith('scene.') && key.length > 0 && scenes.indexOf(key) < 0 &&
+      resolveItemAccess(keys[i], now).expiry > 0) { scenes.push(key); }
   }
   return scenes;
 }
 
 export function limitedFreeCharacterKeys(): string[] {
   initializeEntitlementCache();
-  const snapshot = entitlementSnapshot;
   const now = Date.now();
-  return (snapshot?.bootstrap.items ?? []).filter((item) => item.itemKey.startsWith('character.') &&
-    item.itemKey.length > 'character.'.length && item.itemKey !== 'character.matchman' &&
-    item.access.reason === 'LIMITED_FREE' && snapshotItemExpiry(snapshot, item, now) > 0)
-    .map((item) => item.itemKey.substring('character.'.length));
+  const keys = candidateItemKeys();
+  const limited: string[] = [];
+  for (let i = 0; i < keys.length; i++) {
+    const key = characterKeyOf(keys[i]);
+    const access = resolveItemAccess(keys[i], now);
+    if (key.length > 0 && access.expiry > 0 && access.reason === 'LIMITED_FREE') { limited.push(key); }
+  }
+  return limited.sort();
 }
 
 export function storeItemAccessReason(itemKey: string): string {
   initializeEntitlementCache();
-  const snapshot = entitlementSnapshot;
-  const item = snapshot?.bootstrap.items.find((entry) => entry.itemKey === itemKey);
-  return item !== undefined && snapshotItemExpiry(snapshot, item, Date.now()) > 0 ? item.access.reason : 'LOCKED';
+  const access = resolveItemAccess(itemKey, Date.now());
+  return access.expiry > 0 ? access.reason : 'LOCKED';
 }
 
 export function isCharacterAccessible(key: string): boolean {
@@ -400,7 +511,7 @@ export function currentDrumAccessTime(): number {
 
 export function isMonthlyPassActive(now: number = Date.now()): boolean {
   projectEntitlementSnapshot(now);
-  return snapshotPassExpiry(entitlementSnapshot, now) > 0;
+  return effectivePassExpiry(now) > 0;
 }
 
 export function resolveDrumAccess(now?: number): DrumAccess {
@@ -409,15 +520,13 @@ export function resolveDrumAccess(now?: number): DrumAccess {
   const formalNow = now ?? Date.now();
   const trialNow = now ?? currentDrumAccessTime();
   projectEntitlementSnapshot(formalNow);
-  const passExpiry = snapshotPassExpiry(entitlementSnapshot, formalNow);
+  const passExpiry = effectivePassExpiry(formalNow);
   if (passExpiry > 0) {
     return { allowed: true, source: 'monthly', expiresAt: passExpiry };
   }
-  const snapshot = entitlementSnapshot;
-  const feature = snapshot?.bootstrap.items.find((item) => item.itemKey === 'feature.pro_drum_machine');
-  if (feature !== undefined) {
-    const expiry = snapshotItemExpiry(snapshot, feature, formalNow);
-    if (expiry > 0) { return { allowed: true, source: 'owned', expiresAt: expiry }; }
+  const feature = resolveItemAccess('feature.pro_drum_machine', formalNow);
+  if (feature.expiry > 0) {
+    return { allowed: true, source: 'owned', expiresAt: feature.expiry };
   }
   // Local share rewards have their own durable ledger and clock. Expiring a
   // server snapshot cannot revoke or extend an independently granted trial.

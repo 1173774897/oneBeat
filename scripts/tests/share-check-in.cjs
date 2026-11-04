@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const ts = require(process.argv[2] || '/Applications/DevEco-Studio.app/Contents/tools/hvigor/hvigor/node_modules/typescript/lib/typescript.js');
+const { loadLocalIap } = require('./iap-local-mocks.cjs');
 const root = path.resolve(__dirname, '../../entry/src/main/ets');
 function load(file, mocks = {}, globals = {}) {
   const compiled = ts.transpileModule(fs.readFileSync(path.join(root, file), 'utf8'), {
@@ -222,6 +223,7 @@ function monthlyCacheHarness(durable = new Map()) {
       };
     } } },
     './EntitlementSnapshotCache': load('store/EntitlementSnapshotCache.ets', {}, { Date: ClockDate }),
+    './IapEntitlements': loadLocalIap(ts).entitlements,
     '../common/AtomicTextFile': {
       readOptionalSync: file => durable.get(file) ?? '',
       writeAtomicSync: (file, value) => durable.set(file, value)
@@ -310,6 +312,7 @@ function testResolver() {
   const entitlement = load('store/EntitlementStore.ets', {
     '@kit.ArkData': { preferences: {} },
     './EntitlementSnapshotCache': load('store/EntitlementSnapshotCache.ets', {}, { Date: ClockDate }),
+    './IapEntitlements': loadLocalIap(ts).entitlements,
     '../common/AtomicTextFile': { readOptionalSync: () => '', writeAtomicSync() {} },
     '../common/MonotonicClock': { MonotonicClock: { nowMs: () => 0 } }
   }, { AppStorage: { get: key => app.get(key), setOrCreate: (key, value) => app.set(key, value) }, Date: ClockDate });

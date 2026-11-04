@@ -1241,6 +1241,8 @@ export class AppSession {
       const goIp = await this.p2p.connectToLeader(invitation, rejectionSignal);
       reportStage('p2p-ready', 'joining');
       await this.controller.connectMember(goIp, invitation.port, invitation);
+      // In the room: the closing C: in finally now tells the leader "joined".
+      feedbackAttempt.markJoined();
       reportStage('clock-ready', 'preparing');
       this.syncEngineFromSession();
       try {

@@ -9,6 +9,7 @@ import {
   persistStoreSessionToDisk
 } from './StoreSessionPersistence';
 import { StoreSession } from './StoreModels';
+import { ensureCrossBorderConsent, hasCrossBorderConsent } from './CrossBorderConsent';
 
 const SESSION_TOKEN_KEY: string = 'storeAccessToken';
 const SESSION_EXPIRY_KEY: string = 'storeAccessTokenExpiresAt';
@@ -28,7 +29,9 @@ function cachedSessionToken(): string {
 }
 
 export function currentStoreSessionToken(): string {
-  return cachedSessionToken();
+  // A token issued before consent (e.g. by an older build) must not reach the
+  // Hong Kong server either; callers then fall back to anonymous requests.
+  return hasCrossBorderConsent() ? cachedSessionToken() : '';
 }
 
 export function clearStoreSession(): void {
@@ -47,6 +50,10 @@ function saveStoreSession(session: StoreSession): void {
 
 /** Uses Huawei Account Kit silent login (forceLogin=false) to mint a new backend JWT. */
 export async function trySilentStoreSessionRenewal(): Promise<string> {
+  if (!hasCrossBorderConsent()) {
+    // Silent renewal never prompts; without consent it stays anonymous.
+    return '';
+  }
   const existing = cachedSessionToken();
   if (existing.length > 0) {
     return existing;
@@ -66,6 +73,8 @@ export async function ensureStoreSession(
   context: common.Context,
   interactive: boolean
 ): Promise<string> {
+  // Login and every authenticated request send account data to Hong Kong.
+  await ensureCrossBorderConsent(interactive);
   const existing = cachedSessionToken();
   if (existing.length > 0) {
     return existing;

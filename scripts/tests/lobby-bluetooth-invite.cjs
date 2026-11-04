@@ -54,7 +54,11 @@ function harness() {
     },
     getContext: () => ({}),
     ensureBluetoothDiscoveryPermission() { calls.push(['permission']); return permissionWork; },
-    openWirelessSettings() { calls.push(['settings']); return settingsWork; },
+    // The Bluetooth-off invitation action must open the Bluetooth page itself;
+    // the generic wireless page stays reserved for the Wi-Fi hints.
+    openBluetoothSettings() { calls.push(['settings']); return settingsWork; },
+    openWirelessSettings() { calls.push(['wireless-settings']); return Promise.resolve(); },
+    refreshLocalIapEntitlements() { calls.push(['iap-refresh']); return Promise.resolve(); },
     showUserNotice: (text, scope) => notices.push([text, scope]),
     logUserFailure: (scope, error) => errors.push([scope, error]),
     userErrorMessage: (error, fallback) => error?.message || fallback,
@@ -315,6 +319,8 @@ async function verifySystemStateRefresh() {
     'Returning from system settings reads current state even if the background event was missed');
   await flush();
   assert.equal(resumed.calls.filter(([kind]) => kind === 'refresh-room').length, 1);
+  assert.equal(resumed.calls.filter(([kind]) => kind === 'iap-refresh').length, 1,
+    'Showing the lobby (also after a refund in Huawei settings) re-queries purchases');
 
   const queued = harness();
   queued.page.refresh();

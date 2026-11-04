@@ -54,7 +54,7 @@ function sanitizeItem(item: StoreItemSnapshot): StoreItemSnapshot {
   };
 }
 
-/** Whitelist public catalog/access facts; account binding and receipt data never reach disk. */
+/** Whitelist public catalog/access facts; anything else the server adds never reaches disk. */
 export function sanitizeEntitlementBootstrap(raw: StoreBootstrap): StoreBootstrap | undefined {
   if (raw === null || typeof raw !== 'object' || Array.isArray(raw) ||
     raw.pass === null || typeof raw.pass !== 'object' || Array.isArray(raw.pass) ||
@@ -122,7 +122,7 @@ export function isEntitlementSnapshotUsable(snapshot: EntitlementSnapshot | unde
 
 export function entitlementSnapshotFingerprint(bootstrap: StoreBootstrap): string {
   // Publication follows user-visible catalog/access facts, not response time,
-  // request ordering, purchase bindings, or an otherwise unchanged config tag.
+  // request ordering, or an otherwise unchanged config tag.
   return JSON.stringify({ pass: bootstrap.pass, items: bootstrap.items, redemption: bootstrap.redemption });
 }
 

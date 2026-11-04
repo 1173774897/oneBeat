@@ -9,6 +9,7 @@ import { initializeShareCheckInStore, refreshShareCheckInClock } from '../store/
 import { DrumSampleBank } from '../audio/DrumSampleBank';
 import { TeamAcousticProbe } from '../audio/TeamAcousticProbe';
 import { registerPcmRenderTaskPool } from '../audio/PcmRenderTask';
+import { bindCrossBorderConsentContext } from '../store/CrossBorderConsent';
 import { initializeDrumProgramLibrary } from '../audio/DrumProgramLibrary';
 import { AppSession } from '../app/AppSession';
 import { SessionBackgroundKeeper } from '../session/SessionBackgroundKeeper';
@@ -19,6 +20,7 @@ import {
   isSceneAccessible
 } from '../store/EntitlementStore';
 import { startStoreColdStartBootstrap } from '../store/StoreBootstrapSync';
+import { initializeLocalIapEntitlements } from '../store/IapEntitlements';
 import { bindStoreSessionPersistenceContext } from '../store/StoreSessionPersistence';
 import { bindAudioLatencyPersistenceContext, restoreCalibrationMs, restoreInputLatencyMs } from '../store/AudioLatencyPersistence';
 
@@ -29,6 +31,7 @@ export default class EntryAbility extends UIAbility {
     registerPcmRenderTaskPool();
     SessionBackgroundKeeper.initialize(this.context);
     bindStoreSessionPersistenceContext(this.context);
+    bindCrossBorderConsentContext(this.context);
     bindAudioLatencyPersistenceContext(this.context);
     try {
       initializeDrumProgramLibrary(this.context);
@@ -53,6 +56,8 @@ export default class EntryAbility extends UIAbility {
     AppStorage.setOrCreate('storeEntitlementEpoch', 0);
     initializeEntitlementCache();
     initializeStoredEntitlementCache(this.context);
+    // Paid items are a device-side summary; restore it before the scene check below.
+    initializeLocalIapEntitlements(this.context);
     AppStorage.setOrCreate('recordingLibraryEpoch', 0);
     AppStorage.setOrCreate('recordingShareEpoch', 0);
     AppStorage.setOrCreate('recordingPendingClipId', '');

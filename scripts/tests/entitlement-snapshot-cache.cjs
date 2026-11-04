@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const ts = require(process.argv[2] || '/Applications/DevEco-Studio.app/Contents/tools/hvigor/hvigor/node_modules/typescript/lib/typescript.js');
+const { loadLocalIap } = require('./iap-local-mocks.cjs');
 const root = path.resolve(__dirname, '../../entry/src/main/ets');
 const DAY = 24 * 60 * 60 * 1000;
 const START = Date.parse('2026-10-22T12:00:00+08:00');
@@ -35,6 +36,8 @@ function harness(durable = new Map(), at = START) {
   let store;
   store = compile('store/EntitlementStore.ets', {
     './EntitlementSnapshotCache': helpers,
+    // Real on-device IAP summary; empty unless a test fills the fake Huawei account.
+    './IapEntitlements': loadLocalIap(ts).entitlements,
     '../common/AtomicTextFile': atomic,
     '../common/MonotonicClock': { MonotonicClock: { nowMs: () => now - START } },
     '@kit.ArkData': { preferences: { async getPreferences(_context, name) {

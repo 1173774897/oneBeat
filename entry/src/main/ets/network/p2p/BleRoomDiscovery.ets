@@ -16,6 +16,8 @@ const WIFI_DIALOG_ACCEPT_EVENT: string = 'ohos.event.wifi.DIALOG_ACCEPT';
 const WIFI_DIALOG_REJECT_EVENT: string = 'ohos.event.wifi.DIALOG_REJECT';
 const WIFI_CONFIG_PERMISSION: string = 'ohos.permission.SET_WIFI_CONFIG';
 const P2P_CONFIRM_DIALOG_TYPE: number = 4;
+// Member -> leader: appended to C:<attemptId> when the member reached the room.
+const JOIN_CLOSE_JOINED_SUFFIX: string = ':J';
 const BLE_LOOKUP_TIMEOUT_MS: number = 15000;
 const GATT_CONNECT_TIMEOUT_MS: number = 8000;
 // Device 2026-10-29: a GATT connection takes 3–5s here, so a 3s bound made
@@ -127,10 +129,24 @@ function joinRegistrationCommand(attemptId: string, displayName: string): string
 /** Owns one optional BLE feedback attempt; cancelling must never await the BLE stack. */
 export class BleMemberJoinFeedbackAttempt {
   private cancelled: boolean = false;
+  private joined: boolean = false;
   private readonly cancelListeners: Set<() => void> = new Set();
 
   isCancelled(): boolean {
     return this.cancelled;
+  }
+
+  /**
+   * Call before cancel() once the member is in the room. The closing C: then
+   * says "joined", so a leader that missed the system dialog's accept event
+   * neither reports a withdrawal nor holds the queue for a dialog that is gone.
+   */
+  markJoined(): void {
+    this.joined = true;
+  }
+
+  hasJoined(): boolean {
+    return this.joined;
   }
 
   /** Registers synchronous cleanup, or runs it now if cancelled; returns an unsubscribe callback. */
@@ -216,6 +232,20 @@ function closeFeedbackClient(client: ble.GattClientDevice): void {
   }
 }
 
+/**
+ * close() throws (2900099) while Bluetooth is off or already reset. The radio
+ * going off releases the server anyway, so a failed close must never abort
+ * session teardown: once it did, "退出队伍" failed on every retry (device
+ * 2026-11-04) because the stale server was kept and closed again.
+ */
+function closeGattServerQuietly(server: ble.GattServer): void {
+  try {
+    server.close();
+  } catch (err) {
+    console.warn(`BleRoomDiscovery gattServer.close: ${(err as BusinessError).code}`);
+  }
+}
+
 function feedbackStep<T>(work: Promise<T>, timeoutMs: number,
   attempt?: BleMemberJoinFeedbackAttempt): Promise<T> {
   return new Promise<T>((resolve, reject) => {
@@ -291,6 +321,7 @@ export class BleJoinFeedbackChannel {
   private readonly client: ble.GattClientDevice;
   private readonly characteristic: ble.BLECharacteristic;
   private readonly attemptId: string;
+  private readonly attempt: BleMemberJoinFeedbackAttempt | undefined;
   private resolveRejection: (error: Error) => void = (_error: Error): void => {};
   private closed: boolean = false;
   private rejectionDelivered: boolean = false;
@@ -311,6 +342,7 @@ export class BleJoinFeedbackChannel {
     this.client = client;
     this.characteristic = characteristic;
     this.attemptId = attemptId;
+    this.attempt = attempt;
     this.rejection = new Promise<Error>((resolve) => {
       this.resolveRejection = resolve;
     });
@@ -425,7 +457,10 @@ export class BleJoinFeedbackChannel {
       const cancelCharacteristic: ble.BLECharacteristic = {
         serviceUuid: this.characteristic.serviceUuid,
         characteristicUuid: this.characteristic.characteristicUuid,
-        characteristicValue: encodeText(`C:${this.attemptId}`),
+        // `C:<id>:J` = joined. Older leaders compare only the id, so they still
+        // remove the attempt exactly as for a plain `C:<id>` withdrawal.
+        characteristicValue: encodeText(this.attempt?.hasJoined() === true ?
+          `C:${this.attemptId}${JOIN_CLOSE_JOINED_SUFFIX}` : `C:${this.attemptId}`),
         descriptors: this.characteristic.descriptors
       };
       // C only removes this attemptId on the leader; late cleanup cannot erase
@@ -574,7 +609,16 @@ export class BleRoomDiscovery {
         this.refreshLeaderJoinTurn();
       } else if (command.startsWith('C:')) {
         const current = this.leaderJoinAttempts.get(request.deviceId);
-        if (current !== undefined && current.attemptId === attemptId) {
+        const joined = command.substring(18) === JOIN_CLOSE_JOINED_SUFFIX;
+        if (current !== undefined && current.attemptId === attemptId && joined) {
+          // The member is already in the room: its dialog was accepted even if
+          // the accept event never reached us (Pura X 2026-11-04). No stale hold.
+          if (current.decision === 'pending') {
+            console.info(`BLE join turn closed joined: ${attemptId} acceptEventMissed=true`);
+          }
+          this.removeLeaderJoinAttempt(request.deviceId);
+          this.refreshLeaderJoinTurn();
+        } else if (current !== undefined && current.attemptId === attemptId) {
           // The holder may have sent its P2P request; the leader cannot tell
           // whether a dialog is up, so it assumes one until the window ends.
           const holdUntil = current.turnGrantedAt + JOIN_TURN_MAX_MS;
@@ -624,7 +668,7 @@ export class BleRoomDiscovery {
       await this.startDialogDecisionListener();
     } catch (err) {
       await this.stopDialogDecisionListener();
-      server.close();
+      closeGattServerQuietly(server);
       throw new Error((err as Error).message ?? 'BLE 房间广播启动失败');
     }
   }
@@ -1394,6 +1438,9 @@ export class BleRoomDiscovery {
         }
         const parameters = JSON.stringify(data.parameters ?? {});
         if (parameters.indexOf(`\"dialogType\":${P2P_CONFIRM_DIALOG_TYPE}`) < 0) {
+          // Logged so a dropped decision is visible; parameters may name the peer, so only the type.
+          const dialogType = (data.parameters as Record<string, Object> | undefined)?.['dialogType'];
+          console.info(`BLE join dialog event ignored: ${data.event} dialogType=${dialogType ?? 'missing'}`);
           return;
         }
         if (data.event === WIFI_DIALOG_REJECT_EVENT) {
@@ -1442,8 +1489,9 @@ export class BleRoomDiscovery {
         this.gattServer.removeService(ROOM_SERVICE_UUID);
       } catch (_e) {
       }
-      this.gattServer.close();
+      const server = this.gattServer;
       this.gattServer = undefined;
+      closeGattServerQuietly(server);
     }
   }
 }

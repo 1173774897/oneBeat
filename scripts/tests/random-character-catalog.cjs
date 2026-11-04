@@ -73,10 +73,15 @@ for (const [index, key] of keys.entries()) {
   for (const slot of [0, 1]) {
     const avatar = comic.revealedAvatarAsset('random', key, slot);
     assert.equal(avatar, `${key}_palette_${slot + 1}`);
-    const firstFrame = png(assets.walkFramePath(key, 0, slot));
-    const portrait = png(`comic/avatars/${avatar}.png`);
-    assert.equal(crypto.createHash('sha256').update(firstFrame).digest('hex'),
-      crypto.createHash('sha256').update(portrait).digest('hex'));
+    // The revealed portrait must be art from this character's own palette walk
+    // cycle. Which frame it is follows the cycle phase (re-timed 2026-10-15,
+    // when boonie/curly/buzz shifted by one frame), so any frame of the cycle counts.
+    const digest = data => crypto.createHash('sha256').update(data).digest('hex');
+    const portrait = digest(png(`comic/avatars/${avatar}.png`));
+    const cycle = Array.from({ length: 8 }, (_, frame) => digest(png(assets.walkFramePath(key, frame, slot))));
+    assert.ok(cycle.includes(portrait), `${avatar} portrait is not a frame of its walk cycle`);
+    const otherSlot = Array.from({ length: 8 }, (_, frame) => digest(png(assets.walkFramePath(key, frame, 1 - slot))));
+    assert.ok(!otherSlot.includes(portrait), `${avatar} portrait uses the other palette's art`);
     for (let beat = 0; beat < 2; beat++) {
       for (let step = 0; step < 4; step++) {
         const frame = assets.walkerAnimFrameIndex(key, beat, step);

@@ -39,7 +39,6 @@ export interface StoreRedemptionSnapshot {
 export interface StoreBootstrap {
   serverTime: string;
   configVersion: string;
-  developerPayload?: string;
   pass: StorePassSnapshot;
   items: StoreItemSnapshot[];
   redemption: StoreRedemptionSnapshot;
@@ -65,12 +64,6 @@ export interface StoreSessionEnvelope {
   code: number;
   message: string;
   data: StoreSession;
-}
-
-export interface StorePurchaseSubmission {
-  idempotencyKey: string;
-  productId: string;
-  purchaseData: string;
 }
 
 export interface StoreRedemptionRequest {
